@@ -1,0 +1,52 @@
+<mujoco model="turtlebot_patrol">
+    <compiler angle="degree" coordinate="local" inertiafromgeom="true"/>
+    <option integrator="implicitfast" timestep="0.01" gravity="0 0 -9.81"/> <!-- 100Hz 제어 대응 [1] -->
+
+    <worldbody>
+        <!-- 바닥 환경 -->
+        <geom name="floor" type="plane" size="10 10 0.1" rgba="0.8 0.8 0.8 1"/>
+        <light directional="true" diffuse=".8 .8 .8" specular=".2 .2 .2" pos="0 0 5" dir="0 0 -1"/>
+
+        <!-- 터틀봇 본체 -->
+        <body name="base_link" pos="0 0 0.05">
+            <freejoint name="root"/>
+            <geom name="base_geom" type="cylinder" size="0.15 0.03" rgba="0.2 0.2 0.2 1"/>
+            
+            <!-- 왼쪽 바퀴 -->
+            <body name="wheel_left" pos="0 0.11 0" quat="0.707 0.707 0 0">
+                <joint name="drive_left" type="hinge" axis="0 0 1"/>
+                <geom name="wheel_left_geom" type="cylinder" size="0.033 0.01" rgba="0.1 0.1 0.1 1"/>
+            </body>
+
+            <!-- 오른쪽 바퀴 -->
+            <body name="wheel_right" pos="0 -0.11 0" quat="0.707 0.707 0 0">
+                <joint name="drive_right" type="hinge" axis="0 0 1"/>
+                <geom name="wheel_right_geom" type="cylinder" size="0.033 0.01" rgba="0.1 0.1 0.1 1"/>
+            </body>
+
+            <!-- 센서 타워 (LiDAR & 카메라 장착부) -->
+            <body name="sensor_tower" pos="0 0 0.1">
+                <geom name="tower_geom" type="box" size="0.02 0.02 0.05" rgba="0.3 0.3 0.3 1"/>
+                
+                <!-- LiDAR 센서 [2] -->
+                <site name="lidar_site" pos="0 0 0.05" quat="1 0 0 0"/>
+                
+                <!-- RGB-D 카메라 [2] -->
+                <camera name="patrol_camera" pos="0.05 0 0.02" fovy="60" quat="0.5 -0.5 0.5 -0.5"/>
+            </body>
+        </body>
+    </worldbody>
+
+    <!-- 액추에이터: 속도 제어 방식 [2] -->
+    <actuator>
+        <velocity name="motor_left" joint="drive_left" kv="10"/>
+        <velocity name="motor_right" joint="drive_right" kv="10"/>
+    </actuator>
+
+    <!-- 센서 정의 [3], [2] -->
+    <sensor>
+        <rangefinder name="lidar" site="lidar_site"/>
+        <accelerometer name="imu_accel" site="lidar_site"/>
+        <gyro name="imu_gyro" site="lidar_site"/>
+    </sensor>
+</mujoco>
