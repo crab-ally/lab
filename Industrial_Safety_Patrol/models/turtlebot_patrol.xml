@@ -1,52 +1,142 @@
 <mujoco model="turtlebot_patrol">
-    <compiler angle="degree" coordinate="local" inertiafromgeom="true"/>
-    <option integrator="implicitfast" timestep="0.01" gravity="0 0 -9.81"/> <!-- 100Hz 제어 대응 [1] -->
+    <compiler angle="degree" coordinate="local" inertiafromgeom="false"/>
+    <option integrator="implicitfast" timestep="0.005" gravity="0 0 -9.81"/> <!-- 200Hz 물리, 제어는 100Hz -->
+
+    <default>
+        <joint damping="0.01" armature="0.001"/>
+        <geom friction="1.0 0.005 0.0001" condim="3" contype="1" conaffinity="1"/>
+    </default>
 
     <worldbody>
         <!-- 바닥 환경 -->
         <geom name="floor" type="plane" size="10 10 0.1" rgba="0.8 0.8 0.8 1"/>
         <light directional="true" diffuse=".8 .8 .8" specular=".2 .2 .2" pos="0 0 5" dir="0 0 -1"/>
 
-        <!-- 터틀봇 본체 -->
-        <body name="base_link" pos="0 0 0.05">
+        <!-- ================================================================
+             TurtleBot3 Burger 본체 (ROBOTIS 공식 스펙 기반)
+             크기: 138mm(L) x 178mm(W) x 192mm(H)
+             무게: ~1.0 kg (SBC + 배터리 + 센서 포함)
+             바퀴 반경: 33mm, 바퀴 두께: 12.5mm (반폭)
+             트랙 폭: 160mm (바퀴 중심 간 거리)
+             최대 병진 속도: 0.22 m/s
+             최대 회전 속도: 2.84 rad/s
+             ================================================================ -->
+        <body name="base_link" pos="0 0 0.033"> <!-- 바퀴 반경만큼 높이에 배치 -->
             <freejoint name="root"/>
-            <geom name="base_geom" type="cylinder" size="0.15 0.03" rgba="0.2 0.2 0.2 1"/>
-            
-            <!-- 왼쪽 바퀴 -->
-            <body name="wheel_left" pos="0 0.11 0" quat="0.707 0.707 0 0">
-                <joint name="drive_left" type="hinge" axis="0 0 1"/>
-                <geom name="wheel_left_geom" type="cylinder" size="0.033 0.01" rgba="0.1 0.1 0.1 1"/>
+            <!-- 본체 질량: 전체 ~1.0kg 중 본체 플레이트 + 전자부품 약 0.7kg -->
+            <!-- CoM을 후방 하단으로 배치 (배터리 팩이 후방 1층에 위치) -->
+            <!-- x=-0.02: 배터리 무게가 전방 카메라(x=+0.069, 0.03kg)를 상쇄 -->
+            <!-- z=0.005: 무거운 배터리+모터가 1층(하단 플레이트) 부근에 집중 -->
+            <inertial pos="-0.02 0 0.005" mass="0.7"
+                      diaginertia="0.0012 0.0012 0.0018"/>
+            <!-- 하단 플레이트 (1층: 모터 + 배터리) 138mm x 178mm x 5mm -->
+            <geom name="base_plate_lower" type="box"
+                  size="0.069 0.089 0.0025" pos="0 0 0"
+                  rgba="0.15 0.15 0.15 1"/>
+            <!-- 상단 플레이트 (2층: SBC) 138mm x 178mm x 5mm -->
+            <geom name="base_plate_upper" type="box"
+                  size="0.069 0.089 0.0025" pos="0 0 0.05"
+                  rgba="0.15 0.15 0.15 1"/>
+            <!-- 4개 지지 기둥 (플레이트 연결, 직경 12mm, 높이 50mm) -->
+            <geom name="pillar_fl" type="cylinder" size="0.006 0.025"
+                  pos="0.05 0.065 0.025" rgba="0.7 0.7 0.7 1" contype="0" conaffinity="0"/>
+            <geom name="pillar_fr" type="cylinder" size="0.006 0.025"
+                  pos="0.05 -0.065 0.025" rgba="0.7 0.7 0.7 1" contype="0" conaffinity="0"/>
+            <geom name="pillar_rl" type="cylinder" size="0.006 0.025"
+                  pos="-0.05 0.065 0.025" rgba="0.7 0.7 0.7 1" contype="0" conaffinity="0"/>
+            <geom name="pillar_rr" type="cylinder" size="0.006 0.025"
+                  pos="-0.05 -0.065 0.025" rgba="0.7 0.7 0.7 1" contype="0" conaffinity="0"/>
+
+            <!-- ======== 왼쪽 구동 바퀴 ======== -->
+            <!-- 바퀴 반경 33mm, 두께 25mm(반폭 12.5mm), 트랙폭/2 = 80mm -->
+            <body name="wheel_left" pos="0 0.08 0" quat="0.707107 0.707107 0 0">
+                <joint name="drive_left" type="hinge" axis="0 0 1"
+                       damping="0.005" frictionloss="0.01"/>
+                <inertial pos="0 0 0" mass="0.05"
+                          diaginertia="0.00003 0.00003 0.00005"/>
+                <geom name="wheel_left_geom" type="cylinder"
+                      size="0.033 0.0125" rgba="0.05 0.05 0.05 1"
+                      friction="1.5 0.005 0.0001"/>
             </body>
 
-            <!-- 오른쪽 바퀴 -->
-            <body name="wheel_right" pos="0 -0.11 0" quat="0.707 0.707 0 0">
-                <joint name="drive_right" type="hinge" axis="0 0 1"/>
-                <geom name="wheel_right_geom" type="cylinder" size="0.033 0.01" rgba="0.1 0.1 0.1 1"/>
+            <!-- ======== 오른쪽 구동 바퀴 ======== -->
+            <body name="wheel_right" pos="0 -0.08 0" quat="0.707107 0.707107 0 0">
+                <joint name="drive_right" type="hinge" axis="0 0 1"
+                       damping="0.005" frictionloss="0.01"/>
+                <inertial pos="0 0 0" mass="0.05"
+                          diaginertia="0.00003 0.00003 0.00005"/>
+                <geom name="wheel_right_geom" type="cylinder"
+                      size="0.033 0.0125" rgba="0.05 0.05 0.05 1"
+                      friction="1.5 0.005 0.0001"/>
             </body>
 
-            <!-- 센서 타워 (LiDAR & 카메라 장착부) -->
-            <body name="sensor_tower" pos="0 0 0.1">
-                <geom name="tower_geom" type="box" size="0.02 0.02 0.05" rgba="0.3 0.3 0.3 1"/>
-                
-                <!-- LiDAR 센서 [2] -->
-                <site name="lidar_site" pos="0 0 0.05" quat="1 0 0 0"/>
-                
-                <!-- RGB-D 카메라 [2] -->
-                <camera name="patrol_camera" pos="0.05 0 0.02" fovy="60" quat="0.5 -0.5 0.5 -0.5"/>
+            <!-- ======== 후방 볼 캐스터 (수동 지지) ======== -->
+            <!-- TurtleBot3에는 후방에 볼 캐스터가 있어 3점 지지 구조 -->
+            <body name="caster_ball" pos="-0.06 0 -0.023">
+                <geom name="caster_geom" type="sphere" size="0.01"
+                      rgba="0.6 0.6 0.6 1" friction="0.1 0.005 0.0001"
+                      mass="0.02"/>
+            </body>
+
+            <!-- ======== 센서 타워 (LiDAR + 카메라 장착부) ======== -->
+            <!-- 상단 플레이트 위, 전체 높이 192mm까지 -->
+            <body name="sensor_tower" pos="0 0 0.055">
+                <!-- LiDAR 마운트 기둥 (높이: base ~ 상단까지 약 107mm) -->
+                <geom name="tower_post" type="cylinder"
+                      size="0.01 0.0535" pos="0 0 0.0535"
+                      rgba="0.3 0.3 0.3 1" contype="0" conaffinity="0" mass="0.05"/>
+
+                <!-- ====== LDS-01 LiDAR 센서 (360도) ====== -->
+                <!-- TurtleBot3 상단, base_link 기준 높이 약 159mm (0.033+0.055+0.107-0.036) -->
+                <body name="lidar_body" pos="0 0 0.107">
+                    <inertial pos="0 0 0" mass="0.1"
+                              diaginertia="0.00005 0.00005 0.00003"/>
+                    <geom name="lidar_geom" type="cylinder"
+                          size="0.035 0.018" rgba="0.1 0.1 0.1 1"
+                          contype="0" conaffinity="0"/>
+                    <site name="lidar_site" pos="0 0 0.02" size="0.005"/>
+                </body>
+
+                <!-- ====== RGB-D 카메라 (전방) ====== -->
+                <!-- 전방 상부에 장착, 약간 아래를 향함 -->
+                <body name="camera_body" pos="0.069 0 0.06">
+                    <geom name="camera_geom" type="box"
+                          size="0.015 0.04 0.012" rgba="0.2 0.2 0.2 1"
+                          contype="0" conaffinity="0" mass="0.03"/>
+                    <camera name="patrol_camera" pos="0 0 0"
+                            fovy="58" quat="0.5 0.5 -0.5 0.5"/>
+                    <site name="camera_site" pos="0 0 0" size="0.005"/>
+                </body>
+
+                <!-- ====== IMU 센서 (본체 중심부) ====== -->
+                <site name="imu_site" pos="0 0 0.01" size="0.005"/>
             </body>
         </body>
     </worldbody>
 
-    <!-- 액추에이터: 속도 제어 방식 [2] -->
+    <!-- ======== 액추에이터: DYNAMIXEL XL430-W250-T 기반 ======== -->
+    <!-- kv 게인: 최대 속도 0.22m/s → ω_max = 0.22/0.033 ≈ 6.67 rad/s -->
+    <!-- 최대 토크: ~1.4 Nm (12V) -->
     <actuator>
-        <velocity name="motor_left" joint="drive_left" kv="10"/>
-        <velocity name="motor_right" joint="drive_right" kv="10"/>
+        <velocity name="motor_left" joint="drive_left"
+                  kv="5" forcerange="-1.4 1.4"
+                  ctrlrange="-6.67 6.67"/>
+        <velocity name="motor_right" joint="drive_right"
+                  kv="5" forcerange="-1.4 1.4"
+                  ctrlrange="-6.67 6.67"/>
     </actuator>
 
-    <!-- 센서 정의 [3], [2] -->
+    <!-- ======== 센서 정의 ======== -->
     <sensor>
+        <!-- LDS-01 LiDAR (360도, 범위 0.12~3.5m) -->
         <rangefinder name="lidar" site="lidar_site"/>
-        <accelerometer name="imu_accel" site="lidar_site"/>
-        <gyro name="imu_gyro" site="lidar_site"/>
+        <!-- IMU: 3축 가속도계 + 3축 자이로스코프 -->
+        <accelerometer name="imu_accel" site="imu_site"/>
+        <gyro name="imu_gyro" site="imu_site"/>
+        <!-- 바퀴 인코더 (각속도/위치 피드백) -->
+        <jointvel name="encoder_left" joint="drive_left"/>
+        <jointvel name="encoder_right" joint="drive_right"/>
+        <jointpos name="encoder_pos_left" joint="drive_left"/>
+        <jointpos name="encoder_pos_right" joint="drive_right"/>
     </sensor>
 </mujoco>
