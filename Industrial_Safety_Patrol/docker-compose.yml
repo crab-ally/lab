@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  # A. 로봇 시뮬레이션 서비스 (Main Robot App)
+  robot_sim:
+    build: .
+    container_name: safety_patrol_robot
+    volumes:
+      - .:/app
+      - /tmp/.X11-unix:/tmp/.X11-unix # GUI 전송용
+    environment:
+      - DISPLAY=${DISPLAY}
+      - DB_HOST=db
+      - DB_NAME=patrol_db
+      - DB_USER=admin
+      - DB_PASS=password123
+    depends_on:
+      - db
+    networks:
+      - patrol_network
+
+  # B. 데이터 로깅 서비스 (PostgreSQL/TimescaleDB) [4]
+  db:
+    image: postgres:15
+    container_name: patrol_database
+    environment:
+      POSTGRES_DB: patrol_db
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - patrol_network
+
+  # C. 안전 예방 대시보드 (Grafana) [4]
+  dashboard:
+    image: grafana/grafana:latest
+    container_name: safety_dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - db
+    networks:
+      - patrol_network
+
+networks:
+  patrol_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
