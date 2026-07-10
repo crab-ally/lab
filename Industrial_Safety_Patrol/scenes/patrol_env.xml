@@ -1,55 +1,212 @@
-<mujoco model="turtlebot_indoor_test">
-    <compiler angle="degree" coordinate="local" inertiafromgeom="true"/>
-    <option integrator="RK4" timestep="0.01" gravity="0 0 -9.81"/>
+<mujoco model="turtlebot_indoor_patrol">
+    <compiler angle="degree" coordinate="local" inertiafromgeom="false"/>
+    <option integrator="implicitfast" timestep="0.005" gravity="0 0 -9.81"/>
+
+    <default>
+        <joint damping="0.01" armature="0.001"/>
+        <geom friction="1.0 0.005 0.0001" condim="3" contype="1" conaffinity="1"/>
+    </default>
 
     <worldbody>
-        <!-- 1. 실내 바닥 및 조명 -->
-        <geom name="floor" type="plane" size="5 5 0.1" rgba="0.8 0.8 0.8 1"/>
-        <light directional="true" diffuse=".8 .8 .8" specular=".2 .2 .2" pos="0 0 5" dir="0 0 -1"/>
+        <!-- ================================================================
+             1. 실내 공장 환경
+             공장 레이아웃: 10m x 10m 실내 공간
+             벽 높이: 3m (실제 공장 천장 높이)
+             바닥: 에폭시 코팅 콘크리트 (높은 마찰)
+             ================================================================ -->
+        <geom name="floor" type="plane" size="5 5 0.1"
+              rgba="0.75 0.75 0.72 1" friction="1.0 0.005 0.0001"/>
+        <light directional="true" diffuse=".8 .8 .8" specular=".3 .3 .3"
+               pos="0 0 4" dir="0 0 -1"/>
+        <!-- 보조 조명 (그림자 완화) -->
+        <light directional="false" diffuse=".4 .4 .4" specular=".1 .1 .1"
+               pos="3 3 3.5" dir="-0.3 -0.3 -1"/>
+        <light directional="false" diffuse=".4 .4 .4" specular=".1 .1 .1"
+               pos="-3 -3 3.5" dir="0.3 0.3 -1"/>
 
-        <!-- 2. 실내 벽면 (Indoor Boundary) [1] -->
-        <geom name="wall_n" type="box" size="5 0.05 0.5" pos="0 5 0.5" rgba="0.5 0.5 0.5 1"/>
-        <geom name="wall_s" type="box" size="5 0.05 0.5" pos="0 -5 0.5" rgba="0.5 0.5 0.5 1"/>
-        <geom name="wall_e" type="box" size="0.05 5 0.5" pos="5 0 0.5" rgba="0.5 0.5 0.5 1"/>
-        <geom name="wall_w" type="box" size="0.05 5 0.5" pos="-5 0 0.5" rgba="0.5 0.5 0.5 1"/>
+        <!-- ================================================================
+             2. 실내 벽면 (10m x 10m, 벽 높이 3m, 벽 두께 0.1m)
+             ================================================================ -->
+        <geom name="wall_north" type="box" size="5.1 0.05 1.5"
+              pos="0 5.05 1.5" rgba="0.85 0.85 0.82 1"/>
+        <geom name="wall_south" type="box" size="5.1 0.05 1.5"
+              pos="0 -5.05 1.5" rgba="0.85 0.85 0.82 1"/>
+        <geom name="wall_east" type="box" size="0.05 5.0 1.5"
+              pos="5.05 0 1.5" rgba="0.85 0.85 0.82 1"/>
+        <geom name="wall_west" type="box" size="0.05 5.0 1.5"
+              pos="-5.05 0 1.5" rgba="0.85 0.85 0.82 1"/>
 
-        <!-- 3. 터틀봇 충전 스테이션 [2, 4] -->
-        <body name="charging_station" pos="-4 -4 0.01">
-            <geom name="station_base" type="box" size="0.3 0.3 0.01" rgba="0 1 0 0.5"/>
-            <site name="docking_port" pos="0 0 0.1" size="0.05"/>
+        <!-- ================================================================
+             3. 충전 도킹 스테이션
+             위치: 공장 코너 (-4, -4)
+             크기: 가로 0.4m x 세로 0.3m, 높이 0.15m
+             도킹 포트: 적외선 마커 위치 표시
+             ================================================================ -->
+        <body name="charging_station" pos="-4 -4 0">
+            <!-- 충전 스테이션 베이스 (바닥 고정) -->
+            <geom name="station_base" type="box"
+                  size="0.2 0.15 0.005" pos="0 0 0.005"
+                  rgba="0.2 0.6 0.2 0.7" mass="5.0"/>
+            <!-- 충전 스테이션 본체 (후방 벽) -->
+            <geom name="station_body" type="box"
+                  size="0.2 0.02 0.075" pos="0 -0.13 0.075"
+                  rgba="0.3 0.3 0.3 1" mass="2.0"/>
+            <!-- 충전 단자 표시 -->
+            <geom name="station_connector" type="box"
+                  size="0.03 0.01 0.02" pos="0 -0.11 0.05"
+                  rgba="1.0 0.8 0.0 1" contype="0" conaffinity="0"/>
+            <!-- 상태 표시등 (초록색 = 대기 중) -->
+            <geom name="station_led" type="sphere" size="0.01"
+                  pos="0 -0.13 0.16" rgba="0.0 1.0 0.0 1"
+                  contype="0" conaffinity="0"/>
+            <site name="docking_port" pos="0 0 0.01" size="0.03"
+                  rgba="0 1 0 0.3"/>
         </body>
 
-        <!-- 4. 장애물 2개 (상자 및 팔레트 모사) [3] -->
-        <geom name="obstacle_1" type="box" size="0.4 0.4 0.4" pos="2 2 0.4" rgba="0.7 0.3 0.3 1"/>
-        <geom name="obstacle_2" type="box" size="0.3 0.6 0.3" pos="-1 3 0.3" rgba="0.3 0.3 0.7 1"/>
+        <!-- ================================================================
+             4. 장애물 (산업 현장 적치물)
+             장애물 1: 적재 상자 (카고 박스) 0.6m x 0.4m x 0.5m, ~20kg
+             장애물 2: 팔레트 + 적재물 0.8m x 1.2m x 0.15m(팔레트) + 상자
+             ================================================================ -->
+        <!-- 장애물 1: 통로에 방치된 카고 박스 -->
+        <body name="obstacle_cargo" pos="2 2 0">
+            <geom name="obstacle_1_box" type="box"
+                  size="0.3 0.2 0.25" pos="0 0 0.25"
+                  rgba="0.75 0.35 0.2 1" mass="20.0"/>
+            <!-- 경고 테이프 표시 (상단) -->
+            <geom name="obstacle_1_tape" type="box"
+                  size="0.305 0.205 0.005" pos="0 0 0.505"
+                  rgba="1.0 0.9 0.0 1" contype="0" conaffinity="0"/>
+        </body>
 
-        <!-- 5. 터틀봇3 로봇 본체 -->
-        <body name="base_link" pos="0 0 0.05">
+        <!-- 장애물 2: 팔레트 + 자재 적재 -->
+        <body name="obstacle_pallet" pos="-4 -1 0">
+            <!-- 목재 팔레트 (EUR 팔레트: 1200 x 800 x 144mm) -->
+            <geom name="pallet_base" type="box"
+                  size="0.6 0.4 0.072" pos="0 0 0.072"
+                  rgba="0.65 0.50 0.30 1" mass="25.0"/>
+            <!-- 팔레트 위 적재 상자 -->
+            <geom name="pallet_cargo" type="box"
+                  size="0.5 0.35 0.2" pos="0 0 0.344"
+                  rgba="0.45 0.45 0.55 1" mass="15.0"/>
+        </body>
+
+        <!-- ================================================================
+             5. TurtleBot3 Burger 로봇 본체
+             (ROBOTIS 공식 스펙 기반 현실 크기)
+             크기: 138mm(L) x 178mm(W) x 192mm(H)
+             무게: ~1.0 kg
+             바퀴 반경: 33mm, 트랙 폭: 160mm
+             ================================================================ -->
+        <body name="base_link" pos="-4 -4 0.043" quat="0.707107 0 0 0.707107">
             <freejoint name="root"/>
-            <geom name="base_geom" type="cylinder" size="0.15 0.03" rgba="0.2 0.2 0.2 1"/>
-            
-            <body name="wheel_left" pos="0 0.11 0" quat="0.707 0.707 0 0">
-                <joint name="drive_left" type="hinge" axis="0 0 1"/>
-                <geom name="wheel_left_geom" type="cylinder" size="0.033 0.01" rgba="0.1 0.1 0.1 1"/>
-            </body>
-            <body name="wheel_right" pos="0 -0.11 0" quat="0.707 0.707 0 0">
-                <joint name="drive_right" type="hinge" axis="0 0 1"/>
-                <geom name="wheel_right_geom" type="cylinder" size="0.033 0.01" rgba="0.1 0.1 0.1 1"/>
+            <inertial pos="-0.02 0 0.005" mass="0.7"
+                      diaginertia="0.0012 0.0012 0.0018"/>
+            <!-- 하단 플레이트 (1층: 모터+배터리) -->
+            <geom name="base_plate_lower" type="box"
+                  size="0.069 0.089 0.0025" pos="0 0 0"
+                  rgba="0.15 0.15 0.15 1"/>
+            <!-- 상단 플레이트 (2층: SBC) -->
+            <geom name="base_plate_upper" type="box"
+                  size="0.069 0.089 0.0025" pos="0 0 0.05"
+                  rgba="0.15 0.15 0.15 1"/>
+            <!-- 4개 지지 기둥 -->
+            <geom name="pillar_fl" type="cylinder" size="0.006 0.025"
+                  pos="0.05 0.065 0.025" rgba="0.7 0.7 0.7 1"
+                  contype="0" conaffinity="0"/>
+            <geom name="pillar_fr" type="cylinder" size="0.006 0.025"
+                  pos="0.05 -0.065 0.025" rgba="0.7 0.7 0.7 1"
+                  contype="0" conaffinity="0"/>
+            <geom name="pillar_rl" type="cylinder" size="0.006 0.025"
+                  pos="-0.05 0.065 0.025" rgba="0.7 0.7 0.7 1"
+                  contype="0" conaffinity="0"/>
+            <geom name="pillar_rr" type="cylinder" size="0.006 0.025"
+                  pos="-0.05 -0.065 0.025" rgba="0.7 0.7 0.7 1"
+                  contype="0" conaffinity="0"/>
+
+            <!-- 왼쪽 구동 바퀴 (DYNAMIXEL XL430-W250-T) -->
+            <body name="wheel_left" pos="0 0.08 0" quat="0.707107 0.707107 0 0">
+                <joint name="drive_left" type="hinge" axis="0 0 1"
+                       damping="0.005" frictionloss="0.01"/>
+                <inertial pos="0 0 0" mass="0.05"
+                          diaginertia="0.00003 0.00003 0.00005"/>
+                <geom name="wheel_left_geom" type="cylinder"
+                      size="0.033 0.0125" rgba="0.05 0.05 0.05 1"
+                      friction="1.5 0.005 0.0001"/>
             </body>
 
-            <body name="sensor_tower" pos="0 0 0.1">
-                <site name="lidar_site" pos="0 0 0.05"/>
-                <camera name="patrol_camera" pos="0.05 0 0.02" fovy="60" quat="0.5 -0.5 0.5 -0.5"/>
+            <!-- 오른쪽 구동 바퀴 -->
+            <body name="wheel_right" pos="0 -0.08 0" quat="0.707107 0.707107 0 0">
+                <joint name="drive_right" type="hinge" axis="0 0 1"
+                       damping="0.005" frictionloss="0.01"/>
+                <inertial pos="0 0 0" mass="0.05"
+                          diaginertia="0.00003 0.00003 0.00005"/>
+                <geom name="wheel_right_geom" type="cylinder"
+                      size="0.033 0.0125" rgba="0.05 0.05 0.05 1"
+                      friction="1.5 0.005 0.0001"/>
+            </body>
+
+            <!-- 후방 볼 캐스터 (3점 지지) -->
+            <body name="caster_ball" pos="-0.06 0 -0.023">
+                <geom name="caster_geom" type="sphere" size="0.01"
+                      rgba="0.6 0.6 0.6 1" friction="0.1 0.005 0.0001"
+                      mass="0.02"/>
+            </body>
+
+            <!-- 센서 타워 -->
+            <body name="sensor_tower" pos="0 0 0.055">
+                <!-- LiDAR 마운트 기둥 -->
+                <geom name="tower_post" type="cylinder"
+                      size="0.01 0.0535" pos="0 0 0.0535"
+                      rgba="0.3 0.3 0.3 1" contype="0" conaffinity="0" mass="0.05"/>
+
+                <!-- LDS-01 LiDAR 센서 -->
+                <body name="lidar_body" pos="0 0 0.107">
+                    <inertial pos="0 0 0" mass="0.1"
+                              diaginertia="0.00005 0.00005 0.00003"/>
+                    <geom name="lidar_geom" type="cylinder"
+                          size="0.035 0.018" rgba="0.1 0.1 0.1 1"
+                          contype="0" conaffinity="0"/>
+                    <site name="lidar_site" pos="0.07 0 0" quat="0.707 0 -0.707 0" size="0.005"/>
+                </body>
+
+                <!-- RGB-D 카메라 (전방) -->
+                <body name="camera_body" pos="0.069 0 0.06">
+                    <geom name="camera_geom" type="box"
+                          size="0.015 0.04 0.012" rgba="0.2 0.2 0.2 1"
+                          contype="0" conaffinity="0" mass="0.03"/>
+                    <camera name="patrol_camera" pos="0 0 0"
+                            fovy="58" quat="0.5 0.5 -0.5 0.5"/>
+                    <site name="camera_site" pos="0 0 0" size="0.005"/>
+                </body>
+
+                <!-- IMU 센서 위치 -->
+                <site name="imu_site" pos="0 0 0.01" size="0.005"/>
             </body>
         </body>
     </worldbody>
 
+    <!-- ======== 액추에이터: DYNAMIXEL XL430-W250-T ======== -->
     <actuator>
-        <velocity name="motor_left" joint="drive_left" kv="10"/>
-        <velocity name="motor_right" joint="drive_right" kv="10"/>
+        <velocity name="motor_left" joint="drive_left"
+                  kv="5" forcerange="-1.4 1.4"
+                  ctrlrange="-6.67 6.67"/>
+        <velocity name="motor_right" joint="drive_right"
+                  kv="5" forcerange="-1.4 1.4"
+                  ctrlrange="-6.67 6.67"/>
     </actuator>
 
+    <!-- ======== 센서 정의 ======== -->
     <sensor>
+        <!-- LDS-01 LiDAR (360도, 범위 0.12~3.5m) -->
         <rangefinder name="lidar" site="lidar_site"/>
+        <!-- IMU: 3축 가속도계 + 3축 자이로스코프 -->
+        <accelerometer name="imu_accel" site="imu_site"/>
+        <gyro name="imu_gyro" site="imu_site"/>
+        <!-- 바퀴 인코더 -->
+        <jointvel name="encoder_left" joint="drive_left"/>
+        <jointvel name="encoder_right" joint="drive_right"/>
+        <jointpos name="encoder_pos_left" joint="drive_left"/>
+        <jointpos name="encoder_pos_right" joint="drive_right"/>
     </sensor>
 </mujoco>
