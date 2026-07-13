@@ -1,0 +1,204 @@
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+from sensor_msgs.msg import LaserScan, Image
+import mujoco
+import mujoco.viewer
+import numpy as np
+import time
+import threading
+import cv2
+import cv_bridge
+import math
+from pathlib import Path
+
+class MujocoRosBridge(Node):
+    def __init__(self, model, data):
+        super().__init__('mujoco_ros_bridge')
+        self.model = model
+        self.data = data
+        self.cv_bridge = cv_bridge.CvBridge()
+
+        # 카메라 렌더러 초기화
+        # Renderer는 OpenGL 컨텍스트가 메인 스레드에 묶여 있을 경우 멀티스레드에서 에러를 낼 수 있습니다.
+        # 시뮬레이터와 함께 동작할 수 있도록 초기화
+        try:
+            self.renderer = mujoco.Renderer(self.model, 480, 640)
+        except Exception as e:
+            self.get_logger().warn(f"Renderer initialization failed, camera data will not be published: {e}")
+            self.renderer = None
+
+        # 로봇 제원 [m]
+        self.track_width = 0.160
+        self.wheel_radius = 0.033
+
+        # Subscribers
+        self.cmd_vel_sub = self.create_subscription(
+            Twist,
+            '/cmd_vel',
+            self.cmd_vel_callback,
+            10
+        )
+
+        # Publishers
+        self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
+        self.scan_pub = self.create_publisher(LaserScan, '/scan', 10)
+        self.camera_pub = self.create_publisher(Image, '/camera/image_raw', 10)
+
+        # Timers (Publishing Loop)
+        self.odom_timer = self.create_timer(0.05, self.publish_odom)  # 20Hz
+        self.scan_timer = self.create_timer(0.1, self.publish_scan)   # 10Hz
+        self.camera_timer = self.create_timer(0.1, self.publish_camera) # 10Hz
+
+        self.get_logger().info("MuJoCo-ROS2 Bridge Node initialized")
+
+    # ROS2 /cmd_vel → MuJoCo 좌/우 바퀴 회전 속도
+    def cmd_vel_callback(self, msg: Twist):
+        v = msg.linear.x  # 앞/뒤 이동
+        w = msg.angular.z # z축 기준 회전
+
+        # 역운동학 계산 (Differential Drive)
+        v_left = v - (w * self.track_width / 2.0)
+        v_right = v + (w * self.track_width / 2.0)
+
+        # 모터 제어 인가 (rad/s)
+        self.data.ctrl[0] = v_left / self.wheel_radius
+        self.data.ctrl[1] = v_right / self.wheel_radius
+
+    # MuJoCo 로봇 상태(qpos, qvel) → ROS2 Odometry
+    def publish_odom(self):
+        try:
+            # base_link 바디의 qpos, qvel 추출
+            # root 조인트(freejoint) 찾기
+            joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "root")
+            if joint_id == -1:
+                return
+
+            qpos_adr = self.model.jnt_qposadr[joint_id]
+            qvel_adr = self.model.jnt_dofadr[joint_id]
+
+            pos = self.data.qpos[qpos_adr : qpos_adr + 3]
+            quat = self.data.qpos[qpos_adr + 3 : qpos_adr + 7]
+            vel = self.data.qvel[qvel_adr : qvel_adr + 3]
+            ang_vel = self.data.qvel[qvel_adr + 3 : qvel_adr + 6]
+
+            msg = Odometry()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = 'odom'
+            msg.child_frame_id = 'base_link'
+
+            msg.pose.pose.position.x = float(pos[0])
+            msg.pose.pose.position.y = float(pos[1])
+            msg.pose.pose.position.z = float(pos[2])
+
+            msg.pose.pose.orientation.w = float(quat[0])
+            msg.pose.pose.orientation.x = float(quat[1])
+            msg.pose.pose.orientation.y = float(quat[2])
+            msg.pose.pose.orientation.z = float(quat[3])
+
+            msg.twist.twist.linear.x = float(vel[0])
+            msg.twist.twist.linear.y = float(vel[1])
+            msg.twist.twist.linear.z = float(vel[2])
+
+            msg.twist.twist.angular.x = float(ang_vel[0])
+            msg.twist.twist.angular.y = float(ang_vel[1])
+            msg.twist.twist.angular.z = float(ang_vel[2])
+
+            self.odom_pub.publish(msg)
+        except Exception as e:
+            self.get_logger().error(f"Odom publish error: {e}", once=True)
+
+    # MuJoCo LiDAR → ROS2 LaserScan
+    def publish_scan(self):
+        try:
+            sensor_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SENSOR, "lidar")
+            if sensor_id == -1:
+                return
+
+            adr = self.model.sensor_adr[sensor_id]
+            dim = self.model.sensor_dim[sensor_id]
+            sensor_data = self.data.sensordata[adr:adr+dim]
+
+            msg = LaserScan()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = "lidar_link"
+            msg.angle_min = -math.pi
+            msg.angle_max = math.pi
+            msg.angle_increment = (2.0 * math.pi) / dim
+            msg.range_min = 0.12
+            msg.range_max = 3.5
+
+            # MuJoCo rangefinder가 허용 범위를 벗어나면 -1 리턴하므로 inf로 변환
+            ranges = []
+            for val in sensor_data:
+                if val < 0:
+                    ranges.append(float('inf'))
+                else:
+                    ranges.append(float(val))
+
+            msg.ranges = ranges
+            self.scan_pub.publish(msg)
+        except Exception as e:
+            self.get_logger().error(f"Scan publish error: {e}", once=True)
+
+    def publish_camera(self):
+        if self.renderer is None:
+            return
+        try:
+            self.renderer.update_scene(self.data, camera="patrol_camera")
+            pixels = self.renderer.render()
+            if pixels is not None:
+                img_msg = self.cv_bridge.cv2_to_imgmsg(pixels, encoding="rgb8")
+                img_msg.header.stamp = self.get_clock().now().to_msg()
+                img_msg.header.frame_id = "camera_link"
+                self.camera_pub.publish(img_msg)
+        except Exception as e:
+            self.get_logger().warn(f"Camera rendering skipped: {e}", once=True)
+
+
+def ros_spin_thread(node):
+    rclpy.spin(node)
+
+
+def main():
+    rclpy.init()
+
+    BASE_DIR = Path(__file__).resolve().parent
+    xml_path = BASE_DIR.parent / "scenes" / "patrol_factory.xml"
+
+    print(f"Loading model from: {xml_path}")
+    model = mujoco.MjModel.from_xml_path(str(xml_path))
+    data = mujoco.MjData(model)
+
+    node = MujocoRosBridge(model, data)
+
+    # ROS2 노드를 별도의 데몬 스레드에서 실행
+    spin_thread = threading.Thread(target=ros_spin_thread, args=(node,), daemon=True)
+    spin_thread.start()
+
+    print("터틀봇 실내 순찰 시뮬레이션 및 ROS2 브릿지 시작...")
+    
+    # 메인 스레드에서 MuJoCo 뷰어 및 물리 연산(100Hz) 구동
+    with mujoco.viewer.launch_passive(model, data) as viewer:
+        viewer.cam.lookat[:] = [-3, -3, 0.5]
+        viewer.cam.distance = 3
+        viewer.cam.azimuth = 45
+        viewer.cam.elevation = -30
+
+        while viewer.is_running() and rclpy.ok():
+            step_start = time.time()
+            mujoco.mj_step(model, data)
+            viewer.sync()
+
+            time_until_next_step = model.opt.timestep - (time.time() - step_start)
+            if time_until_next_step > 0:
+                time.sleep(time_until_next_step)
+
+    print("시뮬레이션 종료 중...")
+    node.destroy_node()
+    rclpy.shutdown()
+    spin_thread.join(timeout=1.0)
+
+if __name__ == '__main__':
+    main()
