@@ -1,0 +1,4 @@
+<mujoco model="turtlebot_indoor_patrol">
+    <include file="../worlds/indoor_world.xml"/>
+    <include file="../models/turtlebot_patrol.xml"/>
+</mujoco>
