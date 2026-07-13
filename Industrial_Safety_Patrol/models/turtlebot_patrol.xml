@@ -124,7 +124,7 @@
     <!-- ======== 센서 정의 ======== -->
     <sensor>
         <!-- LDS-01 LiDAR (360도, 범위 0.12~3.5m): 벽, 장애물 인식 및 거리 측정 -->
-        <rangefinder name="lidar" site="lidar_site"/>
+        <rangefinder name="lidar" site="lidar_site" cutoff="3.5"/>
         <!-- IMU: 3축 가속도계 + 3축 자이로스코프 -->
         <accelerometer name="imu_accel" site="imu_site"/>
         <gyro name="imu_gyro" site="imu_site"/>
