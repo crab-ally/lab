@@ -45,3 +45,47 @@ if lidar_dist >= 0 and lidar_dist < 1.0
 ```
 
 ---
+
+## 3번
+
+파일: turtlebot_patrol.xml
+
+문제: 시뮬레이션 초기부터 장애물 감지됨.
+
+원인:
+라이다 방향이 의도(+Y)와는 반대(-Y)로 설정됨
+
+해결
+```xml
+<site name="lidar_site" pos="0.07 0 0" quat="0.707 0 -0.707 0" size="0.005"/>
+                                ↓
+<site name="lidar_site" pos="0.07 0 0" quat="0.707 0 0.707 0" size="0.005"/>
+```
+
+---
+
+## 4번
+
+파일: patrol_env.xml
+
+문제: 충전 스테이션에서 내려올 때 로봇이 회전을 함.
+
+원인:
+로봇이 충전 스테이션에서 내려올 때 바닥을 장애물로 감지함.
+
+임시 해결:
+충전 스테이션 바닥을 제거.
+
+---
+
+## 5번
+
+파일: industrial_factory.xml
+
+에러:
+ValueError: Error: mass and inertia of moving bodies must be larger than mjMINVAL
+Element name 'forklift', id 4, line 0
+
+원인: forklift body(움직이는 body)의 질량 또는 관성이 0으로 계산되었다
+
+임시 해결: freejoint 제거. 이후 단계별 추가.
