@@ -1,55 +1,230 @@
-version: '3.8'
+version: "3.8"
+
+# ================================================================
+# AI Safety Patrol Robot
+# CPU Only Simulation Environment
+#
+# Services:
+#   1. robot_sim  : MuJoCo + ROS2 + AI Detection
+#   2. database   : TimescaleDB
+#   3. dashboard  : Grafana
+# ================================================================
 
 services:
-  # A. 로봇 시뮬레이션 서비스 (Main Robot App)
+  # ==============================================================
+  # A. Robot Simulation
+  # MuJoCo + ROS2 + OpenCV + YOLOv8
+  # ==============================================================
+
   robot_sim:
     build: .
     container_name: safety_patrol_robot
+
+    # ROS2 CLI 사용 가능하도록 설정
+    stdin_open: true
+    tty: true
+
+
     volumes:
+      # 프로젝트 코드 공유
       - .:/app
-      - /tmp/.X11-unix:/tmp/.X11-unix # GUI 전송용
+
+
+      # Linux GUI Forwarding
+      # (Linux 환경에서 MuJoCo viewer 사용)
+      - /tmp/.X11-unix:/tmp/.X11-unix
+
+
     environment:
+
+
+      # ==========================
+      # MuJoCo Rendering
+      # ==========================
+
+      # GPU 없는 환경
+      # EGL 대신 CPU rendering
+      - MUJOCO_GL=osmesa
+
+
+      # ==========================
+      # ROS2
+      # ==========================
+
+      - ROS_DOMAIN_ID=0
+
+
+      # ==========================
+      # Display
+      # ==========================
+
       - DISPLAY=${DISPLAY}
+
+
+      # ==========================
+      # Database Connection
+      # ==========================
+
       - DB_HOST=db
+      - DB_PORT=5432
       - DB_NAME=patrol_db
       - DB_USER=admin
       - DB_PASS=password123
+
+
     depends_on:
+
       - db
+
+
     networks:
+
       - patrol_network
 
-  # B. 데이터 로깅 서비스 (PostgreSQL/TimescaleDB) [4]
+
+
+  # ==============================================================
+  # B. Database
+  # Sensor / Risk Log Storage
+  #
+  # 저장 데이터:
+  # - robot pose
+  # - battery
+  # - lidar
+  # - PPE detection result
+  # - fire detection
+  # - collision risk
+  # ==============================================================
+
   db:
-    image: postgres:15
+
+
+    image: timescale/timescaledb:latest-pg15
+
+
     container_name: patrol_database
+
+
     environment:
+
+
       POSTGRES_DB: patrol_db
+
       POSTGRES_USER: admin
+
       POSTGRES_PASSWORD: password123
+
+
+
     ports:
+
+
       - "5432:5432"
+
+
+
     volumes:
+
+
+      # DB 데이터 유지
       - postgres_data:/var/lib/postgresql/data
+
+
+
     networks:
+
+
       - patrol_network
 
-  # C. 안전 예방 대시보드 (Grafana) [4]
+
+
+  # ==============================================================
+  # C. Safety Dashboard
+  # Grafana Visualization
+  #
+  # Display:
+  # - 위험 발생 위치
+  # - 순찰 경로
+  # - 사고 통계
+  # - 센서 데이터
+  # ==============================================================
+
+
   dashboard:
+
+
     image: grafana/grafana:latest
+
+
     container_name: safety_dashboard
+
+
+
     ports:
+
+
       - "3000:3000"
+
+
+
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+
+
+      GF_SECURITY_ADMIN_USER: admin
+
+      GF_SECURITY_ADMIN_PASSWORD: admin
+
+
+
     depends_on:
+
+
       - db
+
+
+
+    volumes:
+
+
+      # Dashboard 설정 저장
+      - grafana_data:/var/lib/grafana
+
+
+
     networks:
+
+
       - patrol_network
+
+
+
+
+
+# ================================================================
+# Network
+# ================================================================
+
 
 networks:
+
+
   patrol_network:
+
     driver: bridge
 
+
+
+
+
+# ================================================================
+# Persistent Volumes
+# ================================================================
+
+
 volumes:
+
+
   postgres_data:
+
+
+  grafana_data:
