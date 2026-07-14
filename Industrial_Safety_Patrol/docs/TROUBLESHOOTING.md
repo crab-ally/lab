@@ -89,3 +89,22 @@ Element name 'forklift', id 4, line 0
 원인: forklift body(움직이는 body)의 질량 또는 관성이 0으로 계산되었다
 
 임시 해결: freejoint 제거. 이후 단계별 추가.
+
+---
+
+## 6번
+
+파일: Dockerfile
+
+문제: Docker 이미지 빌드 중 pip install 단계에서 sympy 충돌로 빌드 실패.
+
+원인:
+osrf/ros:humble-desktop-full 이미지에는 apt로 설치된 sympy 1.9가 포함되어 있는데, torch(ultralytics 의존성) 설치 과정에서 pip가 이를 업그레이드하려고 시도하여 충돌 발생.
+
+해결
+```bash
+# 추가
+RUN python3 -m venv --system-site-packages /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --upgrade pip setuptools wheel
+```
