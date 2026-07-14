@@ -5,13 +5,13 @@
 
 FROM osrf/ros:humble-desktop-full
 
-
 # ================================================================
 # 1. System Package Installation
 # ================================================================
 
 RUN apt-get update && apt-get install -y \
     python3-pip \
+    python3-venv \
     python3-colcon-common-extensions \
     python3-rosdep \
     git \
@@ -19,13 +19,20 @@ RUN apt-get update && apt-get install -y \
     curl \
     vim \
     \
-    # MuJoCo Rendering Dependencies
+    # MuJoCo Viewer (GLFW) + Headless Rendering
     libgl1-mesa-glx \
+    libglu1-mesa \
+    mesa-utils \
     libglfw3 \
     libglew-dev \
     libosmesa6-dev \
+    libx11-6 \
+    libxrandr2 \
+    libxi6 \
+    libxcursor1 \
+    libxinerama1 \
     \
-    # ROS2 Python / Sensor Packages
+    # ROS2 Packages
     ros-humble-rclpy \
     ros-humble-cv-bridge \
     ros-humble-sensor-msgs \
@@ -33,77 +40,68 @@ RUN apt-get update && apt-get install -y \
     ros-humble-nav-msgs \
     ros-humble-tf2-ros \
     ros-humble-tf2-geometry-msgs \
+    ros-humble-teleop-twist-keyboard \
     \
-    # Navigation Stack
+    # Navigation
     ros-humble-navigation2 \
     ros-humble-nav2-bringup \
+    ros-humble-slam-toolbox \
     \
     && rm -rf /var/lib/apt/lists/*
-
-
 
 # ================================================================
 # 2. Workspace
 # ================================================================
 
-WORKDIR /app
-
-
+WORKDIR /workspace
 
 # ================================================================
-# 3. Python Package Installation
+# 3. Python Virtual Environment
 # ================================================================
 
-RUN pip3 install --upgrade pip
+RUN python3 -m venv --system-site-packages /opt/venv
 
+ENV PATH="/opt/venv/bin:$PATH"
 
-RUN pip3 install \
+RUN pip install --upgrade pip setuptools wheel
+
+# ================================================================
+# 4. Python Packages
+# ================================================================
+
+RUN pip install \
     mujoco==3.6.0 \
-    numpy \
+    numpy==1.26.4 \
     scipy \
-    opencv-python \
+    opencv-python==4.10.0.84 \
     ultralytics \
-    torch \
-    torchvision \
     pandas \
     matplotlib \
     psycopg2-binary \
     filterpy \
     pytest
 
-
-
 # ================================================================
-# 4. MuJoCo Rendering Environment
+# 5. MuJoCo Rendering
 # ================================================================
 
-# EGL : GPU / Headless Rendering
-ENV MUJOCO_GL=egl
-
-# Python 출력 버퍼 제거
+ENV MUJOCO_GL=glfw
 ENV PYTHONUNBUFFERED=1
 
-
-
 # ================================================================
-# 5. ROS2 Environment
+# 6. ROS2 Environment
 # ================================================================
 
-# Container 실행 시 ROS2 자동 source
 RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
 
-
-
 # ================================================================
-# 6. Copy Project Source
+# 7. Copy Project
 # ================================================================
 
-COPY . /app
-
-
+COPY . /workspace
 
 # ================================================================
-# 7. Default Command
+# 8. Default Command
 # ================================================================
 
-CMD ["python3", "scripts/main_simulation.py"]
+CMD ["bash"]

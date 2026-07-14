@@ -2,229 +2,166 @@ version: "3.8"
 
 # ================================================================
 # AI Safety Patrol Robot
-# CPU Only Simulation Environment
+# MuJoCo 3.6.0 + ROS2 Humble Simulation Environment
+#
+# Current phase (Level 2): MuJoCo ↔ ROS2 Bridge
 #
 # Services:
-#   1. robot_sim  : MuJoCo + ROS2 + AI Detection
-#   2. database   : TimescaleDB
-#   3. dashboard  : Grafana
+#   1. robot_sim  : MuJoCo viewer + ROS2 bridge (patrol_factory.xml)
+#   2. teleop     : Keyboard teleoperation → /cmd_vel  [optional profile]
+#   3. database   : TimescaleDB (event logging, Level 6)
+#   4. dashboard  : Grafana monitoring (Level 6)
+#
+# ROS2 Topics (robot_sim):
+#   Subscribe : /cmd_vel
+#   Publish   : /odom, /scan, /camera/image_raw
+#
+# Usage:
+#   docker compose up robot_sim
+#   docker compose run --rm teleop          # keyboard control
+#   docker compose --profile teleop up      # sim + teleop together
 # ================================================================
 
 services:
   # ==============================================================
-  # A. Robot Simulation
-  # MuJoCo + ROS2 + OpenCV + YOLOv8
+  # A. Robot Simulation — MuJoCo ↔ ROS2 Bridge
   # ==============================================================
 
   robot_sim:
     build: .
     container_name: safety_patrol_robot
 
-    # ROS2 CLI 사용 가능하도록 설정
     stdin_open: true
     tty: true
 
-
+    ipc: host
+  
     volumes:
-      # 프로젝트 코드 공유
-      - .:/app
-
-
-      # Linux GUI Forwarding
-      # (Linux 환경에서 MuJoCo viewer 사용)
-      - /tmp/.X11-unix:/tmp/.X11-unix
-
+      - ./data:/workspace/data
+      - ./models:/workspace/models
+      - ./results:/workspace/results
+      - ./scenes:/workspace/scenes
+      - ./scripts:/workspace/scripts
+      - ./worlds:/workspace/worlds
 
     environment:
+      # MuJoCo rendering
+      # Linux : export DISPLAY=:0
+      # Windows (VcXsrv) : set DISPLAY=host.docker.internal:0.0
+      # glfw   → viewer (needs DISPLAY)
+      # osmesa → headless camera only (viewer disabled)
+      - DISPLAY=host.docker.internal:0.0
+      - LIBGL_ALWAYS_INDIRECT=1
+      - QT_X11_NO_MITSHM=1
+      - MUJOCO_GL=${MUJOCO_GL:-glfw}
 
+      # ROS2 DDS discovery
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
-      # ==========================
-      # MuJoCo Rendering
-      # ==========================
-
-      # GPU 없는 환경
-      # EGL 대신 CPU rendering
-      - MUJOCO_GL=osmesa
-
-
-      # ==========================
-      # ROS2
-      # ==========================
-
-      - ROS_DOMAIN_ID=0
-
-
-      # ==========================
-      # Display
-      # ==========================
-
-      - DISPLAY=${DISPLAY}
-
-
-      # ==========================
-      # Database Connection
-      # ==========================
-
+      # Database (Level 6: Event Logger)
       - DB_HOST=db
       - DB_PORT=5432
       - DB_NAME=patrol_db
       - DB_USER=admin
       - DB_PASS=password123
 
-
     depends_on:
-
       - db
 
-
     networks:
-
       - patrol_network
 
 
+  # ==============================================================
+  # A-2. Teleoperation (Level 2)
+  # Keyboard → /cmd_vel → robot_sim
+  # ==============================================================
+
+  teleop:
+    build: .
+    container_name: safety_patrol_teleop
+    profiles: ["teleop"]
+
+    stdin_open: true
+    tty: true
+
+    command: >
+      bash -c "source /opt/ros/humble/setup.bash &&
+      ros2 run teleop_twist_keyboard teleop_twist_keyboard"
+
+    environment:
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+    depends_on:
+      - robot_sim
+
+    networks:
+      - patrol_network
+
 
   # ==============================================================
-  # B. Database
-  # Sensor / Risk Log Storage
-  #
-  # 저장 데이터:
-  # - robot pose
-  # - battery
-  # - lidar
-  # - PPE detection result
-  # - fire detection
-  # - collision risk
+  # B. Database — Sensor / Risk Log Storage (Level 6)
   # ==============================================================
 
   db:
-
-
     image: timescale/timescaledb:latest-pg15
-
-
     container_name: patrol_database
 
-
     environment:
-
-
       POSTGRES_DB: patrol_db
-
       POSTGRES_USER: admin
-
       POSTGRES_PASSWORD: password123
 
-
-
     ports:
-
-
       - "5432:5432"
 
-
-
     volumes:
-
-
-      # DB 데이터 유지
       - postgres_data:/var/lib/postgresql/data
 
-
-
     networks:
-
-
       - patrol_network
 
 
-
   # ==============================================================
-  # C. Safety Dashboard
-  # Grafana Visualization
-  #
-  # Display:
-  # - 위험 발생 위치
-  # - 순찰 경로
-  # - 사고 통계
-  # - 센서 데이터
+  # C. Safety Dashboard — Grafana (Level 6)
   # ==============================================================
-
 
   dashboard:
-
-
     image: grafana/grafana:latest
-
-
     container_name: safety_dashboard
 
-
-
     ports:
-
-
       - "3000:3000"
 
-
-
     environment:
-
-
       GF_SECURITY_ADMIN_USER: admin
-
       GF_SECURITY_ADMIN_PASSWORD: admin
 
-
-
     depends_on:
-
-
       - db
 
-
-
     volumes:
-
-
-      # Dashboard 설정 저장
       - grafana_data:/var/lib/grafana
 
-
-
     networks:
-
-
       - patrol_network
-
-
-
 
 
 # ================================================================
 # Network
 # ================================================================
 
-
 networks:
-
-
   patrol_network:
-
     driver: bridge
-
-
-
 
 
 # ================================================================
 # Persistent Volumes
 # ================================================================
 
-
 volumes:
-
-
   postgres_data:
-
-
   grafana_data:
