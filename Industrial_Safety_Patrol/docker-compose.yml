@@ -18,6 +18,8 @@ version: "3.8"
 #       /odom
 #       /scan
 #       /camera/image_raw
+#       /tf
+#       /map (slam 서비스 실행 시)
 #
 # 실행 예시
 #
@@ -27,8 +29,17 @@ version: "3.8"
 #   [2] 키보드 제어 (별도 터미널)
 #       docker compose run --rm teleop
 #
-#   [3] 시뮬레이터 + Teleop 실행
-#       docker compose --profile teleop up
+#   [4] SLAM 지도 생성 (별도 터미널)
+#       docker compose --profile slam up slam
+#
+#   [5] 자동 탐색 매핑 (SLAM 실행 중)
+#       docker compose run --rm auto_explore
+#
+#   [6] 지도 저장 (SLAM 실행 중, 탐색 완료 후)
+#       docker compose run --rm map_saver
+#
+#   [7] 시뮬레이터 + SLAM + Teleop
+#       docker compose --profile slam --profile teleop up
 # =============================================================================
 
 services:
@@ -67,6 +78,12 @@ services:
 
     # 프로젝트 폴더 공유
     volumes:
+
+      # SLAM 설정
+      - ./config:/workspace/config
+
+      # SLAM 지도 출력 (factory_map.yaml, factory_map.pgm)
+      - ./maps:/workspace/maps
 
       # 원본 데이터
       - ./data:/workspace/data
@@ -175,6 +192,113 @@ services:
 
     depends_on:
       - robot_sim
+
+    networks:
+      - patrol_network
+
+  # ===========================================================================
+  # SLAM Mapping
+  #
+  # LiDAR (/scan) + TF + Odometry (/odom)
+  #       ↓
+  # SLAM Toolbox
+  #       ↓
+  # Occupancy Grid Map (/map)
+  # ===========================================================================
+
+  slam:
+
+    build: .
+
+    container_name: safety_patrol_slam
+
+    profiles:
+      - slam
+
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      ros2 launch slam_toolbox online_async_launch.py \
+      slam_params_file:=/workspace/config/slam_toolbox_factory.yaml \
+      use_sim_time:=false"
+
+    volumes:
+      - ./config:/workspace/config
+      - ./maps:/workspace/maps
+
+    environment:
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+    depends_on:
+      - robot_sim
+
+    networks:
+      - patrol_network
+
+  # ===========================================================================
+  # Auto Explore (SLAM 매핑용 자동 주행)
+  # ===========================================================================
+
+  auto_explore:
+
+    build: .
+
+    container_name: safety_patrol_auto_explore
+
+    profiles:
+      - slam
+
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      python /workspace/scripts/auto_explore_for_mapping.py"
+
+    volumes:
+      - ./scripts:/workspace/scripts
+
+    environment:
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+    depends_on:
+      - robot_sim
+      - slam
+
+    networks:
+      - patrol_network
+
+  # ===========================================================================
+  # Map Saver
+  #
+  # 결과: maps/factory_map.yaml, maps/factory_map.pgm
+  # ===========================================================================
+
+  map_saver:
+
+    build: .
+
+    container_name: safety_patrol_map_saver
+
+    profiles:
+      - slam
+
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      python /workspace/scripts/save_factory_map.py
+      --output /workspace/maps/factory_map"
+
+    volumes:
+      - ./maps:/workspace/maps
+      - ./scripts:/workspace/scripts
+
+    environment:
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+    depends_on:
+      - slam
 
     networks:
       - patrol_network
