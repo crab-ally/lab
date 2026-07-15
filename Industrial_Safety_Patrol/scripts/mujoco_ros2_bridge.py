@@ -1,3 +1,5 @@
+# MuJoCo를 ROS2 로봇으로 만들어주는 ROS2 Bridge
+
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
@@ -20,14 +22,8 @@ class MujocoRosBridge(Node):
         self.data = data
         self.cv_bridge = cv_bridge.CvBridge()
 
-        # 카메라 렌더러 초기화
-        # Renderer는 OpenGL 컨텍스트가 메인 스레드에 묶여 있을 경우 멀티스레드에서 에러를 낼 수 있습니다.
-        # 시뮬레이터와 함께 동작할 수 있도록 초기화
-        try:
-            self.renderer = mujoco.Renderer(self.model, 480, 640)
-        except Exception as e:
-            self.get_logger().warn(f"Renderer initialization failed, camera data will not be published: {e}")
-            self.renderer = None
+        # Renderer는 Viewer 생성 이후 Main Thread에서 초기화
+        self.renderer = None
 
         # 로봇 제원 [m]
         self.track_width = 0.160
@@ -40,6 +36,9 @@ class MujocoRosBridge(Node):
             self.cmd_vel_callback,
             10
         )
+
+        self.camera_image = None
+        self.camera_lock = threading.Lock()
 
         # Publishers
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
@@ -143,18 +142,27 @@ class MujocoRosBridge(Node):
             self.get_logger().error(f"Scan publish error: {e}", once=True)
 
     def publish_camera(self):
-        if self.renderer is None:
-            return
-        try:
-            self.renderer.update_scene(self.data, camera="patrol_camera")
-            pixels = self.renderer.render()
-            if pixels is not None:
-                img_msg = self.cv_bridge.cv2_to_imgmsg(pixels, encoding="rgb8")
-                img_msg.header.stamp = self.get_clock().now().to_msg()
-                img_msg.header.frame_id = "camera_link"
-                self.camera_pub.publish(img_msg)
-        except Exception as e:
-            self.get_logger().warn(f"Camera rendering skipped: {e}", once=True)
+
+        with self.camera_lock:
+
+            if self.camera_image is None:
+                return
+
+            pixels = self.camera_image.copy()
+
+
+        img_msg = self.cv_bridge.cv2_to_imgmsg(
+            pixels,
+            encoding="rgb8"
+        )
+
+        img_msg.header.stamp = (
+            self.get_clock().now().to_msg()
+        )
+
+        img_msg.header.frame_id = "camera_link"
+
+        self.camera_pub.publish(img_msg)
 
 
 def ros_spin_thread(node):
@@ -171,16 +179,30 @@ def main():
     model = mujoco.MjModel.from_xml_path(str(xml_path))
     data = mujoco.MjData(model)
 
-    node = MujocoRosBridge(model, data)
+    node = None
 
-    # ROS2 노드를 별도의 데몬 스레드에서 실행
-    spin_thread = threading.Thread(target=ros_spin_thread, args=(node,), daemon=True)
-    spin_thread.start()
-
-    print("터틀봇 실내 순찰 시뮬레이션 및 ROS2 브릿지 시작...")
-    
-    # 메인 스레드에서 MuJoCo 뷰어 및 물리 연산(100Hz) 구동
     with mujoco.viewer.launch_passive(model, data) as viewer:
+
+        print("터틀봇 실내 순찰 시뮬레이션 및 ROS2 브릿지 시작...")
+
+        node = MujocoRosBridge(model, data)
+
+        # Viewer OpenGL Context 생성 이후 Renderer 생성
+        #node.renderer = mujoco.Renderer(
+        #    model,
+        #    480,
+        #    640
+        #)
+
+        # ROS2 spin 시작
+        spin_thread = threading.Thread(
+            target=ros_spin_thread,
+            args=(node,),
+            daemon=True
+        )
+
+        spin_thread.start()
+
         viewer.cam.lookat[:] = [-3, -3, 0.5]
         viewer.cam.distance = 3
         viewer.cam.azimuth = 45
@@ -191,14 +213,30 @@ def main():
             mujoco.mj_step(model, data)
             viewer.sync()
 
-            time_until_next_step = model.opt.timestep - (time.time() - step_start)
+            if node.renderer is not None:
+
+                node.renderer.update_scene(
+                    data,
+                    camera="patrol_camera"
+                )
+
+                pixels = node.renderer.render()
+
+                with node.camera_lock:
+                    node.camera_image = pixels
+
+            time_until_next_step = (
+                model.opt.timestep -
+                (time.time() - step_start)
+            )
+
             if time_until_next_step > 0:
                 time.sleep(time_until_next_step)
 
-    print("시뮬레이션 종료 중...")
-    node.destroy_node()
-    rclpy.shutdown()
-    spin_thread.join(timeout=1.0)
+        print("시뮬레이션 종료 중...")
+        node.destroy_node()
+        rclpy.shutdown()
+        spin_thread.join(timeout=1.0)
 
 if __name__ == '__main__':
     main()
