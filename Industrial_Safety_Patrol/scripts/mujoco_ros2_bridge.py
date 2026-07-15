@@ -2,9 +2,10 @@
 
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, TransformStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan, Image
+from tf2_ros import TransformBroadcaster
 import mujoco
 import mujoco.viewer
 import numpy as np
@@ -44,6 +45,11 @@ class MujocoRosBridge(Node):
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
         self.scan_pub = self.create_publisher(LaserScan, '/scan', 10)
         self.camera_pub = self.create_publisher(Image, '/camera/image_raw', 10)
+        self.tf_broadcaster = TransformBroadcaster(self)
+
+        # base_link → lidar_link (MuJoCo 모델 좌표 기준)
+        self.lidar_offset = (0.07, 0.0, 0.162)
+        self.lidar_quat = (0.707, 0.0, 0.707, 0.0)
 
         # Timers (Publishing Loop)
         self.odom_timer = self.create_timer(0.05, self.publish_odom)  # 20Hz
@@ -105,8 +111,36 @@ class MujocoRosBridge(Node):
             msg.twist.twist.angular.z = float(ang_vel[2])
 
             self.odom_pub.publish(msg)
+            self._publish_tf(msg.header.stamp, pos, quat)
         except Exception as e:
             self.get_logger().error(f"Odom publish error: {e}", once=True)
+
+    def _publish_tf(self, stamp, pos, quat):
+        odom_to_base = TransformStamped()
+        odom_to_base.header.stamp = stamp
+        odom_to_base.header.frame_id = 'odom'
+        odom_to_base.child_frame_id = 'base_link'
+        odom_to_base.transform.translation.x = float(pos[0])
+        odom_to_base.transform.translation.y = float(pos[1])
+        odom_to_base.transform.translation.z = float(pos[2])
+        odom_to_base.transform.rotation.w = float(quat[0])
+        odom_to_base.transform.rotation.x = float(quat[1])
+        odom_to_base.transform.rotation.y = float(quat[2])
+        odom_to_base.transform.rotation.z = float(quat[3])
+
+        base_to_lidar = TransformStamped()
+        base_to_lidar.header.stamp = stamp
+        base_to_lidar.header.frame_id = 'base_link'
+        base_to_lidar.child_frame_id = 'lidar_link'
+        base_to_lidar.transform.translation.x = self.lidar_offset[0]
+        base_to_lidar.transform.translation.y = self.lidar_offset[1]
+        base_to_lidar.transform.translation.z = self.lidar_offset[2]
+        base_to_lidar.transform.rotation.w = self.lidar_quat[0]
+        base_to_lidar.transform.rotation.x = self.lidar_quat[1]
+        base_to_lidar.transform.rotation.y = self.lidar_quat[2]
+        base_to_lidar.transform.rotation.z = self.lidar_quat[3]
+
+        self.tf_broadcaster.sendTransform([odom_to_base, base_to_lidar])
 
     # MuJoCo LiDAR → ROS2 LaserScan
     def publish_scan(self):
