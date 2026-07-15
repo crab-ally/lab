@@ -1,110 +1,647 @@
-# 에러 정정표
+# 에러 정정표 (Troubleshooting Log)
 
-## 1번
+AI Safety Patrol Robot 프로젝트 진행 중 발생한 오류와 해결 기록
 
-파일: scripts\spawn_world.py
+---
 
-기존 코드
-```py
+# 1. NumPy 배열 포맷팅 오류
+
+## 파일
+
+`scripts/spawn_world.py`
+
+## 에러 코드
+
+```text
+TypeError: unsupported format string passed to numpy.ndarray.__format__
+```
+
+## 기존 코드
+
+```python
 print(f"[경고] 장애물 감지! 거리: {dist:.2f}m - 우회 경로 탐색 중...")
 ```
 
-에러: TypeError: unsupported format string passed to numpy.ndarray.__format__
+## 원인
 
-원인: 
-data.sensor(...).data는 NumPy 배열을 반환한다. 그리고 .2f는 실수를 출력하는 포맷팅이다.
+`data.sensor(...).data`는 단일 숫자가 아니라 **NumPy 배열(ndarray)** 형태로 반환된다.
 
-해결
-```py
-lidar_dist = data.sensor('lidar').data # [numpy.ndarray]
+하지만 `.2f`는 Python 실수(float) 출력 형식이며 배열에는 적용할 수 없다.
+
+## 해결
+
+```python
+lidar_dist = data.sensor('lidar').data
                 ↓
-lidar_dist = data.sensor('lidar').data[0] # [numpy.float64]
+lidar_dist = data.sensor('lidar').data[0]
 ```
 
 ---
 
-## 2번
+# 2. LiDAR 장애물 오검출
 
-파일: scripts\spawn_world.py
+## 파일
 
-기존 코드
-```py
+`scripts/spawn_world.py`
+
+## 문제
+
+장애물이 없음에도 장애물 감지 메시지가 출력됨.
+
+## 기존 코드
+
+```python
 if lidar_dist < 1.0:
 ```
 
-에러: 장애물이 없음에도 장애물 감지됨.
+## 원인
 
-원인: 
-장애물 미감지 시 `-1`을 반환하며, 이것이 if문의 조건을 만족함.
+MuJoCo LiDAR는 장애물을 찾지 못하면 `-1`을 반환한다.
 
-해결
-```py
+## 해결
+
+```python
 if lidar_dist < 1.0:
         ↓
-if lidar_dist >= 0 and lidar_dist < 1.0
+if lidar_dist >= 0 and lidar_dist < 1.0:
 ```
 
 ---
 
-## 3번
+# 3. LiDAR 방향 오류
 
-파일: turtlebot_patrol.xml
+## 파일
 
-문제: 시뮬레이션 초기부터 장애물 감지됨.
+`models/turtlebot_patrol.xml`
 
-원인:
-라이다 방향이 의도(+Y)와는 반대(-Y)로 설정됨
+## 문제
 
-해결
+시뮬레이션 시작 직후 장애물이 감지됨.
+
+## 원인
+
+LiDAR 센서 방향(-Y)이 의도한 방향(+Y)과 반대로 설정됨.
+따라서 뒤쪽 충전 스테이션을 장애물로 감지함.
+
+## 해결
+
 ```xml
-<site name="lidar_site" pos="0.07 0 0" quat="0.707 0 -0.707 0" size="0.005"/>
-                                ↓
-<site name="lidar_site" pos="0.07 0 0" quat="0.707 0 0.707 0" size="0.005"/>
+<site name="lidar_site"
+      pos="0.07 0 0"
+      quat="0.707 0 -0.707 0"
+      size="0.005"/>
+        ↓
+<site name="lidar_site"
+      pos="0.07 0 0"
+      quat="0.707 0 0.707 0"
+      size="0.005"/>
 ```
 
 ---
 
-## 4번
+# 4. 충전 스테이션 탈출 시 회전 문제
 
-파일: patrol_env.xml
+## 파일
 
-문제: 충전 스테이션에서 내려올 때 로봇이 회전을 함.
+`scenes/patrol_env.xml`
 
-원인:
-로봇이 충전 스테이션에서 내려올 때 바닥을 장애물로 감지함.
+## 문제
 
-임시 해결:
-충전 스테이션 바닥을 제거.
+로봇이 충전 스테이션에서 내려올 때 회전함.
 
----
+## 원인
 
-## 5번
+로봇이 충전 스테이션에서 내려올 때 본체가 기울어져 바닥을 장애물로 감지함.
 
-파일: industrial_factory.xml
+## 임시 해결
 
-에러:
-ValueError: Error: mass and inertia of moving bodies must be larger than mjMINVAL
-Element name 'forklift', id 4, line 0
-
-원인: forklift body(움직이는 body)의 질량 또는 관성이 0으로 계산되었다
-
-임시 해결: freejoint 제거. 이후 단계별 추가.
+충전 스테이션 바닥 제거.
 
 ---
 
-## 6번
+# 5. Moving Body 질량/관성 오류
 
-파일: Dockerfile
+## 파일
 
-문제: Docker 이미지 빌드 중 pip install 단계에서 sympy 충돌로 빌드 실패.
+`worlds/industrial_factory.xml`
 
-원인:
-osrf/ros:humble-desktop-full 이미지에는 apt로 설치된 sympy 1.9가 포함되어 있는데, torch(ultralytics 의존성) 설치 과정에서 pip가 이를 업그레이드하려고 시도하여 충돌 발생.
+## 에러 코드
 
-해결
-```bash
-# 추가
+```text
+ValueError:
+mass and inertia of moving bodies must be larger than mjMINVAL
+
+Element name 'forklift'
+```
+
+## 원인
+
+움직이는 Body(`forklift`)의 질량 또는 관성이 0으로 계산됨.
+
+MuJoCo에서는 움직이는 객체는 반드시:
+
+```text
+mass > 0
+inertia > 0
+```
+
+조건을 만족해야 한다.
+
+## 발생 원인
+
+`freejoint` 추가 후 자유롭게 움직이는 객체로 되었지만 물리 파라미터가 부족함.
+
+## 임시 해결
+
+freejoint 제거. 이후 단계적으로 추가 예정.
+
+---
+
+# 6. Docker pip 설치 중 Sympy 충돌
+
+## 파일
+
+`Dockerfile`
+
+## 문제
+
+Docker Image Build 과정에서 `pip install` 단계 실패.
+
+## 에러 원인
+
+`osrf/ros:humble-desktop-full` 이미지 내부에는 ROS2 패키지 관리를 위해 `apt`로 설치된 Python 패키지가 존재한다.
+
+그중:
+
+```text
+sympy 1.9
+```
+
+가 이미 설치되어 있다.
+
+이후:
+
+```text
+pip install torch
+        ↓
+torch dependency 확인
+        ↓
+sympy 최신 버전 설치 시도
+        ↓
+apt package와 pip package 충돌
+```
+
+발생.
+
+## 해결
+
+Python Virtual Environment 생성.
+
+추가:
+
+```dockerfile
 RUN python3 -m venv --system-site-packages /opt/venv
+
 ENV PATH="/opt/venv/bin:$PATH"
+
 RUN pip install --upgrade pip setuptools wheel
 ```
+
+---
+
+# 7. NumPy 2.x / ROS2 cv_bridge 호환 오류
+
+## 파일
+
+`Dockerfile`
+
+## 에러 코드
+
+```text
+A module that was compiled using NumPy 1.x cannot be run in
+NumPy 2.2.6 as it may crash.
+
+AttributeError: _ARRAY_API not found
+```
+
+## 원인
+
+ROS2 Humble의 `cv_bridge`는 NumPy 1.x 기준으로 컴파일된 Binary Package이다.
+
+> Binary Package: 이미 컴파일되어 바로 사용할 수 있는 패키지
+
+하지만 Docker 환경에서:
+
+```text
+pip install numpy
+        ↓
+numpy 2.2.6 설치
+```
+
+됨.
+
+결과: ABI 호환 오류
+
+> ABI (Application Binary Interface): 컴파일된 프로그램과 라이브러리가 데이터를 주고받는 규칙
+
+## 해결
+
+기존:
+
+```dockerfile
+numpy
+  ↓
+numpy==1.26.4
+```
+
+---
+
+# 8. MuJoCo Renderer OpenGL Context 오류
+
+## 파일
+
+`scripts/mujoco_ros2_bridge.py`
+
+## 에러 코드
+
+```text
+Renderer initialization failed,
+camera data will not be published
+
+gladLoadGL error
+```
+
+## 원인
+
+기존 구조에서는 ROS2 Node 생성 시점에 Renderer를 생성했다.
+
+기존:
+
+```python
+class MujocoRosBridge(Node):
+
+    def __init__(self):
+        self.renderer = mujoco.Renderer(...)
+```
+
+실행 흐름:
+
+```text
+ROS2 Node 생성
+        ↓
+Renderer 생성
+        ↓
+OpenGL Context 없음
+        ↓
+Renderer 초기화 실패
+```
+
+## 이유
+
+MuJoCo Renderer는 OpenGL Context가 필요하다.
+
+> OpenGL Context: GPU가 그래픽 작업을 수행하기 위한 실행 환경.
+> Renderer = 그림을 그리는 사람, OpenGL Context = 그림을 그릴 작업 공간.
+
+> Renderer: 센서 이미지 또는 화면을 생성하는 모듈.
+> Camera Sensor → MuJoCo Renderer → Image Message → ROS2 Topic /camera/image_raw.
+
+하지만 OpenGL Context는 Viewer 실행 과정에서 생성된다.
+
+즉:
+
+```text
+Renderer 생성
+
+필요:
+OpenGL Context
+
+현재 상태:
+없음
+
+결과:
+실패
+```
+
+---
+
+## 해결
+
+### 변경 전
+
+```python
+class MujocoRosBridge(Node):
+
+    def __init__(self):
+        self.renderer = mujoco.Renderer(
+            self.model,
+            480,
+            640
+        )
+```
+
+### 변경 후
+
+ROS2 Node 생성 시 Renderer 생성하지 않음.
+
+```python
+class MujocoRosBridge(Node):
+
+    def __init__(self):
+        self.renderer = None
+```
+
+Viewer 실행 이후 Renderer 생성:
+
+```python
+with mujoco.viewer.launch_passive(model, data) as viewer:
+
+    node = MujocoRosBridge(model, data)
+
+    node.renderer = mujoco.Renderer(
+        model,
+        480,
+        640
+    )
+```
+
+---
+
+# 9. Docker GLFW 초기화 실패
+
+## 파일
+
+`docker-compose.yml`
+
+## 에러 코드
+
+```text
+ERROR: could not initialize GLFW
+```
+
+> GLFW: OpenGL 기반 프로그램에서 Window 생성, Keyboard 및 Mouse 입력 처리, OpenGL Context 생성을 담당하는 라이브러리.
+> MuJoCo Viewer가 사용한다.
+
+## 원인
+
+Docker Container는 기본적으로 Host PC의 GUI 환경에 접근할 수 없다.
+
+구조:
+
+```text
+Host PC
+ └─ Display Server
+        |
+       X11
+        |
+Container
+ └─ MuJoCo Viewer
+```
+
+Container에서 Host Display 접근 설정 필요.
+
+> X11: Linux 계열 운영체제에서 화면 출력과 GUI 입력을 관리하는 시스템. Docker GUI 프로그램 실행 시 Host와 Container 사이 연결이 필요하다.
+
+## 해결
+
+기존:
+
+```yaml
+DISPLAY=${DISPLAY:-:0}
+```
+
+변경:
+
+```yaml
+DISPLAY=host.docker.internal:0.0
+QT_X11_NO_MITSHM=1
+MUJOCO_GL=glfw
+```
+
+제거:
+
+```yaml
+/tmp/.X11-unix:/tmp/.X11-unix:rw
+```
+
+---
+
+# 10. Docker `/dev/dri` GPU Device 오류
+
+## 파일
+
+`docker-compose.yml`
+
+## 에러 코드
+
+```text
+error gathering device information while adding custom device "/dev/dri":
+not a device node
+```
+
+> Device Node: Linux에서 하드웨어 장치를 파일처럼 접근하기 위한 인터페이스
+
+## 원인
+
+기존 설정:
+
+```yaml
+devices:
+  - /dev/dri:/dev/dri
+```
+
+은 Linux 환경에서 GPU 장치를 Container에 전달하기 위한 설정이다.
+
+하지만 현재 환경:
+
+```text
+Windows + Docker Desktop
+```
+
+에서는 Linux GPU Device Node인:
+
+```text
+/dev/dri
+```
+
+가 존재하지 않는다.
+
+따라서 Docker가 해당 장치를 찾지 못하고 오류 발생.
+
+## 해결
+
+삭제:
+
+```yaml
+devices:
+  - /dev/dri:/dev/dri
+```
+
+---
+
+# 11. OpenGL Software Rendering 문제
+
+## 파일
+
+`docker-compose.yml`
+
+## 에러 코드
+
+```text
+OpenGL renderer string: softpipe
+
+OpenGL version string: 1.4
+```
+
+## 문제
+
+MuJoCo 실행 시 GPU 가속이 아닌 CPU 기반 Software Rendering 사용.
+
+## 원인
+
+Docker Container가 Host GPU/OpenGL 환경을 제대로 전달받지 못함.
+
+결과:
+
+```text
+Host GPU
+   ↓
+Container 접근 실패
+   ↓
+Mesa Software Renderer 사용
+```
+
+
+> Mesa: Linux에서 OpenGL 기능을 제공하는 오픈소스 그래픽 라이브러리.
+> GPU 연결이 실패하면 Software Renderer로 동작한다.
+
+> OpenGL Rendering: 3D 그래픽을 계산하여 화면을 생성하는 과정  
+> Hardware Rendering - GPU 사용 [빠름]  
+> Software Rendering - CPU 사용 [느림]
+
+## 해결
+
+```yaml
+DISPLAY=${DISPLAY:-:0}
+        ↓
+DISPLAY=host.docker.internal:0.0
+```
+
+---
+
+# 12. Docker Compose Network 설정 충돌
+
+## 파일
+
+`docker-compose.yml`
+
+## 에러 코드
+
+```text
+service robot_sim declares mutually exclusive
+network_mode and networks
+```
+
+## 원인
+
+Docker Compose에서는:
+
+```yaml
+network_mode:
+```
+
+와
+
+```yaml
+networks:
+```
+
+를 동시에 사용할 수 없다.
+
+> network_mode: Container가 네트워크를 사용하는 방식을 지정  
+> networks: Docker 내부 가상 네트워크를 생성하고 Container끼리 연결
+
+## 해결
+
+`network_mode` 제거.
+
+---
+
+# 13. MuJoCo Viewer Segmentation Fault
+
+## 파일
+
+`scripts/mujoco_ros2_bridge.py`
+
+## 에러 코드
+
+```text
+Segmentation fault
+
+X_GLXMakeCurrent
+
+BadAccess
+```
+
+> Segmentation Fault: 프로그램이 접근하면 안 되는 메모리에 접근했을 때 발생하는 오류
+
+> GLX: Linux 환경에서 OpenGL과 X Window System을 연결하는 인터페이스.
+> X_GLXMakeCurrent: OpenGL Context 연결 실패.
+
+## 문제
+
+MuJoCo Viewer 실행 중 비정상 종료 발생.
+
+## 원인
+
+OpenGL Context를 서로 다른 Thread에서 접근함.
+
+기존 구조:
+
+```text
+Main Thread
+ └─ MuJoCo Viewer
+       |
+       |
+       OpenGL Context 생성
+
+ROS Thread
+ └─ Renderer 생성
+       |
+       |
+       OpenGL Context 접근
+```
+
+OpenGL Context는 기본적으로 생성된 Thread에서만 안전하게 사용 가능하다.
+
+## 해결
+
+Thread 구조 변경.
+
+수정 후:
+
+```text
+Main Thread
+ ├─ MuJoCo Viewer 실행
+ ├─ OpenGL Context 생성
+ └─ Renderer 생성
+
+ROS Thread
+ └─ ROS2 spin()
+```
+
+즉:
+
+```text
+Viewer
+  +
+Renderer
+  ↓
+같은 Thread에서 실행
+
+ROS 통신
+   ↓
+별도 Thread 처리
+```
+
+---
