@@ -1,94 +1,173 @@
 version: "3.8"
 
-# ================================================================
+# =============================================================================
 # AI Safety Patrol Robot
-# MuJoCo 3.6.0 + ROS2 Humble Simulation Environment
+# MuJoCo + ROS2 Humble Simulation Environment
 #
-# Current phase (Level 2): MuJoCo ↔ ROS2 Bridge
+# 역할
+#   - robot_sim : MuJoCo 시뮬레이션 + ROS2 Bridge
+#   - teleop    : 키보드 입력으로 /cmd_vel 발행
+#   - db        : 위험 이벤트 및 센서 로그 저장 (Level 6)
+#   - dashboard : Grafana 시각화 (Level 6)
 #
-# Services:
-#   1. robot_sim  : MuJoCo viewer + ROS2 bridge (patrol_factory.xml)
-#   2. teleop     : Keyboard teleoperation → /cmd_vel  [optional profile]
-#   3. database   : TimescaleDB (event logging, Level 6)
-#   4. dashboard  : Grafana monitoring (Level 6)
+# ROS2 Topic
+#   Subscribe
+#       /cmd_vel
 #
-# ROS2 Topics (robot_sim):
-#   Subscribe : /cmd_vel
-#   Publish   : /odom, /scan, /camera/image_raw
+#   Publish
+#       /odom
+#       /scan
+#       /camera/image_raw
 #
-# Usage:
-#   docker compose up robot_sim
-#   docker compose run --rm teleop          # keyboard control
-#   docker compose --profile teleop up      # sim + teleop together
-# ================================================================
+# 실행 예시
+#
+#   [1] MuJoCo 시뮬레이터 실행
+#       docker compose up robot_sim
+#
+#   [2] 키보드 제어 (별도 터미널)
+#       docker compose run --rm teleop
+#
+#   [3] 시뮬레이터 + Teleop 실행
+#       docker compose --profile teleop up
+# =============================================================================
 
 services:
-  # ==============================================================
-  # A. Robot Simulation — MuJoCo ↔ ROS2 Bridge
-  # ==============================================================
+
+  # ===========================================================================
+  # Robot Simulation
+  #
+  # MuJoCo Physics Engine
+  # + ROS2 Bridge(Node)
+  #
+  # 기능
+  #   - patrol_factory.xml 로드
+  #   - 물리 시뮬레이션
+  #   - /cmd_vel 구독
+  #   - /odom Publish
+  #   - /scan Publish
+  #   - /camera/image_raw Publish
+  # ===========================================================================
 
   robot_sim:
+
+    # Dockerfile을 이용하여 이미지 생성
     build: .
+
+    # 컨테이너 이름
     container_name: safety_patrol_robot
 
+    # 터미널 입력 허용
     stdin_open: true
+
+    # TTY 활성화
     tty: true
 
+    # OpenGL / MuJoCo 공유 메모리
     ipc: host
-  
+
+    # 프로젝트 폴더 공유
     volumes:
+
+      # 원본 데이터
       - ./data:/workspace/data
+
+      # 로봇 모델
       - ./models:/workspace/models
+
+      # 결과 저장
       - ./results:/workspace/results
+
+      # MuJoCo Scene(XML)
       - ./scenes:/workspace/scenes
+
+      # Python Script
       - ./scripts:/workspace/scripts
+
+      # World 파일
       - ./worlds:/workspace/worlds
 
     environment:
-      # MuJoCo rendering
-      # Linux : export DISPLAY=:0
-      # Windows (VcXsrv) : set DISPLAY=host.docker.internal:0.0
-      # glfw   → viewer (needs DISPLAY)
-      # osmesa → headless camera only (viewer disabled)
+
+      # =======================================================
+      # MuJoCo Rendering
+      # =======================================================
+
+      # Windows(VcXsrv) - host.docker.internal:0.0
+      # Linux - export DISPLAY=:0
       - DISPLAY=host.docker.internal:0.0
-      - LIBGL_ALWAYS_INDIRECT=1
+
+      # GPU가 없으면 0 유지
+      - LIBGL_ALWAYS_SOFTWARE=0
+
+      # Qt 공유 메모리 문제 방지
       - QT_X11_NO_MITSHM=1
+
+      # OpenGL Backend - glfw / egl / osmesa
       - MUJOCO_GL=${MUJOCO_GL:-glfw}
 
-      # ROS2 DDS discovery
+      # OpenGL Version
+      - MESA_GL_VERSION_OVERRIDE=4.6
+
+      # =======================================================
+      # ROS2 DDS
+      # =======================================================
+
+      # 같은 Domain ID끼리만 통신
       - ROS_DOMAIN_ID=50
+
+      # DDS Middleware
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
-      # Database (Level 6: Event Logger)
+      # =======================================================
+      # Database (Level 6)
+      # =======================================================
+
       - DB_HOST=db
       - DB_PORT=5432
       - DB_NAME=patrol_db
       - DB_USER=admin
       - DB_PASS=password123
 
+    # Database 먼저 실행
     depends_on:
       - db
 
+    # Docker Network
     networks:
       - patrol_network
 
-
-  # ==============================================================
-  # A-2. Teleoperation (Level 2)
-  # Keyboard → /cmd_vel → robot_sim
-  # ==============================================================
+  # ===========================================================================
+  # Teleoperation
+  #
+  # Keyboard
+  #     ↓
+  # teleop_twist_keyboard
+  #     ↓
+  # /cmd_vel
+  #     ↓
+  # robot_sim
+  # ===========================================================================
 
   teleop:
+
     build: .
+
     container_name: safety_patrol_teleop
-    profiles: ["teleop"]
+
+    # 필요할 때만 실행 (--profile 필요)
+    profiles:
+      - teleop
 
     stdin_open: true
     tty: true
 
+    privileged: true
+
+    # Keyboard Teleoperation
     command: >
-      bash -c "source /opt/ros/humble/setup.bash &&
-      ros2 run teleop_twist_keyboard teleop_twist_keyboard"
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args"
 
     environment:
       - ROS_DOMAIN_ID=50
@@ -100,68 +179,123 @@ services:
     networks:
       - patrol_network
 
-
-  # ==============================================================
-  # B. Database — Sensor / Risk Log Storage (Level 6)
-  # ==============================================================
+  # ===========================================================================
+  # Database
+  #
+  # TimescaleDB
+  #
+  # 저장 예정
+  #
+  #   - 위험 이벤트
+  #   - 순찰 로그
+  #   - AI 추론 결과
+  #   - 센서 데이터
+  #
+  # 구현 단계
+  #
+  #   Level 6
+  # ===========================================================================
 
   db:
+
     image: timescale/timescaledb:latest-pg15
+
     container_name: patrol_database
 
     environment:
+
       POSTGRES_DB: patrol_db
+
       POSTGRES_USER: admin
+
       POSTGRES_PASSWORD: password123
 
     ports:
+
       - "5432:5432"
 
     volumes:
+
       - postgres_data:/var/lib/postgresql/data
 
     networks:
+
       - patrol_network
 
-
-  # ==============================================================
-  # C. Safety Dashboard — Grafana (Level 6)
-  # ==============================================================
+  # ===========================================================================
+  # Grafana Dashboard
+  #
+  # 역할
+  #
+  #   - 위험 이벤트 시각화
+  #   - 센서 데이터 모니터링
+  #   - AI 통계
+  #   - 순찰 이력
+  #
+  # 접속
+  #
+  #   http://localhost:3000
+  #
+  # 구현 단계
+  #
+  #   Level 6
+  # ===========================================================================
 
   dashboard:
+
     image: grafana/grafana:latest
+
     container_name: safety_dashboard
 
     ports:
+
       - "3000:3000"
 
     environment:
+
       GF_SECURITY_ADMIN_USER: admin
+
       GF_SECURITY_ADMIN_PASSWORD: admin
 
     depends_on:
+
       - db
 
     volumes:
+
       - grafana_data:/var/lib/grafana
 
     networks:
+
       - patrol_network
 
-
-# ================================================================
-# Network
-# ================================================================
+# =============================================================================
+# Docker Network
+#
+# 모든 컨테이너가 같은 가상 네트워크에서 통신
+#
+# robot_sim
+# teleop
+# db
+# dashboard
+# =============================================================================
 
 networks:
+
   patrol_network:
+
     driver: bridge
 
-
-# ================================================================
-# Persistent Volumes
-# ================================================================
+# =============================================================================
+# Docker Persistent Volume
+#
+# 컨테이너를 삭제해도 데이터 유지
+# =============================================================================
 
 volumes:
+
+  # PostgreSQL 데이터
   postgres_data:
+
+  # Grafana 설정 및 Dashboard
   grafana_data:
