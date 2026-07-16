@@ -85,14 +85,16 @@
                       size="0.01 0.0535" pos="0 0 0.0535"
                       rgba="0.3 0.3 0.3 1" contype="0" conaffinity="0" mass="0.05"/>
 
-                <!-- LDS-01 LiDAR 센서 -->
+                <!-- LDS-01 LiDAR 센서 (36빔, 10° 간격 → 360°) -->
                 <body name="lidar_body" pos="0 0 0.107">
                     <inertial pos="0 0 0" mass="0.1"
                               diaginertia="0.00005 0.00005 0.00003"/>
                     <geom name="lidar_geom" type="cylinder"
                           size="0.035 0.018" rgba="0.1 0.1 0.1 1"
                           contype="0" conaffinity="0"/>
-                    <site name="lidar_site" pos="0.07 0 0" quat="0.707 0 0.707 0" size="0.005"/>
+                    <replicate count="36" sep="-" offset="0 0 0" euler="0 0 10">
+                        <site name="lidar_site" pos="0.07 0 0" euler="0 90 180" size="0.005"/>
+                    </replicate>
                 </body>
 
                 <!-- RGB-D 카메라 (전방): PPE, 화재, 쓰러짐 탐지 -->
@@ -123,7 +125,11 @@
 
     <!-- ======== 센서 정의 ======== -->
     <sensor>
-        <!-- LDS-01 LiDAR (360도, 범위 0.12~3.5m): 벽, 장애물 인식 및 거리 측정 -->
+        <!-- ================================================================
+             <LDS-01 LiDAR 참고>
+             360° × 36빔 (10° 해상도), 5~10Hz
+             거리: 0.12~3.5m
+             ================================================================ -->
         <rangefinder name="lidar" site="lidar_site" cutoff="3.5"/>
         <!-- IMU: 3축 가속도계 + 3축 자이로스코프 -->
         <accelerometer name="imu_accel" site="imu_site"/>
