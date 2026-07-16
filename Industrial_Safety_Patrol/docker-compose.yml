@@ -393,6 +393,76 @@ services:
 
       - patrol_network
 
+  # ===========================================================================
+  # Nav2 Autonomous Navigation
+  # ===========================================================================
+
+  nav2:
+
+    build: .
+
+    container_name: safety_patrol_nav2
+
+    profiles:
+      - nav2
+
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      ros2 launch nav2_bringup bringup_launch.py \
+      use_sim_time:=false \
+      autostart:=true \
+      map:=/workspace/maps/factory_map.yaml \
+      params_file:=/workspace/config/nav2_params.yaml"
+
+    volumes:
+      - ./config:/workspace/config
+      - ./maps:/workspace/maps
+
+    environment:
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+    depends_on:
+      - robot_sim
+
+    networks:
+      - patrol_network
+
+  # ===========================================================================
+  # RViz2 Visualization
+  # ===========================================================================
+
+  rviz:
+
+    build: .
+
+    container_name: safety_patrol_rviz
+
+    profiles:
+      - nav2
+
+    stdin_open: true
+    tty: true
+
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      ros2 run rviz2 rviz2 -d /workspace/config/nav2_default_view.rviz"
+
+    volumes:
+      - ./config:/workspace/config
+
+    environment:
+      - DISPLAY=host.docker.internal:0.0
+      - LIBGL_ALWAYS_SOFTWARE=0
+      - QT_X11_NO_MITSHM=1
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+    networks:
+      - patrol_network
+
 # =============================================================================
 # Docker Network
 #
