@@ -11,12 +11,23 @@ xml_path = BASE_DIR.parent / "scenes" / "patrol_factory.xml"
 model = mujoco.MjModel.from_xml_path(str(xml_path))
 data = mujoco.MjData(model)
 
-# 2. 순찰 중 장애물 감지 로직 [3, 4]
-def check_for_obstacles(data):
-    lidar_dist = data.sensor('lidar').data[0]
-    if lidar_dist >= 0 and lidar_dist < 1.0: # 1미터 이내 장애물 감지 시
-        return True, lidar_dist
-    return False, lidar_dist
+# 2. 순찰 중 장애물 감지 로직 [3, 4] — 36빔 LiDAR 360° 스캔
+def check_for_obstacles(model, data, threshold=1.0):
+    min_dist = float('inf')
+    for sensor_id in range(model.nsensor):
+        if model.sensor_type[sensor_id] != mujoco.mjtSensor.mjSENS_RANGEFINDER:
+            continue
+        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_SENSOR, sensor_id)
+        if not name or not (name == "lidar" or name.startswith("lidar-")):
+            continue
+        adr = model.sensor_adr[sensor_id]
+        dist = float(data.sensordata[adr])
+        if dist >= 0:
+            min_dist = min(min_dist, dist)
+
+    if min_dist < threshold:
+        return True, min_dist
+    return False, min_dist if min_dist != float('inf') else -1.0
 
 # 3. 시뮬레이션 실행 (100Hz 루프) [5]
 with mujoco.viewer.launch_passive(model, data) as viewer:
@@ -37,7 +48,7 @@ with mujoco.viewer.launch_passive(model, data) as viewer:
         data.ctrl[1] = -2.0
 
         # 장애물 감지 시 우회 또는 정지 로직 (Scenario 1) [4]
-        is_hazard, dist = check_for_obstacles(data)
+        is_hazard, dist = check_for_obstacles(model, data)
         if is_hazard:
             # 장애물 발견 시 왼쪽으로 회전하여 회피 시도
             state = "detected"

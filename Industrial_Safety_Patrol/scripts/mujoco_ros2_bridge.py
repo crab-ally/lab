@@ -51,12 +51,58 @@ class MujocoRosBridge(Node):
         self.lidar_offset = (0.07, 0.0, 0.162)
         self.lidar_quat = (0.707, 0.0, 0.707, 0.0)
 
+        self.lidar_beam_count = 36
+        self._init_lidar_sensors()
+
         # Timers (Publishing Loop)
         self.odom_timer = self.create_timer(0.05, self.publish_odom)  # 20Hz
         self.scan_timer = self.create_timer(0.1, self.publish_scan)   # 10Hz
         self.camera_timer = self.create_timer(0.1, self.publish_camera) # 10Hz
 
-        self.get_logger().info("MuJoCo-ROS2 Bridge Node initialized")
+        self.get_logger().info(
+            f"MuJoCo-ROS2 Bridge Node initialized "
+            f"(LiDAR beams: {self.lidar_beam_count}, mode: {self.lidar_mode})"
+        )
+
+    def _init_lidar_sensors(self):
+        combined_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_SENSOR, "lidar"
+        )
+        if combined_id != -1 and self.model.sensor_dim[combined_id] >= self.lidar_beam_count:
+            self.lidar_mode = "combined"
+            self.lidar_sensor_id = combined_id
+            return
+
+        replicated = []
+        for sensor_id in range(self.model.nsensor):
+            if self.model.sensor_type[sensor_id] != mujoco.mjtSensor.mjSENS_RANGEFINDER:
+                continue
+            name = mujoco.mj_id2name(
+                self.model, mujoco.mjtObj.mjOBJ_SENSOR, sensor_id
+            )
+            if name and (name == "lidar" or name.startswith("lidar-")):
+                replicated.append((name, sensor_id))
+
+        replicated.sort(key=lambda item: item[0])
+        if len(replicated) < self.lidar_beam_count:
+            self.get_logger().warn(
+                f"Expected {self.lidar_beam_count} LiDAR beams, found {len(replicated)}"
+            )
+        self.lidar_mode = "replicated"
+        self.lidar_sensor_ids = replicated[: self.lidar_beam_count]
+
+    def _read_lidar_ranges(self):
+        if self.lidar_mode == "combined":
+            sensor_id = self.lidar_sensor_id
+            adr = self.model.sensor_adr[sensor_id]
+            dim = self.model.sensor_dim[sensor_id]
+            return list(self.data.sensordata[adr : adr + dim])
+
+        ranges = []
+        for _, sensor_id in self.lidar_sensor_ids:
+            adr = self.model.sensor_adr[sensor_id]
+            ranges.append(float(self.data.sensordata[adr]))
+        return ranges
 
     # ROS2 /cmd_vel → MuJoCo 좌/우 바퀴 회전 속도
     def cmd_vel_callback(self, msg: Twist):
@@ -142,23 +188,20 @@ class MujocoRosBridge(Node):
 
         self.tf_broadcaster.sendTransform([odom_to_base, base_to_lidar])
 
-    # MuJoCo LiDAR → ROS2 LaserScan
+    # MuJoCo LiDAR (36빔) → ROS2 LaserScan
     def publish_scan(self):
         try:
-            sensor_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SENSOR, "lidar")
-            if sensor_id == -1:
+            sensor_data = self._read_lidar_ranges()
+            if not sensor_data:
                 return
 
-            adr = self.model.sensor_adr[sensor_id]
-            dim = self.model.sensor_dim[sensor_id]
-            sensor_data = self.data.sensordata[adr:adr+dim]
-
+            beam_count = len(sensor_data)
             msg = LaserScan()
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = "lidar_link"
             msg.angle_min = -math.pi
             msg.angle_max = math.pi
-            msg.angle_increment = (2.0 * math.pi) / dim
+            msg.angle_increment = (2.0 * math.pi) / beam_count
             msg.range_min = 0.12
             msg.range_max = 3.5
 
