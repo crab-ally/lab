@@ -645,3 +645,110 @@ ROS 통신
 ```
 
 ---
+
+# 14. MuJoCo 로봇 이동 방향 반대 문제
+
+파일: `models/turtlebot_patrol.xml`
+
+문제: 로봇에게 전진 명령을 줬는데 실제 시뮬레이션에서는 후진함
+
+원인: MJCF에서 바퀴 회전축 방향(axis)이 실제 이동 방향과 반대로 설정됨
+
+해결
+```xml
+<!-- 왼쪽 바퀴도 동일하게 변경 -->
+<joint name="drive_right" axis="0 0 1"/>
+                ↓
+<joint name="drive_right" axis="0 0 -1">
+```
+
+---
+
+# 15. Auto Explore 종료 후 로봇 자동 재시작 문제
+
+파일: `scripts/auto_explore_for_mapping.py`
+
+문제: 자동 탐색 중 종료했는데 MuJoCo Viewer만 다시 실행해도 로봇이 이전 경로로 자동 이동. 심지어 중단했던 위치로 이동 시도.
+
+원인: Python ROS2 노드 프로세스가 백그라운드에 남아있음.
+
+즉,
+
+```
+MuJoCo 실행
+      ↑
+      |
+남아있는 auto_explore process
+      |
+      ↓
+/cmd_vel 재발행
+```
+
+해결
+
+1. 정상 종료 시 속도 명령 초기화
+
+```py
+try:
+    rclpy.spin(node)
+except KeyboardInterrupt:
+    pass
+        ↓
+try:
+    rclpy.spin(node)
+except KeyboardInterrupt:
+    node.get_logger().info(
+        "Keyboard interrupt received. Stopping robot."
+    )
+finally:
+    node.publish_cmd(0.0, 0.0)
+    node.destroy_node()
+    rclpy.shutdown()
+```
+
+2. 종료 전에 Timer 제거
+
+```py
+if self.timer:
+    self.timer.cancel()
+```
+
+3. 종료 시 Twist 0 여러 번 Publish
+
+```py
+finally:
+
+    for _ in range(5):
+        node.publish_cmd(0.0,0.0)
+        time.sleep(0.1)
+
+    node.destroy_node()
+    rclpy.shutdown()
+```
+
+---
+
+# 16. SLAM Toolbox 지도 저장 실패
+
+파일: `scripts/save_factory_map.py`
+
+에러 코드:
+```text
+[map_saver]: Failed to spin map subscription
+
+Map save failed.
+Check that /map is being published.
+```
+
+원인: SLAM Toolbox가 실행되지 않은 상태에서 map 저장 실행. 즉, /map 토픽이 발행되지 않음.
+
+해결
+```
+robot_sim 실행
+        ↓
+slam_toolbox 실행
+        ↓
+auto_explore 실행
+        ↓
+map_saver 실행
+```
