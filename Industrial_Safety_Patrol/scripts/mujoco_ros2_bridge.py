@@ -202,6 +202,8 @@ class MujocoRosBridge(Node):
             msg.angle_min = -math.pi
             msg.angle_max = math.pi
             msg.angle_increment = (2.0 * math.pi) / beam_count
+            msg.scan_time = 0.1
+            msg.time_increment = 0.1 / beam_count
             msg.range_min = 0.12
             msg.range_max = 3.5
 
