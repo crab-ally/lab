@@ -195,30 +195,27 @@ class MujocoRosBridge(Node):
             if not sensor_data:
                 return
 
+            # MuJoCo sensor order correction
+            sensor_data = sensor_data[::-1]
+
             beam_count = len(sensor_data)
+
             msg = LaserScan()
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = "lidar_link"
             msg.angle_min = -math.pi
-            msg.angle_max = math.pi
-            msg.angle_increment = (2.0 * math.pi) / beam_count
+            msg.angle_increment = math.radians(360.0 / beam_count)
+            msg.angle_max = msg.angle_min + msg.angle_increment * (beam_count-1)
             msg.scan_time = 0.1
-            msg.time_increment = 0.1 / beam_count
+            msg.time_increment = msg.scan_time / beam_count
             msg.range_min = 0.12
             msg.range_max = 3.5
+            msg.ranges = [float(r) if r > 0 else float('inf') for r in sensor_data]
 
-            # MuJoCo rangefinder가 허용 범위를 벗어나면 -1 리턴하므로 inf로 변환
-            ranges = []
-            for val in sensor_data:
-                if val < 0:
-                    ranges.append(float('inf'))
-                else:
-                    ranges.append(float(val))
-
-            msg.ranges = ranges
             self.scan_pub.publish(msg)
+
         except Exception as e:
-            self.get_logger().error(f"Scan publish error: {e}", once=True)
+            self.get_logger().error(f"Scan publish error: {e}",once=True)
 
     def publish_camera(self):
 
