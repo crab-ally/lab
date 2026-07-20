@@ -3,13 +3,13 @@
 # ROS2 Humble + MuJoCo 3.6.0 + AI Vision Environment
 # ================================================================
 
-FROM osrf/ros:humble-desktop-full
+FROM osrf/ros:humble-desktop-full AS robot
 
 # ================================================================
 # 1. System Package Installation
 # ================================================================
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     python3-pip \
     python3-venv \
     python3-colcon-common-extensions \
@@ -45,8 +45,14 @@ RUN apt-get update && apt-get install -y \
     # Navigation
     ros-humble-navigation2 \
     ros-humble-nav2-bringup \
+    ros-humble-diagnostic-updater \
+    ros-humble-nav2-msgs \
+    ros-humble-nav2-common \
     ros-humble-slam-toolbox \
-    \
+    && apt-get install --only-upgrade -y \
+      ros-humble-navigation2 \
+      ros-humble-nav2-bringup \
+      ros-humble-diagnostic-updater \
     && rm -rf /var/lib/apt/lists/*
 
 # ================================================================
@@ -105,3 +111,13 @@ COPY . /workspace
 # ================================================================
 
 CMD ["bash"]
+
+# ================================================================
+# 9. Database Service
+# ================================================================
+FROM timescale/timescaledb:latest-pg15 AS db
+
+# ================================================================
+# 10. Dashboard Service
+# ================================================================
+FROM grafana/grafana:latest AS dashboard

@@ -62,7 +62,9 @@ services:
   robot_sim:
 
     # Dockerfile을 이용하여 이미지 생성
-    build: .
+    build:
+      context: .
+      target: robot
 
     # 컨테이너 이름
     container_name: safety_patrol_robot
@@ -167,7 +169,9 @@ services:
 
   teleop:
 
-    build: .
+    build:
+      context: .
+      target: robot
 
     container_name: safety_patrol_teleop
 
@@ -208,7 +212,9 @@ services:
 
   slam:
 
-    build: .
+    build:
+      context: .
+      target: robot
 
     container_name: safety_patrol_slam
 
@@ -242,7 +248,9 @@ services:
 
   auto_explore:
 
-    build: .
+    build:
+      context: .
+      target: robot
 
     container_name: safety_patrol_auto_explore
 
@@ -276,7 +284,9 @@ services:
 
   map_saver:
 
-    build: .
+    build:
+      context: .
+      target: robot
 
     container_name: safety_patrol_map_saver
 
@@ -322,7 +332,9 @@ services:
 
   db:
 
-    image: timescale/timescaledb:latest-pg15
+    build:
+      context: .
+      target: db
 
     container_name: patrol_database
 
@@ -367,7 +379,9 @@ services:
 
   dashboard:
 
-    image: grafana/grafana:latest
+    build:
+      context: .
+      target: dashboard
 
     container_name: safety_dashboard
 
@@ -399,7 +413,9 @@ services:
 
   nav2:
 
-    build: .
+    build:
+      context: .
+      target: robot
 
     container_name: safety_patrol_nav2
 
@@ -435,7 +451,9 @@ services:
 
   rviz:
 
-    build: .
+    build:
+      context: .
+      target: robot
 
     container_name: safety_patrol_rviz
 
