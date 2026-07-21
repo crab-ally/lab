@@ -137,7 +137,7 @@ class MujocoRosBridge(Node):
             msg = Odometry()
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = 'odom'
-            msg.child_frame_id = 'base_link'
+            msg.child_frame_id = 'base_footprint'
 
             msg.pose.pose.position.x = float(pos[0])
             msg.pose.pose.position.y = float(pos[1])
@@ -165,7 +165,7 @@ class MujocoRosBridge(Node):
         odom_to_base = TransformStamped()
         odom_to_base.header.stamp = stamp
         odom_to_base.header.frame_id = 'odom'
-        odom_to_base.child_frame_id = 'base_link'
+        odom_to_base.child_frame_id = 'base_footprint'
         odom_to_base.transform.translation.x = float(pos[0])
         odom_to_base.transform.translation.y = float(pos[1])
         odom_to_base.transform.translation.z = float(pos[2])
