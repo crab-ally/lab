@@ -137,6 +137,8 @@ services:
       # DDS Middleware
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
+      - USE_SIM_TIME=true
+
       # =======================================================
       # Database (Level 6)
       # =======================================================
@@ -146,10 +148,6 @@ services:
       - DB_NAME=patrol_db
       - DB_USER=admin
       - DB_PASS=password123
-
-    # Database 먼저 실행
-    depends_on:
-      - db
 
     # Docker Network
     networks:
@@ -173,17 +171,15 @@ services:
     command: >
       bash -c "
       source /opt/ros/humble/setup.bash &&
-      ros2 run robot_state_publisher robot_state_publisher /workspace/urdf/turtlebot_patrol.urdf"
+      ros2 launch /workspace/launch/robot_state_publisher.launch.py"
 
     volumes:
       - ./urdf:/workspace/urdf
+      - ./launch:/workspace/launch
 
     environment:
       - ROS_DOMAIN_ID=50
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-
-    depends_on:
-      - robot_sim
 
     networks:
       - patrol_network
@@ -473,7 +469,7 @@ services:
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
     depends_on:
-      - robot_sim
+      - robot_state_publisher
 
     networks:
       - patrol_network
@@ -503,13 +499,18 @@ services:
 
     volumes:
       - ./config:/workspace/config
+      - /tmp/.X11-unix:/tmp/.X11-unix
 
     environment:
       - DISPLAY=host.docker.internal:0.0
-      - LIBGL_ALWAYS_SOFTWARE=0
+      - LIBGL_ALWAYS_SOFTWARE=1
       - QT_X11_NO_MITSHM=1
       - ROS_DOMAIN_ID=50
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - MESA_GL_VERSION_OVERRIDE=3.3
+
+    depends_on:
+      - nav2
 
     networks:
       - patrol_network
