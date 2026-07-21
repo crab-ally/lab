@@ -9,7 +9,7 @@ FROM osrf/ros:humble-desktop-full AS robot
 # 1. System Package Installation
 # ================================================================
 
-RUN apt-get update && apt-get upgrade -y && apt-get install -y \
+RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-venv \
     python3-colcon-common-extensions \
@@ -49,6 +49,9 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     ros-humble-nav2-msgs \
     ros-humble-nav2-common \
     ros-humble-slam-toolbox \
+    ros-humble-robot-state-publisher \
+    ros-humble-joint-state-publisher \
+    ros-humble-joint-state-publisher-gui \
     && apt-get install --only-upgrade -y \
       ros-humble-navigation2 \
       ros-humble-nav2-bringup \
