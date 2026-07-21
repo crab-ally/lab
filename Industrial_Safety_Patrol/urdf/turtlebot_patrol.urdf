@@ -1,0 +1,269 @@
+<?xml version="1.0" ?>
+<robot name="turtlebot_patrol">
+
+  <!-- ================================================================
+       TurtleBot3 Burger 기반 순찰 로봇 (URDF 변환본)
+       ================================================================ -->
+
+  <!-- Base footprint (ROS 표준에 맞게 바닥 기준점 추가) -->
+  <link name="base_footprint"/>
+  
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <!-- MuJoCo 기준 base_link의 z축 오프셋 적용 -->
+    <origin xyz="0 0 0.043" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ================================================================
+       본체 (Base Link)
+       ================================================================ -->
+  <link name="base_link">
+    <inertial>
+      <origin xyz="-0.02 0 0.005" rpy="0 0 0"/>
+      <mass value="0.7"/>
+      <inertia ixx="0.0012" ixy="0" ixz="0" iyy="0.0012" iyz="0" izz="0.0018"/>
+    </inertial>
+
+    <!-- 하단 플레이트 (1층: 모터+배터리) -->
+    <visual name="base_plate_lower">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <!-- MuJoCo size (half-extents) -> URDF size (full-extents) -->
+        <box size="0.138 0.178 0.005"/>
+      </geometry>
+      <material name="dark_grey">
+        <color rgba="0.15 0.15 0.15 1"/>
+      </material>
+    </visual>
+    <collision name="base_plate_lower_col">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.138 0.178 0.005"/>
+      </geometry>
+    </collision>
+
+    <!-- 상단 플레이트 (2층: SBC) -->
+    <visual name="base_plate_upper">
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.138 0.178 0.005"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision name="base_plate_upper_col">
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.138 0.178 0.005"/>
+      </geometry>
+    </collision>
+
+    <!-- 4개 지지 기둥 -->
+    <!-- Front Left -->
+    <visual name="pillar_fl">
+      <origin xyz="0.05 0.065 0.025" rpy="0 0 0"/>
+      <geometry>
+        <!-- MuJoCo size="0.006 0.025" (radius, half-length) -> URDF (radius, length) -->
+        <cylinder radius="0.006" length="0.05"/>
+      </geometry>
+      <material name="light_grey">
+        <color rgba="0.7 0.7 0.7 1"/>
+      </material>
+    </visual>
+    <!-- Front Right -->
+    <visual name="pillar_fr">
+      <origin xyz="0.05 -0.065 0.025" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.006" length="0.05"/>
+      </geometry>
+      <material name="light_grey"/>
+    </visual>
+    <!-- Rear Left -->
+    <visual name="pillar_rl">
+      <origin xyz="-0.05 0.065 0.025" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.006" length="0.05"/>
+      </geometry>
+      <material name="light_grey"/>
+    </visual>
+    <!-- Rear Right -->
+    <visual name="pillar_rr">
+      <origin xyz="-0.05 -0.065 0.025" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.006" length="0.05"/>
+      </geometry>
+      <material name="light_grey"/>
+    </visual>
+  </link>
+
+  <!-- ================================================================
+       바퀴 및 구동부
+       ================================================================ -->
+  <!-- 왼쪽 구동 바퀴 -->
+  <link name="wheel_left_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="0.00003" ixy="0" ixz="0" iyy="0.00003" iyz="0" izz="0.00005"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.033" length="0.025"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.05 0.05 0.05 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.033" length="0.025"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="drive_left" type="fixed">
+    <parent link="base_link"/>
+    <child link="wheel_left_link"/>
+    <origin xyz="0 0.08 0" rpy="-1.570796 0 0"/> <!-- Roll 90deg -> 실린더의 z축이 바퀴 회전축(y축)이 되도록 정렬 -->
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <!-- 오른쪽 구동 바퀴 -->
+  <link name="wheel_right_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="0.00003" ixy="0" ixz="0" iyy="0.00003" iyz="0" izz="0.00005"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.033" length="0.025"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.033" length="0.025"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="drive_right" type="fixed">
+    <parent link="base_link"/>
+    <child link="wheel_right_link"/>
+    <origin xyz="0 -0.08 0" rpy="-1.570796 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <!-- 후방 볼 캐스터 (3점 지지) -->
+  <link name="caster_ball_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.02"/>
+      <inertia ixx="0.0000008" ixy="0" ixz="0" iyy="0.0000008" iyz="0" izz="0.0000008"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.01"/>
+      </geometry>
+      <material name="caster_grey">
+        <color rgba="0.6 0.6 0.6 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.01"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="caster_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="caster_ball_link"/>
+    <origin xyz="-0.06 0 -0.023" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ================================================================
+       센서 타워 및 센서 모듈
+       ================================================================ -->
+  <!-- 센서 타워 베이스 -->
+  <link name="sensor_tower_link">
+    <visual name="tower_post">
+      <origin xyz="0 0 0.0535" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.01" length="0.107"/>
+      </geometry>
+      <material name="tower_grey">
+        <color rgba="0.3 0.3 0.3 1"/>
+      </material>
+    </visual>
+    <inertial>
+      <origin xyz="0 0 0.0535" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="0.000048" ixy="0" ixz="0" iyy="0.000048" iyz="0" izz="0.0000025"/>
+    </inertial>
+  </link>
+  <joint name="sensor_tower_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="sensor_tower_link"/>
+    <origin xyz="0 0 0.055" rpy="0 0 0"/>
+  </joint>
+
+  <!-- LDS-01 LiDAR 센서 -->
+  <link name="lidar_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.1"/>
+      <inertia ixx="0.00005" ixy="0" ixz="0" iyy="0.00005" iyz="0" izz="0.00003"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.035" length="0.036"/>
+      </geometry>
+      <material name="very_dark_grey">
+        <color rgba="0.1 0.1 0.1 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="lidar_joint" type="fixed">
+    <parent link="sensor_tower_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="0 0 0.107" rpy="0 0 0"/>
+  </joint>
+
+  <!-- RGB-D 카메라 -->
+  <link name="camera_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.03"/>
+      <inertia ixx="0.000004" ixy="0" ixz="0" iyy="0.0000009" iyz="0" izz="0.000004"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.03 0.08 0.024"/>
+      </geometry>
+      <material name="camera_grey">
+        <color rgba="0.2 0.2 0.2 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="camera_joint" type="fixed">
+    <parent link="sensor_tower_link"/>
+    <child link="camera_link"/>
+    <origin xyz="0.069 0 0.06" rpy="0 0 0"/>
+  </joint>
+
+  <!-- IMU 센서 가상 링크 -->
+  <link name="imu_link"/>
+  <joint name="imu_joint" type="fixed">
+    <parent link="sensor_tower_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0.01" rpy="0 0 0"/>
+  </joint>
+
+</robot>
