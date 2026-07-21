@@ -41,7 +41,7 @@ class AutoExploreNode(Node):
             (4.0, 0.0, 2.0),
             (4.0, -2.5, 2.0),
             (1.5, -4.0, 2.0),
-            (-3.8, -3.8, 2.0)
+            (-4.0, -3.8, 2.0)
         ]
         self.waypoint_idx = 0
         self.arrival_threshold = 0.35
