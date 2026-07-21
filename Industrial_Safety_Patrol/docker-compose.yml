@@ -156,6 +156,39 @@ services:
       - patrol_network
 
   # ===========================================================================
+  # Robot State Publisher
+  #
+  # URDF를 읽어서 /robot_description 파라미터로 제공하고
+  # /tf_static (정적 변환)을 발행합니다.
+  # ===========================================================================
+
+  robot_state_publisher:
+
+    build:
+      context: .
+      target: robot
+
+    container_name: safety_patrol_state_publisher
+
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      ros2 run robot_state_publisher robot_state_publisher /workspace/urdf/turtlebot_patrol.urdf"
+
+    volumes:
+      - ./urdf:/workspace/urdf
+
+    environment:
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+    depends_on:
+      - robot_sim
+
+    networks:
+      - patrol_network
+
+  # ===========================================================================
   # Teleoperation
   #
   # Keyboard
