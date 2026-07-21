@@ -752,3 +752,124 @@ auto_explore 실행
         ↓
 map_saver 실행
 ```
+
+---
+
+# 17. ROS2 Diagnostic Updater 라이브러리 오류
+
+## 명령어
+
+`docker compose --profile nav2 up nav2 rviz`
+
+## 에러 코드
+
+```bash
+Failed to load library:
+libdiagnostic_updater.so:
+cannot open shared object file:
+No such file or directory
+```
+
+## 원인
+
+Nav2의 nav2_lifecycle_manager는 libdiagnostic_updater.so 라이브러리에 의존.
+
+그런데 현재 Docker 이미지에는 ros-humble-diagnostic-updater 패키지가 설치되어 있지 않음.
+
+## 해결
+
+`ros-humble-diagnostic-updater` 패키지 설치.
+
+---
+
+# 18. Nav2 Planner Plugin 이름 오류
+
+## 파일
+
+`config/nav2_params.yaml`
+
+## 에러코드
+
+```
+[FATAL] [planner_server]:
+Failed to create global planner.
+
+Exception:
+According to the loaded plugin descriptions the class
+nav2_navfn_planner::NavfnPlanner
+with base class type nav2_core::GlobalPlanner does not exist.
+
+Declared types are
+
+nav2_navfn_planner/NavfnPlanner
+nav2_smac_planner/SmacPlanner2D
+nav2_smac_planner/SmacPlannerHybrid
+nav2_smac_planner/SmacPlannerLattice
+nav2_theta_star_planner/ThetaStarPlanner
+```
+
+## 원인
+
+현재 Nav2 Humble에서는 plugin 이름이 변경되었습니다.
+
+
+## 해결
+
+```yaml
+plugin: "nav2_navfn_planner::NavfnPlanner"
+                 ↓
+plugin: "nav2_navfn_planner/NavfnPlanner"
+```
+
+---
+
+# 19. Rviz 로봇 위치 확인 불가
+
+## 문제
+
+rviz에서 display - robotmodel - description topic /robot_description 설정했는데도 지도에 로봇이 표시가 안 됨
+
+## 원인
+
+`robot_state_publisher` 노드 없음
+
+## 해결
+
+`urdf/turtlebot_patrol.urdf` 파일 생성 및 연결
+
+---
+
+# 20. Rviz TF 에러
+
+## 파일
+
+`scripts/mujoco_ros2_bridge.py`
+
+## 에러코드
+
+```text
+RobotModel
+    |
+Status : Error
+    |
+base_footprint No transform from [base_footprint] to [map]
+```
+
+## 원인
+
+base_link가 부모를 두 개 가져 TF 트리가 충돌함
+
+```
+odom → base_link
+base_footprint → base_link
+```
+
+## 해결
+
+```python
+msg.child_frame_id = 'base_link'
+odom_to_base.child_frame_id = 'base_link'
+                ↓
+msg.child_frame_id = 'base_footprint'
+odom_to_base.child_frame_id = 'base_footprint'
+``` 
