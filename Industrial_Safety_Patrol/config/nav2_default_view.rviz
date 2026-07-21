@@ -96,7 +96,7 @@ Visualization Manager:
       Value: true
       Visual Enabled: true
     - Class: rviz_default_plugins/TF
-      Enabled: false
+      Enabled: true
       Frame Timeout: 15
       Frames:
         All Enabled: true
@@ -182,8 +182,9 @@ Visualization Manager:
       Min Color: 0; 0; 0
       Min Intensity: 0
       Name: LaserScan
+      Transform Tolerance: 0.3
       Position Transformer: XYZ
-      Queue Size: 10
+      Queue Size: 30
       Selectable: true
       Size (Pixels): 3
       Size (m): 0.1
