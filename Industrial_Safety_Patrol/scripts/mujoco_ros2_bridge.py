@@ -15,6 +15,7 @@ import cv2
 import cv_bridge
 import math
 from pathlib import Path
+from rosgraph_msgs.msg import Clock
 
 class MujocoRosBridge(Node):
     def __init__(self, model, data):
@@ -35,6 +36,12 @@ class MujocoRosBridge(Node):
             Twist,
             '/cmd_vel',
             self.cmd_vel_callback,
+            10
+        )
+
+        self.clock_pub = self.create_publisher(
+            Clock,
+            '/clock',
             10
         )
 
@@ -174,19 +181,11 @@ class MujocoRosBridge(Node):
         odom_to_base.transform.rotation.y = float(quat[2])
         odom_to_base.transform.rotation.z = float(quat[3])
 
-        base_to_lidar = TransformStamped()
-        base_to_lidar.header.stamp = stamp
-        base_to_lidar.header.frame_id = 'base_link'
-        base_to_lidar.child_frame_id = 'lidar_link'
-        base_to_lidar.transform.translation.x = self.lidar_offset[0]
-        base_to_lidar.transform.translation.y = self.lidar_offset[1]
-        base_to_lidar.transform.translation.z = self.lidar_offset[2]
-        base_to_lidar.transform.rotation.w = self.lidar_quat[0]
-        base_to_lidar.transform.rotation.x = self.lidar_quat[1]
-        base_to_lidar.transform.rotation.y = self.lidar_quat[2]
-        base_to_lidar.transform.rotation.z = self.lidar_quat[3]
+        # lidar TF는 robot_state_publisher가 담당
 
-        self.tf_broadcaster.sendTransform([odom_to_base, base_to_lidar])
+        # odom -> base_footprint 만 publish
+        # base_footprint -> base_link -> lidar_link 는 robot_state_publisher 담당
+        self.tf_broadcaster.sendTransform(odom_to_base)
 
     # MuJoCo LiDAR (36빔) → ROS2 LaserScan
     def publish_scan(self):
@@ -286,6 +285,19 @@ def main():
 
         while viewer.is_running() and rclpy.ok():
             step_start = time.time()
+
+            # MuJoCo simulation time → ROS2 clock
+            clock_msg = Clock()
+
+            sim_time = data.time
+
+            clock_msg.clock.sec = int(sim_time)
+            clock_msg.clock.nanosec = int(
+                (sim_time - int(sim_time)) * 1e9
+            )
+
+            node.clock_pub.publish(clock_msg)
+
             mujoco.mj_step(model, data)
             viewer.sync()
 
