@@ -41,11 +41,11 @@ slam_toolbox:
     use_scan_matching: true
     use_scan_barycenter: true
     minimum_travel_distance: 0.05 # 업데이트 거리 임계값
-    minimum_travel_heading: 0.05  # 업데이트 각도 임계값
+    minimum_travel_heading: 0.1   # 업데이트 각도 임계값
     scan_buffer_size: 20          # SLAM이 참고할 이전 스캔 개수
     scan_buffer_maximum_scan_distance: 10.0
     link_match_minimum_response_fine: 0.1
-    link_scan_maximum_distance: 1.5
+    link_scan_maximum_distance: 1.5 # 두 스캔 사이에서 대응되는 점을 찾을 때 어느 정도 떨어진 점까지 연결 후보로 볼 것인가
     loop_search_maximum_distance: 3.0
     do_loop_closing: true
     loop_match_minimum_chain_size: 10
