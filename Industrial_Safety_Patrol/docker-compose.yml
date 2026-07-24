@@ -254,8 +254,7 @@ services:
       bash -c "
       source /opt/ros/humble/setup.bash &&
       ros2 launch slam_toolbox online_async_launch.py \
-      slam_params_file:=/workspace/config/slam_toolbox_factory.yaml \
-      use_sim_time:=false"
+      slam_params_file:=/workspace/config/slam_toolbox_factory.yaml"
 
     volumes:
       - ./config:/workspace/config
