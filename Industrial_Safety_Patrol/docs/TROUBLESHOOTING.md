@@ -872,4 +872,26 @@ odom_to_base.child_frame_id = 'base_link'
                 ↓
 msg.child_frame_id = 'base_footprint'
 odom_to_base.child_frame_id = 'base_footprint'
-``` 
+```
+
+---
+
+# 21. waypoints 주행 unpack 오류
+
+## 파일
+
+`scripts/auto_explore_for_mapping.py`
+
+## 에러코드
+
+```text
+[ERROR] [1784773009.828672112] [auto_explore_for_mapping]: too many values to unpack (expected 3)
+```
+
+## 원인
+
+`(1.0, -1,0, 2,0)` 처럼 콤마를 잘못 입력하여 전달되는 값이 5개가 됨
+
+## 해결
+
+`,` 수정
