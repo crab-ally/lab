@@ -113,7 +113,7 @@ class MujocoRosBridge(Node):
         # Timers (Publishing Loop)
         self.odom_timer = self.create_timer(0.05, self.publish_odom)  # 20Hz
         self.scan_timer = self.create_timer(0.1, self.publish_scan)   # 10Hz
-        self.camera_timer = self.create_timer(0.1, self.publish_camera) # 10Hz
+        #self.camera_timer = self.create_timer(0.1, self.publish_camera) # 10Hz
 
         self.get_logger().info(
             f"MuJoCo-ROS2 Bridge Node initialized "
@@ -188,6 +188,34 @@ class MujocoRosBridge(Node):
             vel = self.data.qvel[qvel_adr : qvel_adr + 3]
             ang_vel = self.data.qvel[qvel_adr + 3 : qvel_adr + 6]
 
+            # ==========================================================
+            # [추가]
+            # MuJoCo freejoint의 qvel은 World Frame 기준 속도이다.
+            #
+            # 하지만 ROS Odometry(Twist)는 child_frame(base_footprint)
+            # 기준 속도를 publish해야 한다.
+            #
+            # 따라서 현재 자세(quaternion)의 역회전을 이용하여
+            # World Velocity → Base Velocity 로 변환한다.
+            # ==========================================================
+
+            quat_world_inv = np.zeros(4)
+            mujoco.mju_negQuat(quat_world_inv, quat_world)
+
+            vel_base = np.zeros(3)
+            mujoco.mju_rotVecQuat(
+                vel_base,
+                vel,
+                quat_world_inv
+            )
+
+            ang_vel_base = np.zeros(3)
+            mujoco.mju_rotVecQuat(
+                ang_vel_base,
+                ang_vel,
+                quat_world_inv
+            )
+
             # -----------------------------------------------------------
             # [수정] 월드 절대좌표 → odom 상대좌표 변환
             #
@@ -218,17 +246,21 @@ class MujocoRosBridge(Node):
             msg.pose.pose.orientation.y = float(quat_odom[2])
             msg.pose.pose.orientation.z = float(quat_odom[3])
 
-            # NOTE: twist(선속도)는 아직 월드 프레임 그대로입니다 (원인 D,
-            # 이번 수정 범위 밖). REP-105대로 child_frame(base_footprint)
-            # 기준으로 바꾸려면 vel을 quat_world의 역회전으로 한 번 더
-            # 변환해야 합니다 — 필요하시면 이어서 고쳐드리겠습니다.
-            msg.twist.twist.linear.x = float(vel[0])
-            msg.twist.twist.linear.y = float(vel[1])
-            msg.twist.twist.linear.z = float(vel[2])
+            # ==========================================================
+            # ROS REP-105
+            #
+            # Twist는 child_frame(base_footprint) 기준 속도이다.
+            #
+            # World 기준 속도를 Base 기준으로 변환한 값을 publish.
+            # ==========================================================
 
-            msg.twist.twist.angular.x = float(ang_vel[0])
-            msg.twist.twist.angular.y = float(ang_vel[1])
-            msg.twist.twist.angular.z = float(ang_vel[2])
+            msg.twist.twist.linear.x = float(vel_base[0])
+            msg.twist.twist.linear.y = float(vel_base[1])
+            msg.twist.twist.linear.z = float(vel_base[2])
+
+            msg.twist.twist.angular.x = float(ang_vel_base[0])
+            msg.twist.twist.angular.y = float(ang_vel_base[1])
+            msg.twist.twist.angular.z = float(ang_vel_base[2])
 
             self.odom_pub.publish(msg)
             self._publish_tf(msg.header.stamp, pos_odom, quat_odom)
@@ -260,9 +292,6 @@ class MujocoRosBridge(Node):
             sensor_data = self._read_lidar_ranges()
             if not sensor_data:
                 return
-
-            # MuJoCo sensor order correction
-            sensor_data = sensor_data[::-1]
 
             beam_count = len(sensor_data)
 
