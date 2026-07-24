@@ -52,10 +52,8 @@ RUN apt-get update && apt-get install -y \
     ros-humble-robot-state-publisher \
     ros-humble-joint-state-publisher \
     ros-humble-joint-state-publisher-gui \
-    && apt-get install --only-upgrade -y \
-      ros-humble-navigation2 \
-      ros-humble-nav2-bringup \
-      ros-humble-diagnostic-updater \
+    ros-humble-navigation2 \
+    ros-humble-nav2-bringup \
     && rm -rf /var/lib/apt/lists/*
 
 # ================================================================
