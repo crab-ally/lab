@@ -81,7 +81,7 @@ class AutoExploreNode(Node):
         self.waypoint_idx = 0
         self.arrival_threshold = 0.35
         self.linear_speed = 0.25
-        self.angular_speed = 0.6
+        self.angular_speed = 0.35
         self.hold_until = None
         self.exploration_done = False
 
