@@ -61,6 +61,46 @@ class MujocoRosBridge(Node):
         self.lidar_beam_count = 36
         self._init_lidar_sensors()
 
+        # =====================================================================
+        # [수정] odom 원점 캡처 (root freejoint)
+        # -----------------------------------------------------------------
+        # 문제: 기존 코드는 MuJoCo 월드 절대좌표(qpos)를 그대로 /odom으로
+        #       publish했음. 로봇이 월드 (-4,-4)에서 시작하면 odom도 거기서
+        #       시작 → SLAM Toolbox가 map→odom을 초기화할 때 base_link가
+        #       odom 원점(0,0,0)에 있다고 가정하므로, map 좌표계가 MuJoCo
+        #       월드 좌표계와 크게 어긋나는 결과가 생김.
+        #
+        # 해결: 노드 생성 시점(=시뮬레이션 초기 상태)의 위치/자세를 저장해두고,
+        #       매 publish_odom() 호출마다 "시작점 대비 상대 이동량"을
+        #       시작 자세의 역회전으로 변환해 odom으로 내보냄.
+        #       → odom 프레임 원점 = 로봇이 시작한 지점 (REP-105 관례와 일치)
+        # =====================================================================
+        joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "root")
+        if joint_id == -1:
+            raise RuntimeError("root freejoint를 모델에서 찾을 수 없습니다")
+
+        self._qpos_adr = self.model.jnt_qposadr[joint_id]
+        self._qvel_adr = self.model.jnt_dofadr[joint_id]
+
+        # MjData는 생성 시점에 qpos0(모델 초기값)로 채워져 있으므로,
+        # 여기서 읽는 값이 곧 "시뮬레이션 시작 위치/자세"가 됨.
+        self.origin_pos = np.array(
+            self.data.qpos[self._qpos_adr: self._qpos_adr + 3], dtype=np.float64
+        ).copy()
+        self.origin_quat = np.array(
+            self.data.qpos[self._qpos_adr + 3: self._qpos_adr + 7], dtype=np.float64
+        ).copy()
+
+        self.origin_quat_inv = np.zeros(4)
+        mujoco.mju_negQuat(self.origin_quat_inv, self.origin_quat)
+
+        self.get_logger().info(
+            f"Odom origin captured — world pos={self.origin_pos.tolist()}, "
+            f"world quat={self.origin_quat.tolist()} "
+            f"(odom(0,0,0)이 이 지점에 대응합니다)"
+        )
+        # =====================================================================
+
         # Timers (Publishing Loop)
         self.odom_timer = self.create_timer(0.05, self.publish_odom)  # 20Hz
         self.scan_timer = self.create_timer(0.1, self.publish_scan)   # 10Hz
@@ -127,34 +167,52 @@ class MujocoRosBridge(Node):
     # MuJoCo 로봇 상태(qpos, qvel) → ROS2 Odometry
     def publish_odom(self):
         try:
-            # base_link 바디의 qpos, qvel 추출
-            # root 조인트(freejoint) 찾기
-            joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "root")
-            if joint_id == -1:
-                return
+            qpos_adr = self._qpos_adr
+            qvel_adr = self._qvel_adr
 
-            qpos_adr = self.model.jnt_qposadr[joint_id]
-            qvel_adr = self.model.jnt_dofadr[joint_id]
-
-            pos = self.data.qpos[qpos_adr : qpos_adr + 3]
-            quat = self.data.qpos[qpos_adr + 3 : qpos_adr + 7]
+            pos_world = np.array(
+                self.data.qpos[qpos_adr: qpos_adr + 3], dtype=np.float64
+            )
+            quat_world = np.array(
+                self.data.qpos[qpos_adr + 3: qpos_adr + 7], dtype=np.float64
+            )
             vel = self.data.qvel[qvel_adr : qvel_adr + 3]
             ang_vel = self.data.qvel[qvel_adr + 3 : qvel_adr + 6]
+
+            # -----------------------------------------------------------
+            # [수정] 월드 절대좌표 → odom 상대좌표 변환
+            #
+            # 위치: (현재 위치 - 시작 위치)를 "시작 자세" 기준으로 회전.
+            #       시작 시점에 로봇이 90도 돌아가 있었다면(quat="0.707 0 0 0.707"
+            #       같은 경우), 그 회전까지 같이 걷어내야 odom의 +X가
+            #       "로봇이 원래 보던 방향"이 됨.
+            # 자세: origin_quat의 역 * 현재 quat = 시작 자세 대비 상대 회전.
+            # -----------------------------------------------------------
+            diff = pos_world - self.origin_pos
+            pos_odom = np.zeros(3)
+            mujoco.mju_rotVecQuat(pos_odom, diff, self.origin_quat_inv)
+
+            quat_odom = np.zeros(4)
+            mujoco.mju_mulQuat(quat_odom, self.origin_quat_inv, quat_world)
 
             msg = Odometry()
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = 'odom'
             msg.child_frame_id = 'base_footprint'
 
-            msg.pose.pose.position.x = float(pos[0])
-            msg.pose.pose.position.y = float(pos[1])
-            msg.pose.pose.position.z = float(pos[2])
+            msg.pose.pose.position.x = float(pos_odom[0])
+            msg.pose.pose.position.y = float(pos_odom[1])
+            msg.pose.pose.position.z = float(pos_odom[2])
 
-            msg.pose.pose.orientation.w = float(quat[0])
-            msg.pose.pose.orientation.x = float(quat[1])
-            msg.pose.pose.orientation.y = float(quat[2])
-            msg.pose.pose.orientation.z = float(quat[3])
+            msg.pose.pose.orientation.w = float(quat_odom[0])
+            msg.pose.pose.orientation.x = float(quat_odom[1])
+            msg.pose.pose.orientation.y = float(quat_odom[2])
+            msg.pose.pose.orientation.z = float(quat_odom[3])
 
+            # NOTE: twist(선속도)는 아직 월드 프레임 그대로입니다 (원인 D,
+            # 이번 수정 범위 밖). REP-105대로 child_frame(base_footprint)
+            # 기준으로 바꾸려면 vel을 quat_world의 역회전으로 한 번 더
+            # 변환해야 합니다 — 필요하시면 이어서 고쳐드리겠습니다.
             msg.twist.twist.linear.x = float(vel[0])
             msg.twist.twist.linear.y = float(vel[1])
             msg.twist.twist.linear.z = float(vel[2])
@@ -164,7 +222,7 @@ class MujocoRosBridge(Node):
             msg.twist.twist.angular.z = float(ang_vel[2])
 
             self.odom_pub.publish(msg)
-            self._publish_tf(msg.header.stamp, pos, quat)
+            self._publish_tf(msg.header.stamp, pos_odom, quat_odom)
         except Exception as e:
             self.get_logger().error(f"Odom publish error: {e}", once=True)
 
@@ -262,13 +320,6 @@ def main():
 
         node = MujocoRosBridge(model, data)
 
-        # Viewer OpenGL Context 생성 이후 Renderer 생성
-        #node.renderer = mujoco.Renderer(
-        #    model,
-        #    480,
-        #    640
-        #)
-
         # ROS2 spin 시작
         spin_thread = threading.Thread(
             target=ros_spin_thread,
@@ -278,10 +329,10 @@ def main():
 
         spin_thread.start()
 
-        viewer.cam.lookat[:] = [-3, -3, 0.5]
-        viewer.cam.distance = 3
-        viewer.cam.azimuth = 45
-        viewer.cam.elevation = -30
+        viewer.cam.lookat[:] = [0, 0, 0.9]
+        viewer.cam.distance = 15.8
+        viewer.cam.azimuth = 85
+        viewer.cam.elevation = -85
 
         while viewer.is_running() and rclpy.ok():
             step_start = time.time()
