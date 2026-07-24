@@ -16,10 +16,19 @@ import cv_bridge
 import math
 from pathlib import Path
 from rosgraph_msgs.msg import Clock
+from rclpy.parameter import Parameter
 
 class MujocoRosBridge(Node):
     def __init__(self, model, data):
         super().__init__('mujoco_ros_bridge')
+
+        self.set_parameters([
+            Parameter(
+                'use_sim_time',
+                Parameter.Type.BOOL,
+                True
+            )
+        ])
         self.model = model
         self.data = data
         self.cv_bridge = cv_bridge.CvBridge()
@@ -58,7 +67,7 @@ class MujocoRosBridge(Node):
         self.lidar_offset = (0.07, 0.0, 0.162)
         self.lidar_quat = (0.707, 0.0, 0.707, 0.0)
 
-        self.lidar_beam_count = 36
+        self.lidar_beam_count = 360
         self._init_lidar_sensors()
 
         # =====================================================================
