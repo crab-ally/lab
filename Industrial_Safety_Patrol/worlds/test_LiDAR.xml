@@ -1,0 +1,19 @@
+<mujoco model="test_LiDAR">
+    <compiler inertiafromgeom="true"/>
+    <worldbody>
+        <!-- ================================================================
+             1. 기본 공장 바닥 및 조명
+             ================================================================ -->
+        <geom name="floor" type="plane" size="5 5 0.1" rgba="0.75 0.75 0.72 1" friction="1.0 0.005 0.0001"/>
+        <light directional="true" diffuse=".8 .8 .8" specular=".3 .3 .3" pos="0 0 5" dir="0 0 -1"/>
+        <!-- 보조 조명 -->
+        <light directional="false" diffuse=".4 .4 .4" specular=".1 .1 .1" pos="3 3 3.5" dir="-0.3 -0.3 -1"/>
+        <light directional="false" diffuse=".4 .4 .4" specular=".1 .1 .1" pos="-3 -3 3.5" dir="0.3 0.3 -1"/>
+        
+        <!-- ================================================================
+             2. 벽
+             ================================================================ -->
+        <geom name="wall" type="box" size="1 0.05 1.5" pos="-4 -3 1.5" rgba="0.85 0.85 0.82 1"/>
+
+    </worldbody>
+</mujoco>
