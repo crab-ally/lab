@@ -17,18 +17,27 @@ import math
 from pathlib import Path
 from rosgraph_msgs.msg import Clock
 from rclpy.parameter import Parameter
+from builtin_interfaces.msg import Time
+from rclpy.qos import QoSProfile
+from rclpy.qos import ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy
 
 class MujocoRosBridge(Node):
     def __init__(self, model, data):
-        super().__init__('mujoco_ros_bridge')
+        super().__init__(
+            'mujoco_ros_bridge',
+            parameter_overrides=[
+                Parameter(
+                    'use_sim_time',
+                    Parameter.Type.BOOL,
+                    True
+                )
+            ]
+        )
 
-        self.set_parameters([
-            Parameter(
-                'use_sim_time',
-                Parameter.Type.BOOL,
-                True
-            )
-        ])
+        self.sim_time = 0.0
+        self.last_scan_time = 0.0
+        self.last_scan_publish_time = None
         self.model = model
         self.data = data
         self.cv_bridge = cv_bridge.CvBridge()
@@ -48,10 +57,16 @@ class MujocoRosBridge(Node):
             10
         )
 
+        clock_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE
+        )
+
         self.clock_pub = self.create_publisher(
             Clock,
             '/clock',
-            10
+            clock_qos
         )
 
         self.camera_image = None
@@ -64,8 +79,8 @@ class MujocoRosBridge(Node):
         self.tf_broadcaster = TransformBroadcaster(self)
 
         # base_link → lidar_link (MuJoCo 모델 좌표 기준)
-        self.lidar_offset = (0.07, 0.0, 0.162)
-        self.lidar_quat = (0.707, 0.0, 0.707, 0.0)
+        #self.lidar_offset = (0.07, 0.0, 0.162)
+        #self.lidar_quat = (0.707, 0.0, 0.707, 0.0)
 
         self.lidar_beam_count = 360
         self._init_lidar_sensors()
@@ -111,8 +126,8 @@ class MujocoRosBridge(Node):
         # =====================================================================
 
         # Timers (Publishing Loop)
-        self.odom_timer = self.create_timer(0.05, self.publish_odom)  # 20Hz
-        self.scan_timer = self.create_timer(0.1, self.publish_scan)   # 10Hz
+        #self.odom_timer = self.create_timer(0.05, self.publish_odom)  # 20Hz
+        #self.scan_timer = self.create_timer(0.1, self.publish_scan)   # 10Hz
         #self.camera_timer = self.create_timer(0.1, self.publish_camera) # 10Hz
 
         self.get_logger().info(
@@ -233,7 +248,7 @@ class MujocoRosBridge(Node):
             mujoco.mju_mulQuat(quat_odom, self.origin_quat_inv, quat_world)
 
             msg = Odometry()
-            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.stamp = self.get_sim_stamp()
             msg.header.frame_id = 'odom'
             msg.child_frame_id = 'base_footprint'
 
@@ -296,16 +311,33 @@ class MujocoRosBridge(Node):
             beam_count = len(sensor_data)
 
             msg = LaserScan()
-            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.stamp = self.get_sim_stamp()
             msg.header.frame_id = "lidar_link"
-            msg.angle_min = -math.pi
+            msg.angle_min = 0.0
             msg.angle_increment = math.radians(360.0 / beam_count)
             msg.angle_max = msg.angle_min + msg.angle_increment * (beam_count-1)
-            msg.scan_time = 0.1
+
+            # 실제 publish 주기 기반
+            if self.last_scan_publish_time is None:
+                msg.scan_time = 0.1
+            else:
+                msg.scan_time = (
+                    self.sim_time -
+                    self.last_scan_publish_time
+                )
+
+            self.last_scan_publish_time = self.sim_time
+
             msg.time_increment = msg.scan_time / beam_count
             msg.range_min = 0.12
             msg.range_max = 3.5
-            msg.ranges = [float(r) if r > 0 else float('inf') for r in sensor_data]
+
+            msg.ranges = [
+                float(r) if r > 0 else float("inf")
+                for r in sensor_data
+            ]
+
+            
 
             self.scan_pub.publish(msg)
 
@@ -327,13 +359,19 @@ class MujocoRosBridge(Node):
             encoding="rgb8"
         )
 
-        img_msg.header.stamp = (
-            self.get_clock().now().to_msg()
-        )
+        img_msg.header.stamp = self.get_sim_stamp()
 
         img_msg.header.frame_id = "camera_link"
 
         self.camera_pub.publish(img_msg)
+    
+    def get_sim_stamp(self):
+        stamp = Time()
+        stamp.sec = int(self.sim_time)
+        stamp.nanosec = int(
+            (self.sim_time - int(self.sim_time)) * 1e9
+        )
+        return stamp
 
 
 def ros_spin_thread(node):
@@ -373,42 +411,66 @@ def main():
         viewer.cam.elevation = -85
 
         while viewer.is_running() and rclpy.ok():
+
             step_start = time.time()
 
-            # MuJoCo simulation time → ROS2 clock
-            clock_msg = Clock()
-
-            sim_time = data.time
-
-            clock_msg.clock.sec = int(sim_time)
-            clock_msg.clock.nanosec = int(
-                (sim_time - int(sim_time)) * 1e9
-            )
-
-            node.clock_pub.publish(clock_msg)
+            # ==============================
+            # MuJoCo physics step
+            # ==============================
 
             mujoco.mj_step(model, data)
             viewer.sync()
 
-            if node.renderer is not None:
 
+            # ==============================
+            # MuJoCo time -> ROS clock
+            # ==============================
+
+            node.sim_time = data.time
+
+
+            clock_msg = Clock()
+
+            clock_msg.clock.sec = int(node.sim_time)
+            clock_msg.clock.nanosec = int(
+                (node.sim_time - int(node.sim_time)) * 1e9
+            )
+
+            node.clock_pub.publish(clock_msg)
+
+            # ==============================
+            # ROS sensor publish
+            # ==============================
+
+            node.publish_odom()
+
+            if node.sim_time - node.last_scan_time >= 0.1:
+                node.publish_scan()
+                node.last_scan_time = node.sim_time
+
+            # ==============================
+            # Camera
+            # ==============================
+
+            if node.renderer is not None:
                 node.renderer.update_scene(
                     data,
                     camera="patrol_camera"
                 )
-
                 pixels = node.renderer.render()
 
                 with node.camera_lock:
                     node.camera_image = pixels
 
-            time_until_next_step = (
-                model.opt.timestep -
-                (time.time() - step_start)
-            )
+            # ==============================
+            # realtime factor 1.0 유지
+            # ==============================
+            elapsed = time.time() - step_start
+            sleep_time = model.opt.timestep - elapsed
 
-            if time_until_next_step > 0:
-                time.sleep(time_until_next_step)
+
+            if sleep_time > 0:
+                time.sleep(sleep_time)
 
         print("시뮬레이션 종료 중...")
         node.destroy_node()
