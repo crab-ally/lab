@@ -34,7 +34,7 @@ amcl:
     z_max: 0.05
     z_rand: 0.05 # LiDAR의 랜덤 노이즈나 이상 측정을 허용하는 정도
     z_short: 0.05
-    scan_topic: scan
+    scan_topic: /scan
 
 amcl_map_client:
   ros__parameters:
