@@ -189,7 +189,7 @@ class MujocoRosBridge(Node):
         self.data.ctrl[1] = v_right / self.wheel_radius
 
     # MuJoCo 로봇 상태(qpos, qvel) → ROS2 Odometry
-    def publish_odom(self):
+    def publish_odom(self, stamp):
         try:
             qpos_adr = self._qpos_adr
             qvel_adr = self._qvel_adr
@@ -248,7 +248,7 @@ class MujocoRosBridge(Node):
             mujoco.mju_mulQuat(quat_odom, self.origin_quat_inv, quat_world)
 
             msg = Odometry()
-            msg.header.stamp = self.get_sim_stamp()
+            msg.header.stamp = stamp
             msg.header.frame_id = 'odom'
             msg.child_frame_id = 'base_footprint'
 
@@ -277,8 +277,8 @@ class MujocoRosBridge(Node):
             msg.twist.twist.angular.y = float(ang_vel_base[1])
             msg.twist.twist.angular.z = float(ang_vel_base[2])
 
+            self._publish_tf(stamp, pos_odom, quat_odom)
             self.odom_pub.publish(msg)
-            self._publish_tf(msg.header.stamp, pos_odom, quat_odom)
         except Exception as e:
             self.get_logger().error(f"Odom publish error: {e}", once=True)
 
@@ -302,7 +302,7 @@ class MujocoRosBridge(Node):
         self.tf_broadcaster.sendTransform(odom_to_base)
 
     # MuJoCo LiDAR (36빔) → ROS2 LaserScan
-    def publish_scan(self):
+    def publish_scan(self, stamp):
         try:
             sensor_data = self._read_lidar_ranges()
             if not sensor_data:
@@ -311,7 +311,7 @@ class MujocoRosBridge(Node):
             beam_count = len(sensor_data)
 
             msg = LaserScan()
-            msg.header.stamp = self.get_sim_stamp()
+            msg.header.stamp = stamp
             msg.header.frame_id = "lidar_link"
             msg.angle_min = 0.0
             msg.angle_increment = math.radians(360.0 / beam_count)
@@ -344,7 +344,7 @@ class MujocoRosBridge(Node):
         except Exception as e:
             self.get_logger().error(f"Scan publish error: {e}",once=True)
 
-    def publish_camera(self):
+    def publish_camera(self, stamp):
 
         with self.camera_lock:
 
@@ -359,7 +359,7 @@ class MujocoRosBridge(Node):
             encoding="rgb8"
         )
 
-        img_msg.header.stamp = self.get_sim_stamp()
+        img_msg.header.stamp = stamp
 
         img_msg.header.frame_id = "camera_link"
 
@@ -428,24 +428,20 @@ def main():
 
             node.sim_time = data.time
 
+            stamp = node.get_sim_stamp()
 
             clock_msg = Clock()
-
-            clock_msg.clock.sec = int(node.sim_time)
-            clock_msg.clock.nanosec = int(
-                (node.sim_time - int(node.sim_time)) * 1e9
-            )
-
+            clock_msg.clock = stamp
             node.clock_pub.publish(clock_msg)
 
             # ==============================
             # ROS sensor publish
             # ==============================
 
-            node.publish_odom()
+            node.publish_odom(stamp)
 
             if node.sim_time - node.last_scan_time >= 0.1:
-                node.publish_scan()
+                node.publish_scan(stamp)
                 node.last_scan_time = node.sim_time
 
             # ==============================
@@ -461,6 +457,8 @@ def main():
 
                 with node.camera_lock:
                     node.camera_image = pixels
+
+            node.publish_camera(stamp)
 
             # ==============================
             # realtime factor 1.0 유지
