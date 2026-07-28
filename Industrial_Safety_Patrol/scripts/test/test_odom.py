@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-1m 이동
+1m 전진, 90도 반시계 회전, 1m 전진
 """
 
 import math
@@ -11,6 +11,7 @@ from rclpy.node import Node
 
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
+
 
 class ScanDirectionTest(Node):
 
@@ -32,62 +33,74 @@ class ScanDirectionTest(Node):
 
         self.get_logger().info("Waiting for /scan...")
 
-        # 노드가 시작되면 1m 직진
-        self.drive_forward_1m()
+        # 약간 기다렸다가 시작
+        time.sleep(1.0)
 
-    def drive_forward_1m(self):
+        # 1. x 방향으로 1m 이동
+        self.drive_forward(1.0)
+
+        time.sleep(1.0)
+
+        # 2. 반시계 방향으로 90도 회전
+        #self.rotate_ccw(-90)
+
+        #time.sleep(1.0)
+
+        # 3. 현재 바라보는 방향으로 1m 이동
+        #self.drive_forward(1.0)
+
+        self.get_logger().info("Mission Complete!")
+
+    def drive_forward(self, distance):
+
+        speed = 0.1      # m/s
+        duration = distance / speed
 
         twist = Twist()
-
-        speed = 0.2          # m/s
-        distance = 1.0       # m
-        duration = distance / speed
 
         start = time.time()
 
         while rclpy.ok() and (time.time() - start) < duration:
             twist.linear.x = speed
+            twist.angular.z = 0.0
             self.cmd_pub.publish(twist)
             time.sleep(0.05)
 
         twist.linear.x = 0.0
         self.cmd_pub.publish(twist)
 
-        self.get_logger().info("Finished driving 1 meter.")
+        self.get_logger().info(f"Drive {distance:.2f} m finished.")
 
-    def get_range(self, scan, angle_deg):
-        angle = math.radians(angle_deg)
+    def rotate_ccw(self, angle_deg):
 
-        index = int(
-            round((angle - scan.angle_min) /
-                  scan.angle_increment)
-        )
+        angular_speed = 0.5                 # rad/s
+        angle_rad = math.radians(abs(angle_deg))
+        duration = angle_rad / angular_speed
 
-        index = max(0, min(index, len(scan.ranges) - 1))
+        twist = Twist()
 
-        return scan.ranges[index]
+        start = time.time()
+
+        while rclpy.ok() and (time.time() - start) < duration:
+            twist.linear.x = 0.0
+            if angle_deg < 0: twist.angular.z = -angular_speed
+            else: twist.angular.z = angular_speed
+            self.cmd_pub.publish(twist)
+            time.sleep(0.05)
+
+        twist.angular.z = 0.0
+        self.cmd_pub.publish(twist)
+
+        self.get_logger().info(f"Rotate {angle_deg} deg CCW finished.")
 
     def scan_callback(self, scan):
-
-        # print("=" * 50)
-
-        for i in range(0, 360, 30):
-            angle = math.radians(i)
-
-            index = int(
-                round((angle - scan.angle_min) /
-                      scan.angle_increment)
-            )
-
-            index = max(0, min(index, len(scan.ranges) - 1))
-
-            # print(f"{i:3d}° : {scan.ranges[index]:.3f}")
+        pass
 
 
 def main():
     rclpy.init()
 
-    node = ScanDirectionTest() # 1m 이동
+    node = ScanDirectionTest()
 
     try:
         rclpy.spin(node)
