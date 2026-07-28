@@ -117,10 +117,10 @@
     <actuator>
         <velocity name="motor_left" joint="drive_left"
                   kv="5" forcerange="-1.4 1.4"
-                  ctrlrange="-6.67 6.67"/>
+                  ctrlrange="-7.58 7.58"/>
         <velocity name="motor_right" joint="drive_right"
                   kv="5" forcerange="-1.4 1.4"
-                  ctrlrange="-6.67 6.67"/>
+                  ctrlrange="-7.58 7.58"/>
     </actuator>
 
     <!-- ======== 센서 정의 ======== -->
