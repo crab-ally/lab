@@ -58,7 +58,7 @@ class MujocoRosBridge(Node):
         )
 
         clock_qos = QoSProfile(
-            depth=1,
+            depth=10,
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE
         )
@@ -153,7 +153,7 @@ class MujocoRosBridge(Node):
             )
             if name and (name == "lidar" or name.startswith("lidar-")):
                 replicated.append((name, sensor_id))
-
+                
         replicated.sort(key=lambda item: item[0])
         if len(replicated) < self.lidar_beam_count:
             self.get_logger().warn(
@@ -337,8 +337,6 @@ class MujocoRosBridge(Node):
                 for r in sensor_data
             ]
 
-            
-
             self.scan_pub.publish(msg)
 
         except Exception as e:
@@ -421,7 +419,6 @@ def main():
             mujoco.mj_step(model, data)
             viewer.sync()
 
-
             # ==============================
             # MuJoCo time -> ROS clock
             # ==============================
@@ -440,7 +437,7 @@ def main():
 
             node.publish_odom(stamp)
 
-            if node.sim_time - node.last_scan_time >= 0.1:
+            if data.time >= node.last_scan_time + 0.1:
                 node.publish_scan(stamp)
                 node.last_scan_time = node.sim_time
 
@@ -465,7 +462,6 @@ def main():
             # ==============================
             elapsed = time.time() - step_start
             sleep_time = model.opt.timestep - elapsed
-
 
             if sleep_time > 0:
                 time.sleep(sleep_time)
