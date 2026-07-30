@@ -1,0 +1,4 @@
+<mujoco model="turtlebot_test_LiDAR">
+    <include file="../worlds/TwoWall.xml"/>
+    <include file="../models/turtlebot_patrol.xml"/>
+</mujoco>
