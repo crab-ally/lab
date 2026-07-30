@@ -1,46 +1,5 @@
 version: "3.8"
 
-# =============================================================================
-# AI Safety Patrol Robot
-# MuJoCo + ROS2 Humble Simulation Environment
-#
-# 역할
-#   - robot_sim : MuJoCo 시뮬레이션 + ROS2 Bridge
-#   - teleop    : 키보드 입력으로 /cmd_vel 발행
-#   - db        : 위험 이벤트 및 센서 로그 저장 (Level 6)
-#   - dashboard : Grafana 시각화 (Level 6)
-#
-# ROS2 Topic
-#   Subscribe
-#       /cmd_vel
-#
-#   Publish
-#       /odom
-#       /scan
-#       /camera/image_raw
-#       /tf
-#       /map (slam 서비스 실행 시)
-#
-# 실행 예시
-#
-#   [1] MuJoCo 시뮬레이터 실행
-#       docker compose up robot_sim
-#
-#   [2] 키보드 제어 (별도 터미널)
-#       docker compose run --rm teleop
-#
-#   [4] SLAM 지도 생성 (별도 터미널)
-#       docker compose --profile slam up slam
-#
-#   [5] 자동 탐색 매핑 (SLAM 실행 중)
-#       docker compose run --rm auto_explore
-#
-#   [6] 지도 저장 (SLAM 실행 중, 탐색 완료 후)
-#       docker compose run --rm map_saver
-#
-#   [7] 시뮬레이터 + SLAM + Teleop
-#       docker compose --profile slam --profile teleop up
-# =============================================================================
 
 services:
 
@@ -288,7 +247,9 @@ services:
     command: >
       bash -c "
       source /opt/ros/humble/setup.bash &&
-      python /workspace/scripts/auto_explore_for_mapping.py"
+      python /workspace/scripts/auto_explore_for_mapping.py
+      --ros-args
+      -p use_sim_time:=true"
 
     volumes:
       - ./scripts:/workspace/scripts
@@ -494,7 +455,10 @@ services:
     command: >
       bash -c "
       source /opt/ros/humble/setup.bash &&
-      ros2 run rviz2 rviz2 -d /workspace/config/nav2_default_view.rviz"
+      ros2 run rviz2 rviz2
+      -d /workspace/config/nav2_default_view.rviz
+      --ros-args
+      -p use_sim_time:=true"
 
     volumes:
       - ./config:/workspace/config
@@ -506,7 +470,6 @@ services:
       - QT_X11_NO_MITSHM=1
       - ROS_DOMAIN_ID=50
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-      - MESA_GL_VERSION_OVERRIDE=3.3
 
     depends_on:
       - nav2
