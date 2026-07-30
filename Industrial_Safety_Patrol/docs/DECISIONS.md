@@ -20,3 +20,12 @@
 - Docker Compose command에서 -p robot_description:=URDF 내용 형태로 직접 전달할 경우 XML 내부의 <, >, 개행 문자 때문에 ROS2 parameter parser 오류 발생
 - Launch 파일에서 URDF를 읽어 robot_description parameter로 전달하면 안정적으로 TF 정보를 생성 가능
 ROS2 표준 방식에 맞춰 유지보수성과 확장성을 높이기 위해 Launch 기반 구조로 변경
+
+---
+
+# 3. 화재 감지 기능
+
+**결정:** 보류
+
+**이유**
+- 높은 곳도 감지하려면 높은 카메라 위치가 필요하나 터틀봇의 높이로는 불완전한 감지만 가능

@@ -895,3 +895,43 @@ odom_to_base.child_frame_id = 'base_footprint'
 ## 해결
 
 `,` 수정
+
+---
+
+# 22. slam 장애물 인식 오류
+
+## 파일
+
+`scripts/mujoco_ros2_bridge.py`
+
+## 문제
+
+벽과 장애물을 제대로 인식하지 못함
+
+## 원인
+
+```py
+msg.ranges = [
+    float(r) if r > 0 else float("inf")
+    for r in sensor_data
+]
+```
+
+라이다 스펙 상 관측값이 3.5m가 측정되면 장애물이 없는 것인데,
+위 코드로는 3.5m 부근에 장애물이 있다고 해석됨.
+
+## 해결
+
+```py
+clean_ranges = []
+for r in sensor_data:
+    val = float(r)
+    if val >= msg.range_max - 0.05 or val < msg.range_min:
+        clean_ranges.append(float("inf"))
+    else:
+        clean_ranges.append(val)
+
+msg.ranges = clean_ranges
+```
+
+라이다 스펙 상 최대 거리는 inf 처리하여 장애물 없는 것으로 인식
