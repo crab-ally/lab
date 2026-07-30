@@ -2,11 +2,6 @@ amcl:
   ros__parameters:
     use_sim_time: true
     set_initial_pose: true
-    initial_pose:
-      x: -4.0
-      y: -4.0
-      z: 0.0
-      yaw: 1.5708
     alpha1: 0.05 # 회전 noise
     alpha2: 0.05 # 이동 중 회전 noise
     alpha3: 0.05 # 이동 noise
