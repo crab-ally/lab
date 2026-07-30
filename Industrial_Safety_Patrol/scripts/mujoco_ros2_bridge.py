@@ -153,7 +153,6 @@ class MujocoRosBridge(Node):
             )
             if name and (name == "lidar" or name.startswith("lidar-")):
                 replicated.append((name, sensor_id))
-                
         replicated.sort(key=lambda item: item[0])
         if len(replicated) < self.lidar_beam_count:
             self.get_logger().warn(
@@ -301,7 +300,7 @@ class MujocoRosBridge(Node):
         # base_footprint -> base_link -> lidar_link 는 robot_state_publisher 담당
         self.tf_broadcaster.sendTransform(odom_to_base)
 
-    # MuJoCo LiDAR (36빔) → ROS2 LaserScan
+    # MuJoCo LiDAR (360빔) → ROS2 LaserScan
     def publish_scan(self, stamp):
         try:
             sensor_data = self._read_lidar_ranges()
@@ -332,10 +331,16 @@ class MujocoRosBridge(Node):
             msg.range_min = 0.12
             msg.range_max = 3.5
 
-            msg.ranges = [
-                float(r) if r > 0 else float("inf")
-                for r in sensor_data
-            ]
+            clean_ranges = []
+            for r in sensor_data:
+                val = float(r)
+                # MuJoCo에서 닿지 않은 빔(3.5m 이상) 또는 유효하지 않은 값(0 이하, min_range 미만)
+                if val >= msg.range_max - 0.05 or val < msg.range_min:
+                    clean_ranges.append(float("inf"))
+                else:
+                    clean_ranges.append(val)
+
+            msg.ranges = clean_ranges
 
             self.scan_pub.publish(msg)
 
