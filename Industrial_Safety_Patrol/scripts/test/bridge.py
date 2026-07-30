@@ -35,35 +35,12 @@ class MujocoRosBridge(Node):
             ]
         )
 
-        self.last_print_time = 0.0
         self.sim_time = 0.0
         self.last_scan_time = 0.0
         self.last_scan_publish_time = None
         self.model = model
         self.data = data
         self.cv_bridge = cv_bridge.CvBridge()
-
-        self.left_joint_id = mujoco.mj_name2id(
-            self.model,
-            mujoco.mjtObj.mjOBJ_JOINT,
-            "drive_left"
-        )
-
-        self.right_joint_id = mujoco.mj_name2id(
-            self.model,
-            mujoco.mjtObj.mjOBJ_JOINT,
-            "drive_right"
-        )
-
-        if self.left_joint_id == -1 or self.right_joint_id == -1:
-            raise RuntimeError("wheel joint를 찾을 수 없습니다")
-
-        # wheel joint qpos / qvel 주소
-        self.left_qpos = self.model.jnt_qposadr[self.left_joint_id]
-        self.right_qpos = self.model.jnt_qposadr[self.right_joint_id]
-
-        self.left_qvel = self.model.jnt_dofadr[self.left_joint_id]
-        self.right_qvel = self.model.jnt_dofadr[self.right_joint_id]
 
         # Renderer는 Viewer 생성 이후 Main Thread에서 초기화
         self.renderer = None
@@ -176,7 +153,6 @@ class MujocoRosBridge(Node):
             )
             if name and (name == "lidar" or name.startswith("lidar-")):
                 replicated.append((name, sensor_id))
-
         replicated.sort(key=lambda item: item[0])
         if len(replicated) < self.lidar_beam_count:
             self.get_logger().warn(
@@ -360,8 +336,6 @@ class MujocoRosBridge(Node):
                 for r in sensor_data
             ]
 
-            
-
             self.scan_pub.publish(msg)
 
         except Exception as e:
@@ -405,7 +379,7 @@ def main():
     rclpy.init()
 
     BASE_DIR = Path(__file__).resolve().parent
-    xml_path = BASE_DIR.parent.parent / "scenes" / "patrol_factory.xml"
+    xml_path = BASE_DIR.parent.parent / "scenes" / "patrol_TwoWall.xml"
 
     print(f"Loading model from: {xml_path}")
     model = mujoco.MjModel.from_xml_path(str(xml_path))
@@ -432,9 +406,6 @@ def main():
         viewer.cam.distance = 15.8
         viewer.cam.azimuth = 85
         viewer.cam.elevation = -85
-
-        rtf_wall_start = time.time()
-        rtf_sim_start = data.time
 
         while viewer.is_running() and rclpy.ok():
 
@@ -493,25 +464,6 @@ def main():
 
             if sleep_time > 0:
                 time.sleep(sleep_time)
-
-            # ==============================
-            # RTF 측정
-            # ==============================
-
-            sim_elapsed = data.time - rtf_sim_start
-            wall_elapsed = time.time() - rtf_wall_start
-
-            if sim_elapsed >= 10.0:
-
-                print(
-                    f"SIM={sim_elapsed:.2f}s, "
-                    f"WALL={wall_elapsed:.2f}s, "
-                    f"RTF={sim_elapsed / wall_elapsed:.3f}"
-                )
-
-                # 다시 10초 구간 측정
-                rtf_sim_start = data.time
-                rtf_wall_start = time.time()
 
         print("시뮬레이션 종료 중...")
         node.destroy_node()

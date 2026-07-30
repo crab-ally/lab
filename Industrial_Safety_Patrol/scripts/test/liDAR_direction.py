@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+"""
+라이다 방향 출력
+"""
 
 import math
 
@@ -35,8 +38,24 @@ class ScanDirectionTest(Node):
 
     def scan_callback(self, scan):
 
-        for i in range(0, 360, 30):
-            print(i, msg.ranges[i])
+        r0 = self.get_range(scan, 0)
+        r90 = self.get_range(scan, 90)
+        r180 = self.get_range(scan, 180)
+        r270 = self.get_range(scan, 270)
+
+        print(f"angle_min = {math.degrees(scan.angle_min):.1f}°")
+        print(f"angle_max = {math.degrees(scan.angle_max):.1f}°")
+        print(f"increment = {math.degrees(scan.angle_increment):.1f}°")
+        print(f"num_ranges = {len(scan.ranges)}")
+
+        print(
+            f"0°   : {r0:.3f} m\n"
+            f"90°  : {r90:.3f} m\n"
+            f"180° : {r180:.3f} m\n"
+            f"270° : {r270:.3f} m\n"
+            "----------------------"
+        )
+
 
 def main():
     rclpy.init()
