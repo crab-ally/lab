@@ -1,4 +1,11 @@
 # MuJoCo를 ROS2 로봇으로 만들어주는 ROS2 Bridge
+"""
+timestep: 0.005
+odom → base_footprint: 50Hz(0.02s)
+/scan: 10Hz(0.1s)
+/camera/image_raw: 10Hz(0.1s)
+/clock: 매 mj_step() 마다
+"""
 
 import rclpy
 from rclpy.node import Node
@@ -35,6 +42,7 @@ class MujocoRosBridge(Node):
             ]
         )
 
+        self.last_odom_time = 0.0
         self.sim_time = 0.0
         self.last_scan_time = 0.0
         self.last_scan_publish_time = None
@@ -276,8 +284,8 @@ class MujocoRosBridge(Node):
             msg.twist.twist.angular.y = float(ang_vel_base[1])
             msg.twist.twist.angular.z = float(ang_vel_base[2])
 
-            self._publish_tf(stamp, pos_odom, quat_odom)
             self.odom_pub.publish(msg)
+            self._publish_tf(stamp, pos_odom, quat_odom)
         except Exception as e:
             self.get_logger().error(f"Odom publish error: {e}", once=True)
 
@@ -393,6 +401,9 @@ def main():
 
     node = None
 
+    # 카메라 발행 타이머 변수 추가
+    last_camera_time = 0.0
+
     with mujoco.viewer.launch_passive(model, data) as viewer:
 
         print("터틀봇 실내 순찰 시뮬레이션 및 ROS2 브릿지 시작...")
@@ -426,23 +437,23 @@ def main():
             viewer.sync()
 
             # ==============================
-            # MuJoCo time -> ROS clock
+            # MuJoCo time update
             # ==============================
 
             node.sim_time = data.time
 
             stamp = node.get_sim_stamp()
 
-            clock_msg = Clock()
-            clock_msg.clock = stamp
-            node.clock_pub.publish(clock_msg)
-
             # ==============================
-            # ROS sensor publish
+            # ROS sensor publish FIRST
             # ==============================
 
-            node.publish_odom(stamp)
+            # 1. Odom (50Hz / 0.02초 간격)
+            if data.time >= node.last_odom_time + 0.02:
+                node.publish_odom(stamp)
+                node.last_odom_time = data.time
 
+            # 2. Scan (10Hz / 0.1초 간격)
             if data.time >= node.last_scan_time + 0.1:
                 node.publish_scan(stamp)
                 node.last_scan_time = node.sim_time
@@ -451,17 +462,22 @@ def main():
             # Camera
             # ==============================
 
-            if node.renderer is not None:
-                node.renderer.update_scene(
-                    data,
-                    camera="patrol_camera"
-                )
-                pixels = node.renderer.render()
+            if data.time >= last_camera_time + 0.1:
+                if node.renderer is not None:
+                    node.renderer.update_scene(data, camera="patrol_camera")
+                    pixels = node.renderer.render()
+                    with node.camera_lock:
+                        node.camera_image = pixels
+                    node.publish_camera(stamp)
+                last_camera_time = data.time
 
-                with node.camera_lock:
-                    node.camera_image = pixels
+            # ==============================
+            # Publish simulation clock LAST
+            # ==============================
 
-            node.publish_camera(stamp)
+            clock_msg = Clock()
+            clock_msg.clock = stamp
+            node.clock_pub.publish(clock_msg)
 
             # ==============================
             # realtime factor 1.0 유지
