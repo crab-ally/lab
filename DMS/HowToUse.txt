@@ -1,0 +1,8 @@
+1. BlazeFace: 실시간 얼굴 검출(Face Detection) 모델
+2. Face Mesh: 468개의 얼굴 랜드마크(Face Landmark) 검출
+
+```
+# 설치
+pip install mediapipe==0.10.21
+pip install opencv-python==4.10.0.84
+```
