@@ -1,269 +1,428 @@
 <?xml version="1.0" ?>
 <robot name="turtlebot_patrol">
 
-  <!-- ================================================================
-       TurtleBot3 Burger 기반 순찰 로봇 (URDF 변환본)
-       ================================================================ -->
-
-  <!-- Base footprint (ROS 표준에 맞게 바닥 기준점 추가) -->
+  <!-- Base footprint -->
   <link name="base_footprint"/>
-  
+
   <joint name="base_joint" type="fixed">
     <parent link="base_footprint"/>
     <child link="base_link"/>
-    <!-- MuJoCo 기준 base_link의 z축 오프셋 적용 -->
-    <origin xyz="0 0 0.043" rpy="0 0 0"/>
+    <origin xyz="0 0 0.033" rpy="0 0 0"/>
   </joint>
 
   <!-- ================================================================
-       본체 (Base Link)
+       BASE LINK
+       MJCF:
+       mass = 0.85
+       CoM = (-0.025 0 0.020)
        ================================================================ -->
+
   <link name="base_link">
     <inertial>
-      <origin xyz="-0.02 0 0.005" rpy="0 0 0"/>
-      <mass value="0.7"/>
-      <inertia ixx="0.0012" ixy="0" ixz="0" iyy="0.0012" iyz="0" izz="0.0018"/>
+      <origin xyz="-0.025 0 0.020" rpy="0 0 0"/>
+      <mass value="0.85"/>
+      <inertia 
+        ixx="0.0022"
+        ixy="0"
+        ixz="0"
+        iyy="0.0022"
+        iyz="0"
+        izz="0.0035"/>
     </inertial>
 
-    <!-- 하단 플레이트 (1층: 모터+배터리) -->
+    <!-- Lower plate -->
     <visual name="base_plate_lower">
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin xyz="0 0 0.005" rpy="0 0 0"/>
       <geometry>
-        <!-- MuJoCo size (half-extents) -> URDF size (full-extents) -->
-        <box size="0.138 0.178 0.005"/>
+        <box size="0.138 0.150 0.005"/>
       </geometry>
-      <material name="dark_grey">
+      <material name="dark_gray">
         <color rgba="0.15 0.15 0.15 1"/>
       </material>
     </visual>
-    <collision name="base_plate_lower_col">
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+
+    <collision name="base_plate_lower_collision">
+      <origin xyz="0 0 0.005" rpy="0 0 0"/>
       <geometry>
-        <box size="0.138 0.178 0.005"/>
+        <box size="0.138 0.150 0.005"/>
       </geometry>
     </collision>
 
-    <!-- 상단 플레이트 (2층: SBC) -->
-    <visual name="base_plate_upper">
-      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+    <!-- Middle plate -->
+    <visual name="base_plate_middle">
+      <origin xyz="0 0 0.075" rpy="0 0 0"/>
       <geometry>
-        <box size="0.138 0.178 0.005"/>
+        <box size="0.138 0.150 0.005"/>
       </geometry>
-      <material name="dark_grey"/>
+      <material name="dark_gray"/>
     </visual>
-    <collision name="base_plate_upper_col">
-      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+
+    <collision name="base_plate_middle_collision">
+      <origin xyz="0 0 0.075" rpy="0 0 0"/>
       <geometry>
-        <box size="0.138 0.178 0.005"/>
+        <box size="0.138 0.150 0.005"/>
       </geometry>
     </collision>
 
-    <!-- 4개 지지 기둥 -->
-    <!-- Front Left -->
-    <visual name="pillar_fl">
-      <origin xyz="0.05 0.065 0.025" rpy="0 0 0"/>
+    <!-- Upper plate -->
+    <visual name="base_plate_upper">
+      <origin xyz="0 0 0.135" rpy="0 0 0"/>
       <geometry>
-        <!-- MuJoCo size="0.006 0.025" (radius, half-length) -> URDF (radius, length) -->
-        <cylinder radius="0.006" length="0.05"/>
+        <box size="0.138 0.150 0.005"/>
       </geometry>
-      <material name="light_grey">
+      <material name="dark_gray"/>
+    </visual>
+
+    <collision name="base_plate_upper_collision">
+      <origin xyz="0 0 0.135" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.138 0.150 0.005"/>
+      </geometry>
+    </collision>
+
+    <!-- ================================================================
+         Support pillars
+         MJCF:
+         radius 0.004
+         length 0.13
+         ================================================================ -->
+
+    <visual name="pillar_fl">
+      <origin xyz="0.05 0.055 0.07"/>
+      <geometry>
+        <cylinder radius="0.004" length="0.13"/>
+      </geometry>
+      <material name="pillar_gray">
         <color rgba="0.7 0.7 0.7 1"/>
       </material>
     </visual>
-    <!-- Front Right -->
+
     <visual name="pillar_fr">
-      <origin xyz="0.05 -0.065 0.025" rpy="0 0 0"/>
+      <origin xyz="0.05 -0.055 0.07"/>
       <geometry>
-        <cylinder radius="0.006" length="0.05"/>
+        <cylinder radius="0.004" length="0.13"/>
       </geometry>
-      <material name="light_grey"/>
+      <material name="pillar_gray"/>
     </visual>
-    <!-- Rear Left -->
+
     <visual name="pillar_rl">
-      <origin xyz="-0.05 0.065 0.025" rpy="0 0 0"/>
+      <origin xyz="-0.05 0.055 0.07"/>
       <geometry>
-        <cylinder radius="0.006" length="0.05"/>
+        <cylinder radius="0.004" length="0.13"/>
       </geometry>
-      <material name="light_grey"/>
+      <material name="pillar_gray"/>
     </visual>
-    <!-- Rear Right -->
+
     <visual name="pillar_rr">
-      <origin xyz="-0.05 -0.065 0.025" rpy="0 0 0"/>
+      <origin xyz="-0.05 -0.055 0.07"/>
       <geometry>
-        <cylinder radius="0.006" length="0.05"/>
+        <cylinder radius="0.004" length="0.13"/>
       </geometry>
-      <material name="light_grey"/>
+      <material name="pillar_gray"/>
     </visual>
   </link>
 
   <!-- ================================================================
-       바퀴 및 구동부
+       LEFT DRIVE WHEEL
+       MJCF:
+       pos = (0 0.08 0)
+       mass = 0.04
+       hinge joint
        ================================================================ -->
-  <!-- 왼쪽 구동 바퀴 -->
+
   <link name="wheel_left_link">
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.05"/>
-      <inertia ixx="0.00003" ixy="0" ixz="0" iyy="0.00003" iyz="0" izz="0.00005"/>
+      <mass value="0.04"/>
+      <inertia
+        ixx="0.00002"
+        ixy="0"
+        ixz="0"
+        iyy="0.00002"
+        iyz="0"
+        izz="0.00003"/>
     </inertial>
+
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="1.570796 0 0"/>
       <geometry>
-        <cylinder radius="0.033" length="0.025"/>
+        <cylinder radius="0.033" length="0.018"/>
       </geometry>
-      <material name="black">
+      <material name="wheel_black">
         <color rgba="0.05 0.05 0.05 1"/>
       </material>
     </visual>
+
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="1.570796 0 0"/>
       <geometry>
-        <cylinder radius="0.033" length="0.025"/>
+        <cylinder radius="0.033" length="0.018"/>
       </geometry>
     </collision>
   </link>
+
   <joint name="drive_left" type="fixed">
     <parent link="base_link"/>
     <child link="wheel_left_link"/>
-    <origin xyz="0 0.08 0" rpy="-1.570796 0 0"/> <!-- Roll 90deg -> 실린더의 z축이 바퀴 회전축(y축)이 되도록 정렬 -->
+    <origin xyz="0 0.08 0"
+            rpy="-1.570796 0 0"/>
     <axis xyz="0 0 1"/>
-  </joint>
-
-  <!-- 오른쪽 구동 바퀴 -->
-  <link name="wheel_right_link">
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.05"/>
-      <inertia ixx="0.00003" ixy="0" ixz="0" iyy="0.00003" iyz="0" izz="0.00005"/>
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <cylinder radius="0.033" length="0.025"/>
-      </geometry>
-      <material name="black"/>
-    </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <cylinder radius="0.033" length="0.025"/>
-      </geometry>
-    </collision>
-  </link>
-  <joint name="drive_right" type="fixed">
-    <parent link="base_link"/>
-    <child link="wheel_right_link"/>
-    <origin xyz="0 -0.08 0" rpy="-1.570796 0 0"/>
-    <axis xyz="0 0 1"/>
-  </joint>
-
-  <!-- 후방 볼 캐스터 (3점 지지) -->
-  <link name="caster_ball_link">
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.02"/>
-      <inertia ixx="0.0000008" ixy="0" ixz="0" iyy="0.0000008" iyz="0" izz="0.0000008"/>
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <sphere radius="0.01"/>
-      </geometry>
-      <material name="caster_grey">
-        <color rgba="0.6 0.6 0.6 1"/>
-      </material>
-    </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <sphere radius="0.01"/>
-      </geometry>
-    </collision>
-  </link>
-  <joint name="caster_joint" type="fixed">
-    <parent link="base_link"/>
-    <child link="caster_ball_link"/>
-    <origin xyz="-0.06 0 -0.023" rpy="0 0 0"/>
+    <dynamics
+      damping="0.005"
+      friction="0.01"/>
   </joint>
 
   <!-- ================================================================
-       센서 타워 및 센서 모듈
+       RIGHT DRIVE WHEEL
        ================================================================ -->
-  <!-- 센서 타워 베이스 -->
-  <link name="sensor_tower_link">
-    <visual name="tower_post">
-      <origin xyz="0 0 0.0535" rpy="0 0 0"/>
+
+  <link name="wheel_right_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.04"/>
+      <inertia
+        ixx="0.00002"
+        ixy="0"
+        ixz="0"
+        iyy="0.00002"
+        iyz="0"
+        izz="0.00003"/>
+    </inertial>
+
+    <visual>
+      <origin xyz="0 0 0" rpy="1.570796 0 0"/>
       <geometry>
-        <cylinder radius="0.01" length="0.107"/>
+        <cylinder radius="0.033" length="0.018"/>
       </geometry>
-      <material name="tower_grey">
+      <material name="wheel_black"/>
+    </visual>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="1.570796 0 0"/>
+      <geometry>
+        <cylinder radius="0.033" length="0.018"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="drive_right" type="fixed">
+    <parent link="base_link"/>
+    <child link="wheel_right_link"/>
+    <origin xyz="0 -0.08 0"
+            rpy="-1.570796 0 0"/>
+    <axis xyz="0 0 1"/>
+    <dynamics
+      damping="0.005"
+      friction="0.01"/>
+  </joint>
+
+  <!-- ================================================================
+       REAR CASTER BALL
+       MJCF:
+       pos = (-0.055 0 -0.023)
+       mass = 0.01
+       ================================================================ -->
+
+  <link name="caster_ball_link">
+    <inertial>
+      <origin xyz="0 0 0"/>
+      <mass value="0.01"/>
+      <inertia
+        ixx="0.0000008"
+        ixy="0"
+        ixz="0"
+        iyy="0.0000008"
+        iyz="0"
+        izz="0.0000008"/>
+    </inertial>
+
+    <visual>
+      <geometry>
+        <sphere radius="0.010"/>
+      </geometry>
+      <material name="caster_gray">
+        <color rgba="0.6 0.6 0.6 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <sphere radius="0.010"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="caster_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="caster_ball_link"/>
+    <origin xyz="-0.055 0 -0.023"
+            rpy="0 0 0"/>
+  </joint>
+
+  <!-- ================================================================
+       SENSOR TOWER
+       MJCF:
+       body pos="0 0 0.1375"
+       ================================================================ -->
+
+  <link name="sensor_tower_link">
+
+    <inertial>
+      <origin xyz="0 0 0.015" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia
+        ixx="0.000048"
+        ixy="0"
+        ixz="0"
+        iyy="0.000048"
+        iyz="0"
+        izz="0.0000025"/>
+    </inertial>
+
+    <visual>
+      <origin xyz="0 0 0.015"/>
+      <geometry>
+        <cylinder radius="0.008" length="0.03"/>
+      </geometry>
+
+      <material name="tower_gray">
         <color rgba="0.3 0.3 0.3 1"/>
       </material>
     </visual>
-    <inertial>
-      <origin xyz="0 0 0.0535" rpy="0 0 0"/>
-      <mass value="0.05"/>
-      <inertia ixx="0.000048" ixy="0" ixz="0" iyy="0.000048" iyz="0" izz="0.0000025"/>
-    </inertial>
   </link>
+
   <joint name="sensor_tower_joint" type="fixed">
     <parent link="base_link"/>
     <child link="sensor_tower_link"/>
-    <origin xyz="0 0 0.055" rpy="0 0 0"/>
+    <origin xyz="0 0 0.1375"
+            rpy="0 0 0"/>
   </joint>
 
-  <!-- LDS-01 LiDAR 센서 -->
+  <!-- ================================================================
+       LDS-01 LiDAR
+       MJCF:
+       mass 0.08
+       pos relative tower = 0 0 0.030
+       ================================================================ -->
+
   <link name="lidar_link">
     <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.1"/>
-      <inertia ixx="0.00005" ixy="0" ixz="0" iyy="0.00005" iyz="0" izz="0.00003"/>
+      <origin xyz="0 0 0"/>
+      <mass value="0.08"/>
+      <inertia
+        ixx="0.00003"
+        ixy="0"
+        ixz="0"
+        iyy="0.00003"
+        iyz="0"
+        izz="0.00002"/>
     </inertial>
+
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="0.035" length="0.036"/>
+        <cylinder radius="0.035" length="0.024"/>
       </geometry>
-      <material name="very_dark_grey">
+
+      <material name="lidar_black">
         <color rgba="0.1 0.1 0.1 1"/>
       </material>
     </visual>
   </link>
+
   <joint name="lidar_joint" type="fixed">
     <parent link="sensor_tower_link"/>
     <child link="lidar_link"/>
-    <origin xyz="0.07 0 0.107" rpy="0 0 0"/>
+    <origin xyz="0 0 0.030"
+            rpy="0 0 0"/>
   </joint>
 
-  <!-- RGB-D 카메라 -->
+  <!-- ================================================================
+       RGB-D CAMERA
+       MJCF:
+       camera_body pos="-0.05 0 0.2125"
+       mass 0.02
+       ================================================================ -->
+
   <link name="camera_link">
     <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.03"/>
-      <inertia ixx="0.000004" ixy="0" ixz="0" iyy="0.0000009" iyz="0" izz="0.000004"/>
+      <origin xyz="0 0 0"/>
+      <mass value="0.02"/>
+      <inertia
+        ixx="0.000004"
+        ixy="0"
+        ixz="0"
+        iyy="0.0000009"
+        iyz="0"
+        izz="0.000004"/>
     </inertial>
+
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.03 0.08 0.024"/>
+        <box size="0.024 0.070 0.020"/>
       </geometry>
-      <material name="camera_grey">
+
+      <material name="camera_gray">
         <color rgba="0.2 0.2 0.2 1"/>
       </material>
     </visual>
   </link>
+
   <joint name="camera_joint" type="fixed">
     <parent link="sensor_tower_link"/>
     <child link="camera_link"/>
-    <origin xyz="0.069 0 0.06" rpy="0 0 0"/>
+    <origin xyz="-0.05 0 0.2125"
+            rpy="0 0 0"/>
   </joint>
 
-  <!-- IMU 센서 가상 링크 -->
-  <link name="imu_link"/>
+  <!-- ================================================================
+       IMU
+       ================================================================ -->
+
+  <link name="imu_link">
+    <inertial>
+      <origin xyz="0 0 0"/>
+      <mass value="0.001"/>
+      <inertia
+        ixx="0.000001"
+        ixy="0"
+        ixz="0"
+        iyy="0.000001"
+        iyz="0"
+        izz="0.000001"/>
+    </inertial>
+  </link>
+
   <joint name="imu_joint" type="fixed">
     <parent link="sensor_tower_link"/>
     <child link="imu_link"/>
-    <origin xyz="0 0 0.01" rpy="0 0 0"/>
+    <origin xyz="0 0 0.005"
+            rpy="0 0 0"/>
   </joint>
 
+  <!-- ================================================================
+       ROS2 CONTROL
+       MJCF actuator 대응
+       ================================================================ -->
+
+  <ros2_control name="turtlebot_drive"
+                type="system">
+
+    <hardware>
+      <plugin>
+        diff_drive_controller/DiffDriveController
+      </plugin>
+    </hardware>
+
+    <joint name="drive_left">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="drive_right">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
 </robot>
