@@ -111,7 +111,7 @@
 
         <!-- 전도된(쓰러진) 작업자 -->
         <body name="worker_fallen" pos="-2 -2 0" quat="0.707 0 0.707 0">
-            <geom name="fallen_body" type="cylinder" size="0.2 0.6" pos="0 0 0.2" rgba="0.8 0.2 0.2 1" mass="70.0"/>
+            <geom name="fallen_body" type="cylinder" size="0.2 0.6" pos="0 0 0.2" rgba="0.25 0.28 0.32 1" mass="70.0"/>
             <geom name="fallen_head" type="sphere" size="0.15" pos="0 0 0.95" rgba="0.9 0.7 0.6 1" mass="5.0"/>
         </body>
 
@@ -120,11 +120,39 @@
              ================================================================ -->
         <!-- 특정 적치물에서 발화가 일어난 상황 (시각적 + 가상 온도 감지용) -->
         <body name="fire_zone" pos="3.5 3.5 0">
-            <geom name="burning_cargo" type="box" size="0.4 0.4 0.4" pos="0 0 0.4" rgba="0.2 0.2 0.2 1" mass="30.0"/>
-            <!-- 불꽃을 표현하는 반투명 붉은/주황색 객체들 -->
-            <geom name="flame_1" type="sphere" size="0.3" pos="0 0 0.9" rgba="1 0.35 0.05 0.8" contype="0" conaffinity="0"/>
-            <geom name="flame_2" type="sphere" size="0.2" pos="0.1 0.1 1.1" rgba="1 0.7 0.1 0.7" contype="0" conaffinity="0"/>
-            <geom name="smoke_1" type="sphere" size="0.4" pos="-0.1 -0.1 1.4" rgba="0.15 0.15 0.15 0.4" contype="0" conaffinity="0"/>
+            <!-- Burned cargo -->
+            <geom name="burning_cargo" type="box"
+                size="0.40 0.40 0.40" pos="0 0 0.40"
+                rgba="0.18 0.18 0.18 1" mass="30"/>
+
+            <!-- Lower flame (reddish orange) -->
+            <geom name="flame_base" type="sphere"
+                size="0.32" pos="0 0 0.88"
+                rgba="1.0 0.28 0.03 0.90"
+                contype="0" conaffinity="0"/>
+
+            <!-- Middle flame (orange) -->
+            <geom name="flame_mid" type="sphere" size="0.24"
+                pos="0.03 -0.02 1.08"
+                rgba="1.0 0.55 0.06 0.80"
+                contype="0" conaffinity="0"/>
+
+            <!-- Upper flame (yellow) -->
+            <geom name="flame_top" type="sphere"
+                size="0.16" pos="-0.02 0.02 1.25"
+                rgba="1.0 0.85 0.18 0.70"
+                contype="0" conaffinity="0"/>
+
+            <!-- Smoke -->
+            <geom name="smoke_1" type="sphere"
+                size="0.38" pos="-0.08 -0.05 1.50"
+                rgba="0.18 0.18 0.18 0.35"
+                contype="0" conaffinity="0"/>
+
+            <geom name="smoke_2" type="sphere"
+                size="0.48" pos="0.05 0.02 1.82"
+                rgba="0.25 0.25 0.25 0.22"
+                contype="0" conaffinity="0"/>
         </body>
 
         <!-- ================================================================
