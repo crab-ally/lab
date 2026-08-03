@@ -398,6 +398,7 @@ def main():
         print("터틀봇 실내 순찰 시뮬레이션 및 ROS2 브릿지 시작...")
 
         node = MujocoRosBridge(model, data)
+        node.renderer = mujoco.Renderer(model, 480, 640)
 
         # ROS2 spin 시작
         spin_thread = threading.Thread(
