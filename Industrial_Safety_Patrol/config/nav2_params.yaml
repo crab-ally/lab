@@ -136,7 +136,7 @@ controller_server:
       sim_time: 2.5 # 미래 궤적을 예측할 시간(초)
       linear_granularity: 0.05
       angular_granularity: 0.025
-      transform_tolerance: 0.1
+      transform_tolerance: 0.3
       xy_goal_tolerance: 0.1
       trans_stopped_velocity: 0.05 # 정지 상태로 판단하는 최소 이동 속도(m/s)
       short_circuit_trajectory_evaluation: True
@@ -166,6 +166,7 @@ local_costmap:
       robot_base_frame: base_footprint
       use_sim_time: true
       rolling_window: true
+      transform_tolerance: 1.0
       width: 3  # costmap 가로 크기
       height: 3 # costmap 세로 크기
       resolution: 0.05
@@ -195,6 +196,7 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_footprint
       use_sim_time: true
+      transform_tolerance: 1.0
       # 로봇 크기
       robot_radius: 0.15
       resolution: 0.05
@@ -255,7 +257,7 @@ behavior_server:
       plugin: "nav2_behaviors/Wait"
     global_frame: odom
     robot_base_frame: base_footprint
-    transform_timeout: 0.1
+    transform_timeout: 1.0
     use_sim_time: true
     simulate_ahead_time: 2.0
     max_rotational_vel: 1.2 # 회전 속도 제한(rad/s)
