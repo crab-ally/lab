@@ -1,6 +1,6 @@
 <mujoco model="turtlebot_patrol">
     <compiler angle="degree" coordinate="local" inertiafromgeom="false"/>
-    <option integrator="implicitfast" timestep="0.005" gravity="0 0 -9.81"/> <!-- 200Hz 물리, 제어는 100Hz -->
+    <option integrator="implicitfast" timestep="0.005" gravity="0 0 -9.81"/> <!-- 200Hz 물리 -->
 
     <default>
         <joint damping="0.01" armature="0.001"/>
@@ -8,112 +8,127 @@
     </default>
 
     <worldbody>
-        <!-- ================================================================
-             <Quaternion (쿼터니언)>
-             - 회전축 = (ax, ay, az), 회전각도 = θ
-             - w = cos(θ/2)
-             - x = ax × sin(θ/2)
-             - y = ay × sin(θ/2)
-             - z = az × sin(θ/2)  
-             ================================================================ -->
-        <!-- ================================================================
-             <TurtleBot3 Burger 로봇 본체>
-             (ROBOTIS 공식 스펙 기반 현실 크기)
-             크기: 138mm(L) x 178mm(W) x 192mm(H)
-             무게: ~1.0 kg
-             바퀴 반경: 33mm, 트랙 폭: 160mm
-             ================================================================ -->
-        <body name="base_link" pos="-4 -4 0.043" quat="0.707107 0 0 0.707107">
+        <!-- base_link 높이: 바퀴 반경 0.033m에 맞추어 z=0.033에 배치 -->
+        <body name="base_link" pos="-4 -4 0.033" quat="0.707107 0 0 0.707107">
             <freejoint name="root"/>
-            <inertial pos="-0.02 0 0.005" mass="0.7"
-                      diaginertia="0.0012 0.0012 0.0018"/>
-            <!-- 하단 플레이트 (1층: 모터+배터리) -->
-            <geom name="base_plate_lower" type="box"
-                  size="0.069 0.089 0.0025" pos="0 0 0"
-                  rgba="0.15 0.15 0.15 1"/>
-            <!-- 상단 플레이트 (2층: SBC) -->
-            <geom name="base_plate_upper" type="box"
-                  size="0.069 0.089 0.0025" pos="0 0 0.05"
-                  rgba="0.15 0.15 0.15 1"/>
-            <!-- 4개 지지 기둥 -->
-            <geom name="pillar_fl" type="cylinder" size="0.006 0.025"
-                  pos="0.05 0.065 0.025" rgba="0.7 0.7 0.7 1"
-                  contype="0" conaffinity="0"/>
-            <geom name="pillar_fr" type="cylinder" size="0.006 0.025"
-                  pos="0.05 -0.065 0.025" rgba="0.7 0.7 0.7 1"
-                  contype="0" conaffinity="0"/>
-            <geom name="pillar_rl" type="cylinder" size="0.006 0.025"
-                  pos="-0.05 0.065 0.025" rgba="0.7 0.7 0.7 1"
-                  contype="0" conaffinity="0"/>
-            <geom name="pillar_rr" type="cylinder" size="0.006 0.025"
-                  pos="-0.05 -0.065 0.025" rgba="0.7 0.7 0.7 1"
-                  contype="0" conaffinity="0"/>
+            
+            <!-- 
+                [핵심 수정: 무게중심 조정]
+                - mass: 로봇 전체 질량의 대부분(약 0.85kg)을 base_link에 집약
+                - pos: 바퀴 중심(0,0)보다 약간 뒤(-0.025m) 및 낮은 위치(0.02m)로 설정
+                -> acceleration/deceleration 시 쏠림 최소화 및 3점 지지 안정성 확보
+            -->
+            <inertial pos="-0.025 0 0.020" mass="0.85"
+                      diaginertia="0.0022 0.0022 0.0035"/>
 
-            <!-- 왼쪽 구동 바퀴 (DYNAMIXEL XL430-W250-T) -->
+            <!-- 1층: 하단 플레이트 (z = 0.005) -->
+            <geom name="base_plate_lower" type="box"
+                  size="0.069 0.075 0.0025" pos="0 0 0.005"
+                  rgba="0.15 0.15 0.15 1"/>
+
+            <!-- 2층: 중단 플레이트 (z = 0.075) -->
+            <geom name="base_plate_middle" type="box"
+                  size="0.069 0.075 0.0025" pos="0 0 0.075"
+                  rgba="0.15 0.15 0.15 1"/>
+
+            <!-- 3층: 상단 플레이트 (z = 0.135) -->
+            <geom name="base_plate_upper" type="box"
+                  size="0.069 0.075 0.0025" pos="0 0 0.135"
+                  rgba="0.15 0.15 0.15 1"/>
+
+            <!-- 플레이트 간 지지 기둥 (1층 ~ 3층 연결) -->
+            <geom name="pillar_fl" type="cylinder"
+                  size="0.004 0.065" pos="0.05 0.055 0.070"
+                  rgba="0.7 0.7 0.7 1" contype="0" conaffinity="0"/>
+            <geom name="pillar_fr" type="cylinder"
+                  size="0.004 0.065" pos="0.05 -0.055 0.070"
+                  rgba="0.7 0.7 0.7 1" contype="0" conaffinity="0"/>
+            <geom name="pillar_rl" type="cylinder"
+                  size="0.004 0.065" pos="-0.05 0.055 0.070"
+                  rgba="0.7 0.7 0.7 1" contype="0" conaffinity="0"/>
+            <geom name="pillar_rr" type="cylinder"
+                  size="0.004 0.065" pos="-0.05 -0.055 0.070"
+                  rgba="0.7 0.7 0.7 1" contype="0" conaffinity="0"/>
+
+            <!-- 왼쪽 구동 바퀴 -->
             <body name="wheel_left" pos="0 0.08 0" quat="0.707107 0.707107 0 0">
                 <joint name="drive_left" type="hinge" axis="0 0 -1"
                        damping="0.005" frictionloss="0.01"/>
-                <inertial pos="0 0 0" mass="0.05"
-                          diaginertia="0.00003 0.00003 0.00005"/>
+                <inertial pos="0 0 0" mass="0.04"
+                          diaginertia="0.00002 0.00002 0.00003"/>
                 <geom name="wheel_left_geom" type="cylinder"
-                      size="0.033 0.0125" rgba="0.05 0.05 0.05 1"
-                      friction="1.5 0.005 0.0001"/>
+                      size="0.033 0.009" rgba="0.05 0.05 0.05 1"
+                      friction="1.2 0.005 0.0001"/>
             </body>
 
             <!-- 오른쪽 구동 바퀴 -->
             <body name="wheel_right" pos="0 -0.08 0" quat="0.707107 0.707107 0 0">
                 <joint name="drive_right" type="hinge" axis="0 0 -1"
                        damping="0.005" frictionloss="0.01"/>
-                <inertial pos="0 0 0" mass="0.05"
-                          diaginertia="0.00003 0.00003 0.00005"/>
+                <inertial pos="0 0 0" mass="0.04"
+                          diaginertia="0.00002 0.00002 0.00003"/>
                 <geom name="wheel_right_geom" type="cylinder"
-                      size="0.033 0.0125" rgba="0.05 0.05 0.05 1"
-                      friction="1.5 0.005 0.0001"/>
+                      size="0.033 0.009" rgba="0.05 0.05 0.05 1"
+                      friction="1.2 0.005 0.0001"/>
             </body>
 
-            <!-- 후방 볼 캐스터 (3점 지지) -->
-            <body name="caster_ball" pos="-0.06 0 -0.023">
-                <geom name="caster_geom" type="sphere" size="0.01"
-                      rgba="0.6 0.6 0.6 1" friction="0.1 0.005 0.0001"
-                      mass="0.02"/>
+            <!-- 
+                [핵심 수정: 후방 볼 캐스터]
+                - pos: z = -0.023m (반경 0.010m 포함 시 ground level z=-0.033m에 정확히 오차 없이 접지)
+                - friction: 슬라이딩 마찰을 극소화(0.005)하여 주행 저항 및 기울어짐 회전력 차단
+            -->
+            <body name="caster_ball" pos="-0.055 0 -0.023">
+                <geom name="caster_geom" type="sphere" size="0.010"
+                      rgba="0.6 0.6 0.6 1" friction="0.005 0.001 0.0001"
+                      mass="0.01"/>
             </body>
 
-            <!-- 센서 타워 -->
-            <body name="sensor_tower" pos="0 0 0.055">
-                <!-- LiDAR 마운트 기둥 -->
+            <!-- 센서 타워 및 센서류 -->
+            <body name="sensor_tower" pos="0 0 0.1375">
+                <!-- LiDAR 마운트 -->
                 <geom name="tower_post" type="cylinder"
-                      size="0.01 0.0535" pos="0 0 0.0535"
-                      rgba="0.3 0.3 0.3 1" contype="0" conaffinity="0" mass="0.05"/>
+                      size="0.008 0.015" pos="0 0 0.015"
+                      rgba="0.3 0.3 0.3 1" contype="0" conaffinity="0" mass="0.01"/>
 
-                <!-- LDS-01 LiDAR 센서 (360빔, 1° 간격 → 360°) -->
-                <body name="lidar_body" pos="0 0 0.107">
-                    <inertial pos="0 0 0" mass="0.1"
-                              diaginertia="0.00005 0.00005 0.00003"/>
+                <!-- LDS-01 LiDAR 센서 -->
+                <body name="lidar_body" pos="0 0 0.030">
+                    <inertial pos="0 0 0" mass="0.08"
+                              diaginertia="0.00003 0.00003 0.00002"/>
                     <geom name="lidar_geom" type="cylinder"
-                          size="0.035 0.018" rgba="0.1 0.1 0.1 1"
+                          size="0.035 0.012" rgba="0.1 0.1 0.1 1"
                           contype="0" conaffinity="0"/>
                     <replicate count="360" sep="-" offset="0 0 0" euler="0 0 1">
-                        <site name="lidar_site" pos="0.07 0 0" euler="0 90 0" size="0.005"/>
+                        <site name="lidar_site" pos="0.036 0 0" euler="0 90 0" size="0.002"/>
                     </replicate>
                 </body>
 
-                <!-- RGB-D 카메라 (전방): PPE, 화재, 쓰러짐 탐지 -->
-                <body name="camera_body" pos="0.069 0 0.06">
+                <!-- 카메라 후방 지지대 -->
+                <geom name="camera_support"
+                      type="cylinder"
+                      size="0.006 0.10"
+                      pos="-0.05 0 0.10"
+                      rgba="0.3 0.3 0.3 1"
+                      contype="0"
+                      conaffinity="0"
+                      mass="0.03"/>
+
+                <!-- RGB-D 카메라 -->
+                <body name="camera_body" pos="-0.05 0 0.2125">
                     <geom name="camera_geom" type="box"
-                          size="0.015 0.04 0.012" rgba="0.2 0.2 0.2 1"
-                          contype="0" conaffinity="0" mass="0.03"/>
+                          size="0.012 0.035 0.010" rgba="0.2 0.2 0.2 1"
+                          contype="0" conaffinity="0" mass="0.02"/>
                     <camera name="patrol_camera" pos="0 0 0"
-                            fovy="58" quat="0.5 0.5 -0.5 0.5"/>
-                    <site name="camera_site" pos="0 0 0" size="0.005"/>
+                            fovy="58" quat="0.5 0.5 -0.5 -0.5"/>
+                    <site name="camera_site" pos="0 0 0" size="0.003"/>
                 </body>
 
-                <!-- IMU 센서 위치 -->
-                <site name="imu_site" pos="0 0 0.01" size="0.005"/>
+                <!-- IMU 센서 -->
+                <site name="imu_site" pos="0 0 0.005" size="0.003"/>
             </body>
         </body>
     </worldbody>
 
-    <!-- ======== 액추에이터: DYNAMIXEL XL430-W250-T ======== -->
+    <!-- ======== 액추에이터 ======== -->
     <actuator>
         <velocity name="motor_left" joint="drive_left"
                   kv="5" forcerange="-1.4 1.4"
@@ -125,17 +140,9 @@
 
     <!-- ======== 센서 정의 ======== -->
     <sensor>
-        <!-- ================================================================
-             <LDS-01 LiDAR 참고>
-             360° × 360빔 (1° 해상도), 5~10Hz
-             거리: 0.12~3.5m
-             ================================================================ -->
-        <!-- 360도 스캔을 위한 360개 빔 개별 선언 -->
         <rangefinder name="lidar" site="lidar_site" cutoff="3.5"/>
-        <!-- IMU: 3축 가속도계 + 3축 자이로스코프 -->
         <accelerometer name="imu_accel" site="imu_site"/>
         <gyro name="imu_gyro" site="imu_site"/>
-        <!-- 바퀴 인코더: 바퀴의 회전량과 회전 속도를 측정 -->
         <jointvel name="encoder_left" joint="drive_left"/>
         <jointvel name="encoder_right" joint="drive_right"/>
         <jointpos name="encoder_pos_left" joint="drive_left"/>
