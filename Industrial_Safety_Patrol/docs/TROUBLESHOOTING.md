@@ -935,3 +935,50 @@ msg.ranges = clean_ranges
 ```
 
 라이다 스펙 상 최대 거리는 inf 처리하여 장애물 없는 것으로 인식
+
+---
+
+# 23. Nav2 odom 변환(TF) 타임아웃 및 Odom 발행 주기 저하 오류
+
+## 파일
+
+`scripts/mujoco_ros2_bridge.py`
+
+## 문제
+
+Nav2 및 RViz2 실행 시 odom -> base_footprint TF를 찾지 못하고 타임아웃 에러 발생
+
+```
+Invalid frame ID "odom" passed to canTransform argument target_frame - frame does not exist
+```
+
+## 원인
+
+main() 루프 내에서 매 물리 step(5ms)마다 node.renderer.render()를 통한 카메라 오프스크린 렌더링을 무겁게 실행함.
+이로 인해 시뮬레이션 루프에 심각한 병목(Bottleneck)이 발생하여, 설정된 Odom/TF 발행 주기가 원래 목표치(20Hz)에 크게 못 미치는 ~1.14 Hz까지 저하됨.
+
+Nav2는 최소 10~15Hz 이상의 TF 갱신을 요구하므로 TF 데이터를 수신하지 못해 대기 상태에 빠짐.
+
+```py
+# 기존 코드 (매 step마다 카메라 렌더링 호출되어 병목 발생)
+if node.renderer is not None:
+    node.renderer.update_scene(data, camera="patrol_camera")
+    pixels = node.renderer.render()
+    with node.camera_lock:
+        node.camera_image = pixels
+    node.publish_camera(stamp)
+```
+
+## 해결
+
+```py
+# 해결 코드 (카메라 렌더링 주기를 0.1초 간격으로 제한)
+if data.time >= last_camera_time + 0.1:
+    if node.renderer is not None:
+        node.renderer.update_scene(data, camera="patrol_camera")
+        pixels = node.renderer.render()
+        with node.camera_lock:
+            node.camera_image = pixels
+        node.publish_camera(stamp)
+    last_camera_time = data.time
+```
