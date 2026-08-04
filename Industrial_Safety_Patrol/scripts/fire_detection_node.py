@@ -86,9 +86,6 @@ class FireDetectionNode(Node):
             area = cv2.contourArea(contour)
             if area > min_area:
                 x, y, w, h = cv2.boundingRect(contour)
-                
-                # [추가 조건 1] 가로세로 비율 (Aspect Ratio)
-                aspect_ratio = float(w) / h
         
                 roi_depth = depth_image[y:y+h, x:x+w]
                 valid_depths = roi_depth[np.isfinite(roi_depth) & (roi_depth > 0)]
@@ -103,7 +100,7 @@ class FireDetectionNode(Node):
                     depth_std /= 1000.0
                     depth_mean /= 1000.0
 
-                # [추가 조건 2] 지게차/배경 구조물 제외 판정
+                # 지게차/배경 구조물 제외 판정
                 is_hydrant_or_vehicle = (depth_std < 0.04) or (w > 200 and depth_std < 0.08)
 
                 if is_hydrant_or_vehicle:
@@ -135,6 +132,7 @@ class FireDetectionNode(Node):
 
         # ==========================================================
         # 7. 결과 영상 및 알람 Publish
+        # !! 발행만 하고 사용처가 없음
         # ==========================================================
         try:
             processed_msg = self.bridge.cv2_to_imgmsg(cv_image, encoding='bgr8')
