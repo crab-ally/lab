@@ -201,7 +201,7 @@ ROS2 Topic:
 
 # Level 4. AI 위험 감지
 
-## 9. OpenCV 기반 화재 감지 ⭐⭐⭐☆☆ ❌
+## 9. OpenCV 기반 화재 감지 ⭐⭐⭐☆☆ ⭕
 
 난이도: ★★★☆☆
 
@@ -212,6 +212,8 @@ ROS2 Topic:
     HSV 변환
           ↓
     불꽃 색상 검출
+          ↓
+    Depth 정보 활용
           ↓
     Fire Detection
 
