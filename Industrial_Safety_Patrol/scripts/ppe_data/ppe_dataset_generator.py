@@ -40,12 +40,7 @@ cam_id = mujoco.mj_name2id(
     "dataset_camera"
 )
 
-# Light
-light_id = mujoco.mj_name2id(
-    model,
-    mujoco.mjtObj.mjOBJ_LIGHT,
-    "dataset_light"
-)
+
 
 ################################################
 # Workers
@@ -115,12 +110,69 @@ def project(point):
     fovy = model.cam_fovy[cam_id]
     f = HEIGHT / (2 * np.tan(np.deg2rad(fovy) / 2))
 
-    u = f * x / z + WIDTH / 2
-
-    # OpenCV y축
-    v = HEIGHT / 2 - f * y / z
+    u = WIDTH / 2 + f * x / depth
+    v = HEIGHT / 2 - f * y / depth
 
     return (u, v)
+
+################################################
+# Collision Avoidance
+################################################
+
+def is_valid_position(x, y, radius=0.4):
+    for i in range(model.ngeom):
+        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, i)
+        if name and (name.startswith("worker") or name == "floor"):
+            continue
+        
+        pos = model.geom_pos[i]
+        size = model.geom_size[i]
+        gtype = model.geom_type[i]
+        
+        dx = abs(x - pos[0])
+        dy = abs(y - pos[1])
+        
+        if gtype == mujoco.mjtGeom.mjGEOM_BOX:
+            if dx < size[0] + radius and dy < size[1] + radius:
+                return False
+        elif gtype in (mujoco.mjtGeom.mjGEOM_CYLINDER, mujoco.mjtGeom.mjGEOM_SPHERE):
+            if np.hypot(dx, dy) < size[0] + radius:
+                return False
+    return True
+
+################################################
+# Occlusion check
+################################################
+
+def is_visible(point, worker_idx):
+    
+    pix = project(point)
+    if pix is None:
+        return False
+    u, v = pix
+    if not (0 <= u < WIDTH and 0 <= v < HEIGHT):
+        return False
+
+    cam_pos = data.cam_xpos[cam_id]
+    vec = point - cam_pos
+    dist = np.linalg.norm(vec)
+    if dist < 1e-6:
+        return True
+        
+    vec_norm = vec / dist
+    geomid = np.array([-1], dtype=np.int32)
+    
+    # Cast ray from camera to point
+    hit_dist = mujoco.mj_ray(model, data, cam_pos, vec_norm, None, 1, -1, geomid)
+    
+    # If ray hits something before the point (with small margin)
+    if hit_dist >= 0 and hit_dist < dist - 0.05:
+        if geomid[0] != -1:
+            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geomid[0])
+            if name and name.startswith(f"worker_{worker_idx}_"):
+                return True
+        return False
+    return True
 
 ################################################
 # Sample geom surface
@@ -129,6 +181,7 @@ def project(point):
 def sample_geom_points(gid, n_circle=24, n_height=8):
 
     center = data.geom_xpos[gid]
+    R = data.geom_xmat[gid].reshape(3, 3)
     size = model.geom_size[gid]
     gtype = model.geom_type[gid]
 
@@ -147,11 +200,13 @@ def sample_geom_points(gid, n_circle=24, n_height=8):
 
             for z in np.linspace(-h, h, n_height):
 
-                pts.append(center + np.array([
+                local = np.array([
                     r*c,
                     r*s,
                     z
-                ]))
+                ])
+
+                pts.append(center + R @ local)
 
     # Sphere
     elif gtype == mujoco.mjtGeom.mjGEOM_SPHERE:
@@ -162,11 +217,13 @@ def sample_geom_points(gid, n_circle=24, n_height=8):
 
             for theta in np.linspace(0, 2*np.pi, 20, endpoint=False):
 
-                pts.append(center + np.array([
+                local = np.array([
                     r*np.sin(phi)*np.cos(theta),
                     r*np.sin(phi)*np.sin(theta),
                     r*np.cos(phi)
-                ]))
+                ])
+
+                pts.append(center + R @ local)
 
     # Box
     elif gtype == mujoco.mjtGeom.mjGEOM_BOX:
@@ -177,11 +234,13 @@ def sample_geom_points(gid, n_circle=24, n_height=8):
             for dy in (-sy, sy):
                 for dz in (-sz, sz):
 
-                    pts.append(center + np.array([
+                    local = np.array([
                         dx,
                         dy,
                         dz
-                    ]))
+                    ])
+
+                    pts.append(center + R @ local)
 
     # 기타 geom은 중심점만
     else:
@@ -190,12 +249,43 @@ def sample_geom_points(gid, n_circle=24, n_height=8):
 
     return pts
 
+################################################
+# Visible ratio
+################################################
+
+def visible_ratio(names, worker_idx):
+
+    visible = 0
+    total = 0
+
+    for name in names:
+
+        gid = mujoco.mj_name2id(
+            model,
+            mujoco.mjtObj.mjOBJ_GEOM,
+            name
+        )
+
+        if gid < 0:
+            continue
+
+        for p in sample_geom_points(gid):
+
+            total += 1
+
+            if is_visible(p, worker_idx):
+                visible += 1
+
+    if total == 0:
+        return 0.0
+
+    return visible / total
 
 ################################################
 # Generic BBox
 ################################################
 
-def bbox_from_geoms(names):
+def bbox_from_geoms(names, worker_idx):
 
     pixels=[]
 
@@ -211,6 +301,9 @@ def bbox_from_geoms(names):
             continue
 
         for p in sample_geom_points(gid):
+
+            if not is_visible(p, worker_idx):
+                continue
 
             pix=project(p)
 
@@ -274,8 +367,11 @@ def randomize_scene():
         # position
         ################################################
 
-        x=np.random.uniform(-5,5)
-        y=np.random.uniform(-5,5)
+        for _ in range(100):
+            x=np.random.uniform(-4.5,4.5)
+            y=np.random.uniform(-4.5,4.5)
+            if is_valid_position(x, y, 0.4):
+                break
         model.body_pos[bid]=[x,y,0]
 
         ################################################
@@ -359,44 +455,63 @@ def randomize_scene():
     # camera pose (robot mounted camera simulation)
     ################################################
 
-    # 카메라 높이 고정
+    # 카메라 높이
     CAM_Z = 0.383
 
-    # 위치만 랜덤
-    cam_x = np.random.uniform(-4,4)
-    cam_y = np.random.uniform(-4,4)
-    model.cam_pos[cam_id]=[cam_x, cam_y, CAM_Z]
+    # 먼저 바라볼 작업자 선택
+    target = random.choice(workers)
 
-    # 기본 카메라 설치 방향
-    base_quat = np.array([0.5,0.5,-0.5,-0.5])
+    # 최대 100번 시도
+    for _ in range(100):
 
-    # 로봇 yaw 방향 변화
-    yaw = np.random.uniform(-np.pi,np.pi)
+        cam_x = np.random.uniform(-4.5, 4.5)
+        cam_y = np.random.uniform(-4.5, 4.5)
+
+        if not is_valid_position(cam_x, cam_y, 0.3):
+            continue
+
+        dist = np.hypot(
+            target["x"] - cam_x,
+            target["y"] - cam_y
+        )
+
+        if 2.0 <= dist <= 6.0:
+            break
+
+    # 100번 모두 실패하면 마지막 위치 사용
+    model.cam_pos[cam_id] = [cam_x, cam_y, CAM_Z]
+
+    # 작업자를 바라보는 방향 계산
+    dx = target["x"] - cam_x
+    dy = target["y"] - cam_y
+
+    yaw = np.arctan2(dy, dx)
+
+    # ±25도 랜덤
+    yaw += np.random.uniform(
+        np.deg2rad(-25),
+        np.deg2rad(25)
+    )
+
+    base_quat = np.array([0.5, 0.5, -0.5, -0.5])
 
     yaw_quat = np.zeros(4)
+    mujoco.mju_axisAngle2Quat(
+        yaw_quat,
+        np.array([0, 0, 1]),
+        yaw
+    )
 
-    mujoco.mju_axisAngle2Quat(yaw_quat,np.array([0,0,1]),yaw)
-
-    # yaw rotation * camera base rotation
     result = np.zeros(4)
-
     mujoco.mju_mulQuat(
         result,
         yaw_quat,
         base_quat
     )
 
-    model.cam_quat[cam_id]=result
+    model.cam_quat[cam_id] = result
 
-    ################################################
-    # light
-    ################################################
 
-    model.light_pos[light_id]=[
-        np.random.uniform(-5,5),
-        np.random.uniform(-5,5),
-        np.random.uniform(3,7)
-    ]
 
     return workers
 
@@ -404,7 +519,7 @@ def randomize_scene():
 # Generate Dataset
 ################################################
 
-NUM_DATA=10000
+NUM_DATA=100
 
 TRAIN_RATIO = 0.8
 
@@ -428,10 +543,168 @@ for i in range(NUM_DATA):
     )
 
     img=renderer.render()
-    img=cv2.cvtColor(
-        img,
-        cv2.COLOR_RGB2BGR
-    )
+    img=cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+    ################################################
+    # Debug projection (All workers)
+    ################################################
+
+    for worker in workers:
+
+        idx = worker["id"]
+
+        parts = [
+            f"worker_{idx}_body",
+            f"worker_{idx}_head",
+        ]
+
+        if worker["helmet"]:
+            parts.append(f"worker_{idx}_helmet")
+
+        if worker["vest"]:
+            parts.append(f"worker_{idx}_vest")
+        
+        ################################################
+        # Label과 동일한 visibility 조건
+        ################################################
+
+        head_ratio = visible_ratio(
+            [f"worker_{idx}_head"],
+            idx
+        )
+
+        if head_ratio < 0.5:
+            continue
+
+        body_ratio = visible_ratio(
+            [f"worker_{idx}_body"],
+            idx
+        )
+
+        if body_ratio < 0.5:
+            continue
+
+        ################################################
+        # 1. Draw geom centers (Red)
+        ################################################
+
+        for geom_name in parts:
+
+            gid = mujoco.mj_name2id(
+                model,
+                mujoco.mjtObj.mjOBJ_GEOM,
+                geom_name
+            )
+
+            if gid < 0:
+                continue
+
+            world = data.geom_xpos[gid]
+
+            # 가려져 있으면 표시하지 않음
+            if not is_visible(world, idx):
+                continue
+
+            pix = project(world)
+
+            if pix is None:
+                continue
+
+            u, v = map(int, pix)
+
+            if 0 <= u < WIDTH and 0 <= v < HEIGHT:
+
+                cv2.circle(
+                    img,
+                    (u, v),
+                    6,
+                    (0, 0, 255),
+                    -1
+                )
+
+                cv2.putText(
+                    img,
+                    geom_name,
+                    (u + 6, v - 6),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.35,
+                    (0, 0, 255),
+                    1,
+                    cv2.LINE_AA
+                )
+
+        ################################################
+        # 2. Draw sampled surface points (Yellow)
+        ################################################
+
+        for geom_name in parts:
+
+            gid = mujoco.mj_name2id(
+                model,
+                mujoco.mjtObj.mjOBJ_GEOM,
+                geom_name
+            )
+
+            if gid < 0:
+                continue
+
+            for world in sample_geom_points(gid):
+
+                if not is_visible(world, idx):
+                    continue
+
+                pix = project(world)
+
+                if pix is None:
+                    continue
+
+                u, v = map(int, pix)
+
+                if 0 <= u < WIDTH and 0 <= v < HEIGHT:
+
+                    cv2.circle(
+                        img,
+                        (u, v),
+                        2,
+                        (0, 255, 255),
+                        -1
+                    )
+        ################################################
+        # 3. Draw bounding box (Blue)
+        ################################################
+
+        bbox = bbox_from_geoms(parts, idx)
+
+        if bbox is None:
+            continue
+
+        x1, y1, x2, y2 = bbox
+
+        cv2.rectangle(
+            img,
+            (x1, y1),
+            (x2, y2),
+            (255, 0, 0),
+            2
+        )
+
+        ################################################
+        # 4. Draw bbox corners (Magenta)
+        ################################################
+
+        cv2.circle(img, (x1, y1), 5, (255, 0, 255), -1)
+        cv2.circle(img, (x2, y2), 5, (255, 0, 255), -1)
+
+        cv2.putText(
+            img,
+            f"W{idx}",
+            (x1, y1 - 8),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (255, 0, 255),
+            1,
+            cv2.LINE_AA
+        )
 
     labels=[]
 
@@ -442,6 +715,26 @@ for i in range(NUM_DATA):
     for worker in workers:
 
         idx=worker["id"]
+
+        ################################################
+        # Skip if head or body is not visible
+        ################################################
+
+        head_ratio = visible_ratio(
+            [f"worker_{idx}_head"],
+            idx
+        )
+
+        if head_ratio < 0.5:
+            continue
+
+        body_ratio = visible_ratio(
+            [f"worker_{idx}_body"],
+            idx
+        )
+
+        if body_ratio < 0.5:
+            continue
 
         # person
         parts=[
@@ -456,7 +749,7 @@ for i in range(NUM_DATA):
             parts.append(
                 f"worker_{idx}_vest"
             )
-        bbox=bbox_from_geoms(parts)
+        bbox=bbox_from_geoms(parts, idx)
 
         if bbox:
             labels.append(
@@ -470,7 +763,7 @@ for i in range(NUM_DATA):
             helmet=bbox_from_geoms(
                 [
                     f"worker_{idx}_helmet"
-                ]
+                ], idx
             )
             if helmet:
                 labels.append(
@@ -481,7 +774,7 @@ for i in range(NUM_DATA):
             vest=bbox_from_geoms(
                 [
                     f"worker_{idx}_vest"
-                ]
+                ], idx
             )
             if vest:
                 labels.append(
@@ -554,8 +847,7 @@ for i in range(NUM_DATA):
             "image":name+".jpg",
             "workers":workers,
             "camera":model.cam_pos[cam_id].tolist(),
-            "camera_quat":model.cam_quat[cam_id].tolist(),
-            "light":model.light_pos[light_id].tolist()
+            "camera_quat":model.cam_quat[cam_id].tolist()
         }
     )
 
