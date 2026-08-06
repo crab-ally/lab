@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+"""
+NUM_DATA
+"""
 
 import mujoco
 import numpy as np
@@ -519,7 +522,7 @@ def randomize_scene():
 # Generate Dataset
 ################################################
 
-NUM_DATA=100
+NUM_DATA=8000
 
 TRAIN_RATIO = 0.8
 
