@@ -8,14 +8,26 @@ import json
 import random
 import shutil
 
-# Path
 XML_PATH = "/workspace/worlds/ppe_dataset_world.xml"
-IMAGE_DIR = "/workspace/datasets/ppe_dataset/images"
-LABEL_DIR = "/workspace/datasets/ppe_dataset/labels"
-META_PATH = "/workspace/datasets/ppe_dataset/metadata.json"
 
-os.makedirs(IMAGE_DIR, exist_ok=True)
-os.makedirs(LABEL_DIR, exist_ok=True)
+# Dataset root
+DATASET = "/workspace/datasets/ppe_dataset"
+
+TRAIN_IMAGE = os.path.join(DATASET, "images/train")
+VAL_IMAGE = os.path.join(DATASET, "images/val")
+
+TRAIN_LABEL = os.path.join(DATASET, "labels/train")
+VAL_LABEL = os.path.join(DATASET, "labels/val")
+
+META_PATH = os.path.join(DATASET, "metadata.json")
+
+for path in [
+    TRAIN_IMAGE,
+    VAL_IMAGE,
+    TRAIN_LABEL,
+    VAL_LABEL,
+]:
+    os.makedirs(path, exist_ok=True)
 
 # Load MuJoCo
 model = mujoco.MjModel.from_xml_path(XML_PATH)
@@ -392,7 +404,15 @@ def randomize_scene():
 # Generate Dataset
 ################################################
 
-NUM_DATA=3000
+NUM_DATA=10000
+
+TRAIN_RATIO = 0.8
+
+indices = list(range(NUM_DATA))
+random.seed(42)
+random.shuffle(indices)
+
+train_set = set(indices[:int(NUM_DATA * TRAIN_RATIO)])
 
 metadata=[]
 
@@ -472,15 +492,25 @@ for i in range(NUM_DATA):
     # Save image
     ############################################
 
-    name=f"{i:06d}"
-    cv2.imwrite(f"{IMAGE_DIR}/{name}.jpg",img)
+    name = f"{i:06d}"
 
+    if i in train_set:
+        image_dir = TRAIN_IMAGE
+        label_dir = TRAIN_LABEL
+    else:
+        image_dir = VAL_IMAGE
+        label_dir = VAL_LABEL
+
+    cv2.imwrite(
+        os.path.join(image_dir, f"{name}.jpg"),
+        img
+    )
     ############################################
     # Save YOLO
     ############################################
 
     with open(
-        f"{LABEL_DIR}/{name}.txt",
+        os.path.join(label_dir, f"{name}.txt"),
         "w"
     ) as f:
 
@@ -548,115 +578,3 @@ with open(
     )
 
 print("Dataset generation complete")
-
-################################################
-# Dataset Split
-################################################
-
-TRAIN_IMAGE = os.path.join(
-    DATASET := "/workspace/datasets/ppe_dataset",
-    "images/train"
-)
-
-VAL_IMAGE = os.path.join(
-    DATASET,
-    "images/val"
-)
-
-TRAIN_LABEL = os.path.join(
-    DATASET,
-    "labels/train"
-)
-
-VAL_LABEL = os.path.join(
-    DATASET,
-    "labels/val"
-)
-
-for path in [
-    TRAIN_IMAGE,
-    VAL_IMAGE,
-    TRAIN_LABEL,
-    VAL_LABEL
-]:
-    os.makedirs(
-        path,
-        exist_ok=True
-    )
-
-
-################################################
-# Split ratio
-################################################
-
-TRAIN_RATIO = 0.8
-
-images = [
-    f for f in os.listdir(IMAGE_DIR)
-    if f.endswith(".jpg")
-]
-
-random.seed(42)
-random.shuffle(images)
-
-train_count = int(len(images) * TRAIN_RATIO)
-
-train_files = images[:train_count]
-val_files = images[train_count:]
-
-print(f"Train : {len(train_files)}")
-print(f"Val   : {len(val_files)}")
-
-
-################################################
-# Copy function
-################################################
-
-def copy_files(files, image_dst, label_dst):
-
-    for image in files:
-
-        shutil.copy(
-            os.path.join(IMAGE_DIR, image),
-            os.path.join(image_dst, image)
-        )
-
-        label = image.replace(".jpg", ".txt")
-
-        src = os.path.join(
-            LABEL_DIR,
-            label
-        )
-
-        if os.path.exists(src):
-
-            shutil.copy(
-                src,
-                os.path.join(label_dst, label)
-            )
-
-        else:
-
-            print(
-                "Missing label:",
-                label
-            )
-
-
-################################################
-# Execute split
-################################################
-
-copy_files(
-    train_files,
-    TRAIN_IMAGE,
-    TRAIN_LABEL
-)
-
-copy_files(
-    val_files,
-    VAL_IMAGE,
-    VAL_LABEL
-)
-
-print("Dataset split complete")
