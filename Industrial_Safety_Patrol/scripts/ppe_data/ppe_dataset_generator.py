@@ -6,6 +6,7 @@ import cv2
 import os
 import json
 import random
+import shutil
 
 # Path
 XML_PATH = "/workspace/worlds/ppe_dataset_world.xml"
@@ -74,15 +75,8 @@ def random_color(base):
     result=[]
 
     for c in base:
-
-        value=c+np.random.uniform(
-            -0.15,
-            0.15
-        )
-
-        result.append(
-            np.clip(value,0,1)
-        )
+        value = c + np.random.uniform(-0.15,0.15)
+        result.append(np.clip(value,0,1))
 
     return result
 
@@ -193,9 +187,7 @@ def bbox_from_geoms(names):
 
     pixels=[]
 
-
     for name in names:
-
 
         gid=mujoco.mj_name2id(
             model,
@@ -203,11 +195,8 @@ def bbox_from_geoms(names):
             name
         )
 
-
         if gid < 0:
             continue
-
-
 
         for p in sample_geom_points(gid):
 
@@ -216,17 +205,11 @@ def bbox_from_geoms(names):
             if pix is not None:
                 pixels.append(pix)
 
-
-
     if len(pixels)<20:
         return None
 
-
-
     xs=[p[0] for p in pixels]
     ys=[p[1] for p in pixels]
-
-
 
     x1=np.clip(min(xs),0,WIDTH-1)
     y1=np.clip(min(ys),0,HEIGHT-1)
@@ -234,17 +217,11 @@ def bbox_from_geoms(names):
     x2=np.clip(max(xs),0,WIDTH-1)
     y2=np.clip(max(ys),0,HEIGHT-1)
 
-
-
     if x2 <= x1 or y2 <= y1:
         return None
 
-
-
     if (x2-x1)<6 or (y2-y1)<6:
         return None
-
-
 
     return (
         int(x1),
@@ -259,10 +236,7 @@ def bbox_from_geoms(names):
 
 def randomize_scene():
 
-
     workers=[]
-
-
 
     ################################################
     # number of people
@@ -273,77 +247,31 @@ def randomize_scene():
         NUM_WORKERS
     )
 
-
-
     for i,bid in enumerate(worker_ids):
 
-
         if i >= count:
-
-
             # hide
-
             model.body_pos[bid]=[
                 100,
                 100,
                 -10
             ]
-
-
             continue
-
-
-
 
         ################################################
         # position
         ################################################
 
-
-        x=np.random.uniform(
-            -5,
-            5
-        )
-
-        y=np.random.uniform(
-            -5,
-            5
-        )
-
-
-        model.body_pos[bid]=[
-            x,
-            y,
-            0
-        ]
-
-
-
+        x=np.random.uniform(-5,5)
+        y=np.random.uniform(-5,5)
+        model.body_pos[bid]=[x,y,0]
 
         ################################################
         # rotation
         ################################################
 
-        yaw=np.random.uniform(
-            0,
-            2*np.pi
-        )
-
-
-        model.body_quat[bid]=[
-
-            np.cos(yaw/2),
-
-            0,
-
-            0,
-
-            np.sin(yaw/2)
-
-        ]
-
-
-
+        yaw=np.random.uniform(0,2*np.pi)
+        model.body_quat[bid]=[np.cos(yaw/2),0,0,np.sin(yaw/2)]
 
         ################################################
         # PPE
@@ -362,8 +290,6 @@ def randomize_scene():
                 False
             ]
         )
-
-
 
         workers.append(
             {
@@ -385,7 +311,6 @@ def randomize_scene():
             f"worker_{i}_body"
         )
 
-
         model.geom_rgba[body_id][:3]=random_color(
             np.array(
                 [
@@ -395,8 +320,6 @@ def randomize_scene():
                 ]
             )
         )
-
-
 
         ################################################
         # helmet / vest alpha
@@ -423,7 +346,6 @@ def randomize_scene():
     ################################################
     # camera pose (robot mounted camera simulation)
     ################################################
-
 
     # 카메라 높이 고정
     CAM_Z = 0.383
@@ -458,24 +380,13 @@ def randomize_scene():
     # light
     ################################################
 
-
     model.light_pos[light_id]=[
-
         np.random.uniform(-5,5),
-
         np.random.uniform(-5,5),
-
         np.random.uniform(3,7)
-
     ]
 
-
-
     return workers
-
-
-
-
 
 ################################################
 # Generate Dataset
@@ -483,50 +394,30 @@ def randomize_scene():
 
 NUM_DATA=3000
 
-
 metadata=[]
-
-
 
 for i in range(NUM_DATA):
 
-
     workers=randomize_scene()
 
-
-
-    mujoco.mj_forward(
-        model,
-        data
-    )
-
-
+    mujoco.mj_forward(model,data)
 
     renderer.update_scene(
         data,
         camera="dataset_camera"
     )
 
-
     img=renderer.render()
-
-
-
     img=cv2.cvtColor(
         img,
         cv2.COLOR_RGB2BGR
     )
 
-
-
     labels=[]
-
-
 
     ############################################
     # labels
     ############################################
-
 
     for worker in workers:
 
@@ -581,37 +472,19 @@ for i in range(NUM_DATA):
     # Save image
     ############################################
 
-
     name=f"{i:06d}"
-
-
-
-    cv2.imwrite(
-
-        f"{IMAGE_DIR}/{name}.jpg",
-
-        img
-
-    )
-
-
+    cv2.imwrite(f"{IMAGE_DIR}/{name}.jpg",img)
 
     ############################################
     # Save YOLO
     ############################################
 
-
     with open(
-
         f"{LABEL_DIR}/{name}.txt",
-
         "w"
-
     ) as f:
 
-
         for cls,bbox in labels:
-
 
             x1, y1, x2, y2 = bbox
 
@@ -635,25 +508,16 @@ for i in range(NUM_DATA):
                 continue
 
             f.write(
-
                 f"{cls} "
-
                 f"{cx:.6f} "
-
                 f"{cy:.6f} "
-
                 f"{bw:.6f} "
-
                 f"{bh:.6f}\n"
-
             )
-
-
 
     ############################################
     # metadata
     ############################################
-
 
     metadata.append(
         {
@@ -665,28 +529,17 @@ for i in range(NUM_DATA):
         }
     )
 
-
-
     if i%100==0:
-
-        print(
-            f"{i}/{NUM_DATA}"
-        )
-
-
-
-
+        print(f"{i}/{NUM_DATA}")
 
 ################################################
 # save metadata
 ################################################
 
-
 with open(
     META_PATH,
     "w"
 ) as f:
-
 
     json.dump(
         metadata,
@@ -694,8 +547,116 @@ with open(
         indent=4
     )
 
+print("Dataset generation complete")
 
+################################################
+# Dataset Split
+################################################
 
-print(
-    "Dataset generation complete"
+TRAIN_IMAGE = os.path.join(
+    DATASET := "/workspace/datasets/ppe_dataset",
+    "images/train"
 )
+
+VAL_IMAGE = os.path.join(
+    DATASET,
+    "images/val"
+)
+
+TRAIN_LABEL = os.path.join(
+    DATASET,
+    "labels/train"
+)
+
+VAL_LABEL = os.path.join(
+    DATASET,
+    "labels/val"
+)
+
+for path in [
+    TRAIN_IMAGE,
+    VAL_IMAGE,
+    TRAIN_LABEL,
+    VAL_LABEL
+]:
+    os.makedirs(
+        path,
+        exist_ok=True
+    )
+
+
+################################################
+# Split ratio
+################################################
+
+TRAIN_RATIO = 0.8
+
+images = [
+    f for f in os.listdir(IMAGE_DIR)
+    if f.endswith(".jpg")
+]
+
+random.seed(42)
+random.shuffle(images)
+
+train_count = int(len(images) * TRAIN_RATIO)
+
+train_files = images[:train_count]
+val_files = images[train_count:]
+
+print(f"Train : {len(train_files)}")
+print(f"Val   : {len(val_files)}")
+
+
+################################################
+# Copy function
+################################################
+
+def copy_files(files, image_dst, label_dst):
+
+    for image in files:
+
+        shutil.copy(
+            os.path.join(IMAGE_DIR, image),
+            os.path.join(image_dst, image)
+        )
+
+        label = image.replace(".jpg", ".txt")
+
+        src = os.path.join(
+            LABEL_DIR,
+            label
+        )
+
+        if os.path.exists(src):
+
+            shutil.copy(
+                src,
+                os.path.join(label_dst, label)
+            )
+
+        else:
+
+            print(
+                "Missing label:",
+                label
+            )
+
+
+################################################
+# Execute split
+################################################
+
+copy_files(
+    train_files,
+    TRAIN_IMAGE,
+    TRAIN_LABEL
+)
+
+copy_files(
+    val_files,
+    VAL_IMAGE,
+    VAL_LABEL
+)
+
+print("Dataset split complete")
