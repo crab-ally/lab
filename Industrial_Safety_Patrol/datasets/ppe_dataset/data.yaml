@@ -1,4 +1,4 @@
-path: /workspace/datasets/ppe_dataset
+path: /content/ppe_dataset
 
 train: images/train
 val: images/val
