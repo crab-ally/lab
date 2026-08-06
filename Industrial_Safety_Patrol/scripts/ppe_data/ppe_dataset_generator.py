@@ -102,7 +102,8 @@ def project(point):
 
     x, y, z = pc
 
-    if z <= 1e-6:
+    depth = -z  # 카메라는 -Z 방향을 바라봄
+    if depth <= 1e-6:
         return None
 
     fovy = model.cam_fovy[cam_id]
@@ -389,8 +390,8 @@ def randomize_scene():
             np.array(
                 [
                     0.2,
-                0.25,
-                0.3
+                    0.25,
+                    0.3
                 ]
             )
         )
