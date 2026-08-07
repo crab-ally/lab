@@ -32,15 +32,7 @@ class PPEDetectionNode(Node):
         ####################################################
 
         self.get_logger().info('Loading YOLOv8 model...')
-
-        # 기본 YOLOv8 small 모델 로드
-        #
-        # 현재 yolov8s.pt는 COCO 데이터셋으로 학습된 범용 모델
-        # -> person 탐지는 가능
-        # -> helmet / vest는 탐지 불가능
-        #
-        # 추후 형태로 PPE 전용 학습 모델로 교체 필요
-        self.model = YOLO('/workspace/models/ppe_yolov8n/weights/best.pt')
+        self.model = YOLO('/workspace/models/ppe_yolov8n/best.pt')
         self.get_logger().info('YOLOv8 model loaded successfully.')
 
         ####################################################
@@ -113,6 +105,9 @@ class PPEDetectionNode(Node):
         results = self.model(cv_image, verbose=False)
         unsafe_detected = False
 
+        for result in results:
+            self.get_logger().info(f"Detected boxes: {len(result.boxes)}")
+
         ####################################################
         # YOLO 결과 처리
         ####################################################
@@ -136,9 +131,14 @@ class PPEDetectionNode(Node):
                 conf = float(box.conf[0]) # confidence score
                 x1, y1, x2, y2 = map(int, box.xyxy[0]) # Bounding Box 좌표
 
+                # 디버깅용 추가
+                self.get_logger().info(
+                    f"class={cls_id}, name={self.model.names[cls_id]}, conf={conf:.2f}"
+                )
+
                 # 신뢰도가 낮은 탐지는 제외
-                if conf < 0.5:
-                    continue
+                #if conf < 0.3:
+                #    continue
 
                 bbox = (x1, y1, x2, y2)
 
@@ -162,28 +162,19 @@ class PPEDetectionNode(Node):
                 has_helmet = False
                 has_vest = False
 
-                # 사람 영역과 안전모 Bounding Box 비교
+                # 헬멧 중심점이 사람 박스 내부에 있는지 확인
                 for (hx1, hy1, hx2, hy2) in helmets:
-
-                    # 두 박스가 겹치는지 확인
-                    if not (
-                        hx2 < px1 or
-                        hx1 > px2 or
-                        hy2 < py1 or
-                        hy1 > py2
-                    ):
+                    hcx = (hx1 + hx2) / 2.0
+                    hcy = (hy1 + hy2) / 2.0
+                    if px1 <= hcx <= px2 and py1 <= hcy <= py2:
                         has_helmet = True
                         break
 
-                # 사람 영역과 조끼 Bounding Box 비교
+                # 조끼 중심점이 사람 박스 내부에 있는지 확인
                 for (vx1, vy1, vx2, vy2) in vests:
-
-                    if not (
-                        vx2 < px1 or
-                        vx1 > px2 or
-                        vy2 < py1 or
-                        vy1 > py2
-                    ):
+                    vcx = (vx1 + vx2) / 2.0
+                    vcy = (vy1 + vy2) / 2.0
+                    if px1 <= vcx <= px2 and py1 <= vcy <= py2:
                         has_vest = True
                         break
 
