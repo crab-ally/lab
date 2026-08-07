@@ -5,7 +5,8 @@ odom → base_footprint: 50Hz(0.02s)
 /scan: 10Hz(0.1s)
 /camera/image_raw: 10Hz(0.1s)
 /camera/depth/image_raw: 10Hz(0.1s) [추가]
-/clock: 매 mj_step() 마다
+/clock: 50Hz
+viewer.sync(): 60Hz
 """
 
 import rclpy
@@ -335,10 +336,18 @@ def main():
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
 
+        # LiDAR ray 표시 끄기
+        viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_RANGEFINDER] = 0
+
         print("터틀봇 실내 순찰 시뮬레이션 및 ROS2 브릿지 시작...")
 
         node = MujocoRosBridge(model, data)
         node.renderer = mujoco.Renderer(model, 480, 640)
+
+        # Camera renderer visualization option
+        node.render_option = mujoco.MjvOption()
+        node.render_option.flags[mujoco.mjtVisFlag.mjVIS_RANGEFINDER] = 0
+        node.render_option.sitegroup[5] = 0
 
         spin_thread = threading.Thread(
             target=ros_spin_thread,
@@ -352,13 +361,22 @@ def main():
         viewer.cam.azimuth = 85
         viewer.cam.elevation = -85
 
+        # 뷰어 동기화(sync) 프레임 제한 변수 (60Hz)
+        sync_interval = 1.0 / 60.0
+        last_sync_time = time.time()
+
         while viewer.is_running() and rclpy.ok():
 
             step_start = time.time()
 
             # MuJoCo physics step
             mujoco.mj_step(model, data)
-            viewer.sync()
+
+            # viewer.sync() 60Hz
+            current_real_time = time.time()
+            if (current_real_time - last_sync_time) >= sync_interval:
+                viewer.sync()
+                last_sync_time = current_real_time
 
             node.sim_time = data.time
             stamp = node.get_sim_stamp()
@@ -368,16 +386,21 @@ def main():
                 node.publish_odom(stamp)
                 node.last_odom_time = data.time
 
+                # clock을 Odom과 동일하게 50Hz로 퍼블리시
+                clock_msg = Clock()
+                clock_msg.clock = stamp
+                node.clock_pub.publish(clock_msg)
+
             # 2. Scan (10Hz / 0.1초 간격)
             if data.time >= node.last_scan_time + 0.1:
                 node.publish_scan(stamp)
                 node.last_scan_time = node.sim_time
 
-            # 3. Camera RGB + Depth (10Hz / 0.1초 간격) [수정]
+            # 3. Camera RGB + Depth (10Hz / 0.1초 간격)
             if data.time >= last_camera_time + 0.1:
                 if node.renderer is not None:
                     # 렌더링 갱신
-                    node.renderer.update_scene(data, camera="patrol_camera")
+                    node.renderer.update_scene(data, camera="patrol_camera", scene_option=node.render_option)
                     
                     # RGB 렌더링
                     rgb_pixels = node.renderer.render()
@@ -392,12 +415,8 @@ def main():
                         node.depth_image = depth_pixels
 
                     node.publish_camera(stamp)
-                last_camera_time = data.time
 
-            # Publish simulation clock
-            clock_msg = Clock()
-            clock_msg.clock = stamp
-            node.clock_pub.publish(clock_msg)
+                last_camera_time = data.time
 
             # realtime factor 1.0 유지
             elapsed = time.time() - step_start
