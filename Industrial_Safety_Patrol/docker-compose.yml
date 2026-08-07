@@ -535,7 +535,7 @@ services:
       - DISPLAY=host.docker.internal:0.0
       - LIBGL_ALWAYS_SOFTWARE=1
       - QT_X11_NO_MITSHM=1
-      - YOLO_CONFIG_DIR=/workspace/models # YOLO 모델 저장 위치 지정
+      - YOLO_CONFIG_DIR=/workspace/models/ppe_yolov8n # Ultralytics 설정(config) 디렉터리
       - ROS_DOMAIN_ID=50
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
