@@ -1,4 +1,13 @@
-# MuJoCo를 ROS2 로봇으로 만들어주는 ROS2 Bridge
+#!/usr/bin/env python3
+"""
+timestep: 0.005
+odom → base_footprint: 50Hz(0.02s)
+/scan: 10Hz(0.1s)
+/camera/image_raw: 10Hz(0.1s)
+/camera/depth/image_raw: 10Hz(0.1s) [추가]
+/clock: 50Hz
+viewer.sync(): 60Hz
+"""
 
 import rclpy
 from rclpy.node import Node
@@ -35,6 +44,7 @@ class MujocoRosBridge(Node):
             ]
         )
 
+        self.last_odom_time = 0.0
         self.sim_time = 0.0
         self.last_scan_time = 0.0
         self.last_scan_publish_time = None
@@ -70,34 +80,24 @@ class MujocoRosBridge(Node):
         )
 
         self.camera_image = None
+        self.depth_image = None  # [추가] Depth 이미지 저장용
         self.camera_lock = threading.Lock()
 
         # Publishers
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
         self.scan_pub = self.create_publisher(LaserScan, '/scan', 10)
         self.camera_pub = self.create_publisher(Image, '/camera/image_raw', 10)
+        
+        # Depth 이미지 Publisher
+        self.depth_pub = self.create_publisher(Image, '/camera/depth/image_raw', 10)
+        
         self.tf_broadcaster = TransformBroadcaster(self)
-
-        # base_link → lidar_link (MuJoCo 모델 좌표 기준)
-        #self.lidar_offset = (0.07, 0.0, 0.162)
-        #self.lidar_quat = (0.707, 0.0, 0.707, 0.0)
 
         self.lidar_beam_count = 360
         self._init_lidar_sensors()
 
         # =====================================================================
-        # [수정] odom 원점 캡처 (root freejoint)
-        # -----------------------------------------------------------------
-        # 문제: 기존 코드는 MuJoCo 월드 절대좌표(qpos)를 그대로 /odom으로
-        #       publish했음. 로봇이 월드 (-4,-4)에서 시작하면 odom도 거기서
-        #       시작 → SLAM Toolbox가 map→odom을 초기화할 때 base_link가
-        #       odom 원점(0,0,0)에 있다고 가정하므로, map 좌표계가 MuJoCo
-        #       월드 좌표계와 크게 어긋나는 결과가 생김.
-        #
-        # 해결: 노드 생성 시점(=시뮬레이션 초기 상태)의 위치/자세를 저장해두고,
-        #       매 publish_odom() 호출마다 "시작점 대비 상대 이동량"을
-        #       시작 자세의 역회전으로 변환해 odom으로 내보냄.
-        #       → odom 프레임 원점 = 로봇이 시작한 지점 (REP-105 관례와 일치)
+        # odom 원점 캡처 (root freejoint)
         # =====================================================================
         joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "root")
         if joint_id == -1:
@@ -106,8 +106,6 @@ class MujocoRosBridge(Node):
         self._qpos_adr = self.model.jnt_qposadr[joint_id]
         self._qvel_adr = self.model.jnt_dofadr[joint_id]
 
-        # MjData는 생성 시점에 qpos0(모델 초기값)로 채워져 있으므로,
-        # 여기서 읽는 값이 곧 "시뮬레이션 시작 위치/자세"가 됨.
         self.origin_pos = np.array(
             self.data.qpos[self._qpos_adr: self._qpos_adr + 3], dtype=np.float64
         ).copy()
@@ -120,15 +118,8 @@ class MujocoRosBridge(Node):
 
         self.get_logger().info(
             f"Odom origin captured — world pos={self.origin_pos.tolist()}, "
-            f"world quat={self.origin_quat.tolist()} "
-            f"(odom(0,0,0)이 이 지점에 대응합니다)"
+            f"world quat={self.origin_quat.tolist()}"
         )
-        # =====================================================================
-
-        # Timers (Publishing Loop)
-        #self.odom_timer = self.create_timer(0.05, self.publish_odom)  # 20Hz
-        #self.scan_timer = self.create_timer(0.1, self.publish_scan)   # 10Hz
-        #self.camera_timer = self.create_timer(0.1, self.publish_camera) # 10Hz
 
         self.get_logger().info(
             f"MuJoCo-ROS2 Bridge Node initialized "
@@ -174,20 +165,16 @@ class MujocoRosBridge(Node):
             ranges.append(float(self.data.sensordata[adr]))
         return ranges
 
-    # ROS2 /cmd_vel → MuJoCo 좌/우 바퀴 회전 속도
     def cmd_vel_callback(self, msg: Twist):
-        v = msg.linear.x  # 앞/뒤 이동
-        w = msg.angular.z # z축 기준 회전
+        v = msg.linear.x
+        w = msg.angular.z
 
-        # 역운동학 계산 (Differential Drive)
         v_left = v - (w * self.track_width / 2.0)
         v_right = v + (w * self.track_width / 2.0)
 
-        # 모터 제어 인가 (rad/s)
         self.data.ctrl[0] = v_left / self.wheel_radius
         self.data.ctrl[1] = v_right / self.wheel_radius
 
-    # MuJoCo 로봇 상태(qpos, qvel) → ROS2 Odometry
     def publish_odom(self, stamp):
         try:
             qpos_adr = self._qpos_adr
@@ -202,43 +189,15 @@ class MujocoRosBridge(Node):
             vel = self.data.qvel[qvel_adr : qvel_adr + 3]
             ang_vel = self.data.qvel[qvel_adr + 3 : qvel_adr + 6]
 
-            # ==========================================================
-            # [추가]
-            # MuJoCo freejoint의 qvel은 World Frame 기준 속도이다.
-            #
-            # 하지만 ROS Odometry(Twist)는 child_frame(base_footprint)
-            # 기준 속도를 publish해야 한다.
-            #
-            # 따라서 현재 자세(quaternion)의 역회전을 이용하여
-            # World Velocity → Base Velocity 로 변환한다.
-            # ==========================================================
-
             quat_world_inv = np.zeros(4)
             mujoco.mju_negQuat(quat_world_inv, quat_world)
 
             vel_base = np.zeros(3)
-            mujoco.mju_rotVecQuat(
-                vel_base,
-                vel,
-                quat_world_inv
-            )
+            mujoco.mju_rotVecQuat(vel_base, vel, quat_world_inv)
 
             ang_vel_base = np.zeros(3)
-            mujoco.mju_rotVecQuat(
-                ang_vel_base,
-                ang_vel,
-                quat_world_inv
-            )
+            mujoco.mju_rotVecQuat(ang_vel_base, ang_vel, quat_world_inv)
 
-            # -----------------------------------------------------------
-            # [수정] 월드 절대좌표 → odom 상대좌표 변환
-            #
-            # 위치: (현재 위치 - 시작 위치)를 "시작 자세" 기준으로 회전.
-            #       시작 시점에 로봇이 90도 돌아가 있었다면(quat="0.707 0 0 0.707"
-            #       같은 경우), 그 회전까지 같이 걷어내야 odom의 +X가
-            #       "로봇이 원래 보던 방향"이 됨.
-            # 자세: origin_quat의 역 * 현재 quat = 시작 자세 대비 상대 회전.
-            # -----------------------------------------------------------
             diff = pos_world - self.origin_pos
             pos_odom = np.zeros(3)
             mujoco.mju_rotVecQuat(pos_odom, diff, self.origin_quat_inv)
@@ -260,14 +219,6 @@ class MujocoRosBridge(Node):
             msg.pose.pose.orientation.y = float(quat_odom[2])
             msg.pose.pose.orientation.z = float(quat_odom[3])
 
-            # ==========================================================
-            # ROS REP-105
-            #
-            # Twist는 child_frame(base_footprint) 기준 속도이다.
-            #
-            # World 기준 속도를 Base 기준으로 변환한 값을 publish.
-            # ==========================================================
-
             msg.twist.twist.linear.x = float(vel_base[0])
             msg.twist.twist.linear.y = float(vel_base[1])
             msg.twist.twist.linear.z = float(vel_base[2])
@@ -276,8 +227,8 @@ class MujocoRosBridge(Node):
             msg.twist.twist.angular.y = float(ang_vel_base[1])
             msg.twist.twist.angular.z = float(ang_vel_base[2])
 
-            self._publish_tf(stamp, pos_odom, quat_odom)
             self.odom_pub.publish(msg)
+            self._publish_tf(stamp, pos_odom, quat_odom)
         except Exception as e:
             self.get_logger().error(f"Odom publish error: {e}", once=True)
 
@@ -294,13 +245,8 @@ class MujocoRosBridge(Node):
         odom_to_base.transform.rotation.y = float(quat[2])
         odom_to_base.transform.rotation.z = float(quat[3])
 
-        # lidar TF는 robot_state_publisher가 담당
-
-        # odom -> base_footprint 만 publish
-        # base_footprint -> base_link -> lidar_link 는 robot_state_publisher 담당
         self.tf_broadcaster.sendTransform(odom_to_base)
 
-    # MuJoCo LiDAR (36빔) → ROS2 LaserScan
     def publish_scan(self, stamp):
         try:
             sensor_data = self._read_lidar_ranges()
@@ -316,14 +262,10 @@ class MujocoRosBridge(Node):
             msg.angle_increment = math.radians(360.0 / beam_count)
             msg.angle_max = msg.angle_min + msg.angle_increment * (beam_count-1)
 
-            # 실제 publish 주기 기반
             if self.last_scan_publish_time is None:
                 msg.scan_time = 0.1
             else:
-                msg.scan_time = (
-                    self.sim_time -
-                    self.last_scan_publish_time
-                )
+                msg.scan_time = self.sim_time - self.last_scan_publish_time
 
             self.last_scan_publish_time = self.sim_time
 
@@ -331,37 +273,41 @@ class MujocoRosBridge(Node):
             msg.range_min = 0.12
             msg.range_max = 3.5
 
-            msg.ranges = [
-                float(r) if r > 0 else float("inf")
-                for r in sensor_data
-            ]
+            clean_ranges = []
+            for r in sensor_data:
+                val = float(r)
+                if val >= msg.range_max - 0.05 or val < msg.range_min:
+                    clean_ranges.append(float("inf"))
+                else:
+                    clean_ranges.append(val)
 
+            msg.ranges = clean_ranges
             self.scan_pub.publish(msg)
 
         except Exception as e:
-            self.get_logger().error(f"Scan publish error: {e}",once=True)
+            self.get_logger().error(f"Scan publish error: {e}", once=True)
 
+    # RGB 및 Depth 카메라 통합 Publish
     def publish_camera(self, stamp):
-
         with self.camera_lock:
-
-            if self.camera_image is None:
+            if self.camera_image is None or self.depth_image is None:
                 return
 
-            pixels = self.camera_image.copy()
+            rgb_pixels = self.camera_image.copy()
+            depth_pixels = self.depth_image.copy()
 
+        # 1. RGB Image Publish
+        rgb_msg = self.cv_bridge.cv2_to_imgmsg(rgb_pixels, encoding="rgb8")
+        rgb_msg.header.stamp = stamp
+        rgb_msg.header.frame_id = "camera_link"
+        self.camera_pub.publish(rgb_msg)
 
-        img_msg = self.cv_bridge.cv2_to_imgmsg(
-            pixels,
-            encoding="rgb8"
-        )
+        # 2. Depth Image Publish (32FC1 - meters 단위)
+        depth_msg = self.cv_bridge.cv2_to_imgmsg(depth_pixels.astype(np.float32), encoding="32FC1")
+        depth_msg.header.stamp = stamp
+        depth_msg.header.frame_id = "camera_link"
+        self.depth_pub.publish(depth_msg)
 
-        img_msg.header.stamp = stamp
-
-        img_msg.header.frame_id = "camera_link"
-
-        self.camera_pub.publish(img_msg)
-    
     def get_sim_stamp(self):
         stamp = Time()
         stamp.sec = int(self.sim_time)
@@ -379,27 +325,35 @@ def main():
     rclpy.init()
 
     BASE_DIR = Path(__file__).resolve().parent
-    xml_path = BASE_DIR.parent.parent / "scenes" / "patrol_TwoWall.xml"
+    xml_path = BASE_DIR.parent.parent / "scenes" / "test" / "patrol_indoor.xml"
 
     print(f"Loading model from: {xml_path}")
     model = mujoco.MjModel.from_xml_path(str(xml_path))
     data = mujoco.MjData(model)
 
     node = None
+    last_camera_time = 0.0
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
+
+        # LiDAR ray 표시 끄기
+        viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_RANGEFINDER] = 0
 
         print("터틀봇 실내 순찰 시뮬레이션 및 ROS2 브릿지 시작...")
 
         node = MujocoRosBridge(model, data)
+        node.renderer = mujoco.Renderer(model, 480, 640)
 
-        # ROS2 spin 시작
+        # Camera renderer visualization option
+        node.render_option = mujoco.MjvOption()
+        node.render_option.flags[mujoco.mjtVisFlag.mjVIS_RANGEFINDER] = 0
+        node.render_option.sitegroup[5] = 0
+
         spin_thread = threading.Thread(
             target=ros_spin_thread,
             args=(node,),
             daemon=True
         )
-
         spin_thread.start()
 
         viewer.cam.lookat[:] = [0, 0, 0.9]
@@ -407,58 +361,64 @@ def main():
         viewer.cam.azimuth = 85
         viewer.cam.elevation = -85
 
+        # 뷰어 동기화(sync) 프레임 제한 변수 (60Hz)
+        sync_interval = 1.0 / 60.0
+        last_sync_time = time.time()
+
         while viewer.is_running() and rclpy.ok():
 
             step_start = time.time()
 
-            # ==============================
             # MuJoCo physics step
-            # ==============================
-
             mujoco.mj_step(model, data)
-            viewer.sync()
 
-            # ==============================
-            # MuJoCo time -> ROS clock
-            # ==============================
+            # viewer.sync() 60Hz
+            current_real_time = time.time()
+            if (current_real_time - last_sync_time) >= sync_interval:
+                viewer.sync()
+                last_sync_time = current_real_time
 
             node.sim_time = data.time
-
             stamp = node.get_sim_stamp()
 
-            clock_msg = Clock()
-            clock_msg.clock = stamp
-            node.clock_pub.publish(clock_msg)
+            # 1. Odom (50Hz / 0.02초 간격)
+            if data.time >= node.last_odom_time + 0.02:
+                node.publish_odom(stamp)
+                node.last_odom_time = data.time
 
-            # ==============================
-            # ROS sensor publish
-            # ==============================
+                # clock을 Odom과 동일하게 50Hz로 퍼블리시
+                clock_msg = Clock()
+                clock_msg.clock = stamp
+                node.clock_pub.publish(clock_msg)
 
-            node.publish_odom(stamp)
-
+            # 2. Scan (10Hz / 0.1초 간격)
             if data.time >= node.last_scan_time + 0.1:
                 node.publish_scan(stamp)
                 node.last_scan_time = node.sim_time
 
-            # ==============================
-            # Camera
-            # ==============================
+            # 3. Camera RGB + Depth (10Hz / 0.1초 간격)
+            if data.time >= last_camera_time + 0.1:
+                if node.renderer is not None:
+                    # 렌더링 갱신
+                    node.renderer.update_scene(data, camera="patrol_camera", scene_option=node.render_option)
+                    
+                    # RGB 렌더링
+                    rgb_pixels = node.renderer.render()
+                    
+                    # Depth 렌더링 활성화 및 추출
+                    node.renderer.enable_depth_rendering()
+                    depth_pixels = node.renderer.render()
+                    node.renderer.disable_depth_rendering()
 
-            if node.renderer is not None:
-                node.renderer.update_scene(
-                    data,
-                    camera="patrol_camera"
-                )
-                pixels = node.renderer.render()
+                    with node.camera_lock:
+                        node.camera_image = rgb_pixels
+                        node.depth_image = depth_pixels
 
-                with node.camera_lock:
-                    node.camera_image = pixels
+                    node.publish_camera(stamp)
 
-            node.publish_camera(stamp)
+                last_camera_time = data.time
 
-            # ==============================
             # realtime factor 1.0 유지
-            # ==============================
             elapsed = time.time() - step_start
             sleep_time = model.opt.timestep - elapsed
 
