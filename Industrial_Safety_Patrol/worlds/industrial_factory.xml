@@ -93,26 +93,162 @@
             <geom name="fl_mast" type="box" size="0.05 0.3 0.8" pos="0.85 0 0.8" rgba="0.1 0.1 0.1 1"/>
         </body>
 
-        <!-- 정상 작업자 (안전모, 조끼 착용) -->
+        <!-- ================================================================
+             정상 작업자 (안전모, 조끼 착용) - 10 geom 인체 모델, 키 170cm
+             골반(0)→발목(0.38)→무릎(0.80)→어깨(1.22)→머리(1.62)
+             ================================================================ -->
         <body name="worker_normal" pos="2 2 0">
-            <geom name="worker_body" type="cylinder" size="0.2 0.6" pos="0 0 0.6" rgba="0.15 0.2 0.25 1" mass="70.0"/>
-            <!-- PPE: 안전조끼 (노란색) -->
-            <geom name="worker_vest" type="cylinder" size="0.21 0.3" pos="0 0 0.7" rgba="0.8 0.95 0.1 1.0" mass="0.1"/>
-            <geom name="worker_head" type="sphere" size="0.15" pos="0 0 1.35" rgba="0.82 0.65 0.5 1" mass="5.0"/>
-            <!-- PPE: 안전모 (하얀색) -->
-            <geom name="worker_helmet" type="sphere" size="0.16" pos="0 0 1.45" rgba="1 1 1 1" mass="0.5"/>
+            <!-- 머리 (head) -->
+            <geom name="wn_head" type="sphere" size="0.115" pos="0 0 1.62"
+                  rgba="0.82 0.65 0.50 1" mass="5.0"/>
+            <!-- PPE: 안전모 (하드햇, 머리 상단에 씌움) -->
+            <geom name="wn_helmet" type="ellipsoid" size="0.125 0.125 0.075" pos="0 0 1.70"
+                  rgba="1.0 1.0 1.0 1" mass="0.5"/>
+            <!-- 몸통 (torso: 골반~어깨) -->
+            <geom name="wn_torso" type="capsule" fromto="0 0 0.82 0 0 1.48"
+                  size="0.092" rgba="0.15 0.20 0.25 1" mass="30.0"/>
+            <!-- PPE: 안전조끼 (torso 위에 약간 크게 씌움) -->
+            <geom name="wn_vest" type="capsule" fromto="0 0 0.84 0 0 1.40"
+                  size="0.100" rgba="0.85 0.95 0.10 0.90" mass="0.1"
+                  contype="0" conaffinity="0"/>
+            <!-- 골반 (pelvis) -->
+            <geom name="wn_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80"
+                  size="0.075" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <!-- 왼쪽 대퇴 (left upper leg) -->
+            <geom name="wn_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38"
+                  size="0.055" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <!-- 왼쪽 하퇴 (left lower leg) -->
+            <geom name="wn_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00"
+                  size="0.045" rgba="0.15 0.20 0.25 1" mass="4.0"/>
+            <!-- 오른쪽 대퇴 (right upper leg) -->
+            <geom name="wn_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38"
+                  size="0.055" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <!-- 오른쪽 하퇴 (right lower leg) -->
+            <geom name="wn_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00"
+                  size="0.045" rgba="0.15 0.20 0.25 1" mass="4.0"/>
+            <!-- 왼팔 (left arm: 어깨~손목, 약간 내린 자세) -->
+            <geom name="wn_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90"
+                  size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+            <!-- 오른팔 (right arm: 어깨~손목) -->
+            <geom name="wn_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90"
+                  size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
         </body>
 
-        <!-- PPE 미착용 작업자 (안전모, 조끼 없음) -->
+        <!-- ================================================================
+             PPE 미착용 작업자 (안전모·조끼 없음) - 10 geom 인체 모델, 키 170cm
+             ================================================================ -->
         <body name="worker_no_ppe" pos="2 -3 0">
-            <geom name="worker_no_ppe_body" type="cylinder" size="0.2 0.6" pos="0 0 0.6" rgba="0.25 0.28 0.32 1" mass="70.0"/>
-            <geom name="worker_no_ppe_head" type="sphere" size="0.15" pos="0 0 1.35" rgba="0.9 0.7 0.6 1" mass="5.0"/>
+            <!-- 머리 -->
+            <geom name="wp_head" type="sphere" size="0.115" pos="0 0 1.62"
+                  rgba="0.90 0.70 0.60 1" mass="5.0"/>
+            <!-- 몸통 -->
+            <geom name="wp_torso" type="capsule" fromto="0 0 0.82 0 0 1.48"
+                  size="0.092" rgba="0.25 0.28 0.32 1" mass="30.0"/>
+            <!-- 골반 -->
+            <geom name="wp_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80"
+                  size="0.075" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <!-- 왼쪽 대퇴 -->
+            <geom name="wp_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38"
+                  size="0.055" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <!-- 왼쪽 하퇴 -->
+            <geom name="wp_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00"
+                  size="0.045" rgba="0.25 0.28 0.32 1" mass="4.0"/>
+            <!-- 오른쪽 대퇴 -->
+            <geom name="wp_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38"
+                  size="0.055" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <!-- 오른쪽 하퇴 -->
+            <geom name="wp_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00"
+                  size="0.045" rgba="0.25 0.28 0.32 1" mass="4.0"/>
+            <!-- 왼팔 -->
+            <geom name="wp_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90"
+                  size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+            <!-- 오른팔 -->
+            <geom name="wp_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90"
+                  size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+            <!-- 안전모 없음 - 머리만 노출 (위에서 정의됨) -->
         </body>
 
-        <!-- 전도된(쓰러진) 작업자 -->
-        <body name="worker_fallen" pos="-2 -2 0" quat="0.707 0 0.707 0">
-            <geom name="fallen_body" type="cylinder" size="0.2 0.6" pos="0 0 0.2" rgba="0.25 0.28 0.32 1" mass="70.0"/>
-            <geom name="fallen_head" type="sphere" size="0.15" pos="0 0 0.95" rgba="0.9 0.7 0.6 1" mass="5.0"/>
+        <!-- ================================================================
+             전도된(쓰러진) 작업자
+             - 키 170cm
+             - X축으로 90도 회전하여 바닥에 누운 상태
+             - 머리는 -Y 방향
+             - body 자체를 회전시키므로 geom 좌표는 서 있는 상태와 동일
+             ================================================================ -->
+        <body name="worker_fallen" pos="-2 -2 0.115" quat="0.5 0.5 0.5 0.5">
+
+            <!-- 머리 -->
+            <geom name="wf_head"
+                type="sphere"
+                size="0.115"
+                pos="0 0 1.62"
+                rgba="0.90 0.70 0.60 1"
+                mass="5.0"/>
+
+            <!-- 몸통 -->
+            <geom name="wf_torso"
+                type="capsule"
+                fromto="0 0 0.82 0 0 1.48"
+                size="0.092"
+                rgba="0.25 0.28 0.32 1"
+                mass="30.0"/>
+
+            <!-- 골반 -->
+            <geom name="wf_pelvis"
+                type="capsule"
+                fromto="-0.09 0 0.80 0.09 0 0.80"
+                size="0.075"
+                rgba="0.25 0.28 0.32 1"
+                mass="8.0"/>
+
+            <!-- 왼쪽 대퇴 -->
+            <geom name="wf_luleg"
+                type="capsule"
+                fromto="-0.09 0 0.80 -0.09 0 0.38"
+                size="0.055"
+                rgba="0.25 0.28 0.32 1"
+                mass="8.0"/>
+
+            <!-- 왼쪽 하퇴 -->
+            <geom name="wf_llleg"
+                type="capsule"
+                fromto="-0.09 0 0.38 -0.09 0 0.00"
+                size="0.045"
+                rgba="0.25 0.28 0.32 1"
+                mass="4.0"/>
+
+            <!-- 오른쪽 대퇴 -->
+            <geom name="wf_ruleg"
+                type="capsule"
+                fromto="0.09 0 0.80 0.09 0 0.38"
+                size="0.055"
+                rgba="0.25 0.28 0.32 1"
+                mass="8.0"/>
+
+            <!-- 오른쪽 하퇴 -->
+            <geom name="wf_rlleg"
+                type="capsule"
+                fromto="0.09 0 0.38 0.09 0 0.00"
+                size="0.045"
+                rgba="0.25 0.28 0.32 1"
+                mass="4.0"/>
+
+            <!-- 왼팔 -->
+            <geom name="wf_larm"
+                type="capsule"
+                fromto="-0.17 0 1.44 -0.30 0 0.90"
+                size="0.037"
+                rgba="0.90 0.70 0.60 1"
+                mass="4.0"/>
+
+            <!-- 오른팔 -->
+            <geom name="wf_rarm"
+                type="capsule"
+                fromto="0.17 0 1.44 0.30 0 0.90"
+                size="0.037"
+                rgba="0.90 0.70 0.60 1"
+                mass="4.0"/>
+
         </body>
 
         <!-- ================================================================
