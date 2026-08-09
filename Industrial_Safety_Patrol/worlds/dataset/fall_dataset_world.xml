@@ -112,165 +112,111 @@
         <!-- =================================================== -->
 
         <!-- 왼쪽 앞 -->
-        <body name="fallen_worker_0"
-            pos="-2.0 -1.0 0"
-            quat="0.707 0.707 0 0">
-
-            <geom name="fallen_worker_0_body"
-                type="cylinder"
-                size="0.20 0.60"
-                pos="0 0 0.22"
-                rgba="0.15 0.20 0.25 1"
-                mass="70"/>
-
-            <geom name="fallen_worker_0_head"
-                type="sphere"
-                size="0.15"
-                pos="0.65 0 0.22"
-                rgba="0.9 0.7 0.6 1"
-                mass="5"/>
+        <body name="fallen_worker_0" pos="-2.0 -1.0 0.115" quat="0.707 0.707 0 0">
+            <geom name="fw0_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.90 0.70 0.60 1" mass="5.0"/>
+            <geom name="fw0_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.15 0.20 0.25 1" mass="30.0"/>
+            <geom name="fw0_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <geom name="fw0_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <geom name="fw0_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.15 0.20 0.25 1" mass="4.0"/>
+            <geom name="fw0_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <geom name="fw0_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.15 0.20 0.25 1" mass="4.0"/>
+            <geom name="fw0_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+            <geom name="fw0_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
         </body>
-
 
         <!-- 중앙 앞 -->
-        <body name="fallen_worker_1"
-            pos="0.0 -2.0 0"
-            quat="0.923 0 0 0.382">
-
-            <geom name="fallen_worker_1_body"
-                type="cylinder"
-                size="0.20 0.60"
-                pos="0 0 0.22"
-                rgba="0.20 0.25 0.30 1"
-                mass="70"/>
-
-            <geom name="fallen_worker_1_head"
-                type="sphere"
-                size="0.15"
-                pos="0.65 0 0.22"
-                rgba="0.8 0.65 0.5 1"
-                mass="5"/>
+        <body name="fallen_worker_1" pos="0.0 -2.0 0.115" quat="0.923 0 0 0.382">
+            <geom name="fw1_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.90 0.70 0.60 1" mass="5.0"/>
+            <geom name="fw1_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.20 0.25 0.30 1" mass="30.0"/>
+            <geom name="fw1_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.20 0.25 0.30 1" mass="8.0"/>
+            <geom name="fw1_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.20 0.25 0.30 1" mass="8.0"/>
+            <geom name="fw1_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.20 0.25 0.30 1" mass="4.0"/>
+            <geom name="fw1_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.20 0.25 0.30 1" mass="8.0"/>
+            <geom name="fw1_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.20 0.25 0.30 1" mass="4.0"/>
+            <geom name="fw1_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+            <geom name="fw1_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
         </body>
-
 
         <!-- 오른쪽 중앙 -->
-        <body name="fallen_worker_2"
-            pos="2.0 0.5 0"
-            quat="0.707 0 0.707 0">
-
-            <geom name="fallen_worker_2_body"
-                type="cylinder"
-                size="0.20 0.60"
-                pos="0 0 0.22"
-                rgba="0.25 0.28 0.32 1"
-                mass="70"/>
-
-            <geom name="fallen_worker_2_head"
-                type="sphere"
-                size="0.15"
-                pos="0.65 0 0.22"
-                rgba="0.85 0.68 0.52 1"
-                mass="5"/>
+        <body name="fallen_worker_2" pos="2.0 0.5 0.115" quat="0.707 0 0.707 0">
+            <geom name="fw2_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.90 0.70 0.60 1" mass="5.0"/>
+            <geom name="fw2_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.25 0.28 0.32 1" mass="30.0"/>
+            <geom name="fw2_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <geom name="fw2_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <geom name="fw2_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.25 0.28 0.32 1" mass="4.0"/>
+            <geom name="fw2_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <geom name="fw2_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.25 0.28 0.32 1" mass="4.0"/>
+            <geom name="fw2_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+            <geom name="fw2_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
         </body>
-
 
         <!-- 뒤쪽 왼쪽 -->
-        <body name="fallen_worker_3"
-            pos="-1.8 2.0 0"
-            quat="0.923 0 0 -0.382">
-
-            <geom name="fallen_worker_3_body"
-                type="cylinder"
-                size="0.20 0.60"
-                pos="0 0 0.22"
-                rgba="0.18 0.20 0.28 1"
-                mass="70"/>
-
-            <geom name="fallen_worker_3_head"
-                type="sphere"
-                size="0.15"
-                pos="0.65 0 0.22"
-                rgba="0.92 0.72 0.58 1"
-                mass="5"/>
+        <body name="fallen_worker_3" pos="-1.8 2.0 0.115" quat="0.923 0 0 -0.382">
+            <geom name="fw3_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.90 0.70 0.60 1" mass="5.0"/>
+            <geom name="fw3_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.18 0.20 0.28 1" mass="30.0"/>
+            <geom name="fw3_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.18 0.20 0.28 1" mass="8.0"/>
+            <geom name="fw3_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.18 0.20 0.28 1" mass="8.0"/>
+            <geom name="fw3_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.18 0.20 0.28 1" mass="4.0"/>
+            <geom name="fw3_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.18 0.20 0.28 1" mass="8.0"/>
+            <geom name="fw3_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.18 0.20 0.28 1" mass="4.0"/>
+            <geom name="fw3_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+            <geom name="fw3_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
         </body>
 
-
         <!-- 뒤쪽 오른쪽 -->
-        <body name="fallen_worker_4"
-            pos="2.5 2.0 0"
-            quat="0.707 0.707 0 0">
-
-            <geom name="fallen_worker_4_body"
-                type="cylinder"
-                size="0.20 0.60"
-                pos="0 0 0.22"
-                rgba="0.22 0.26 0.30 1"
-                mass="70"/>
-
-            <geom name="fallen_worker_4_head"
-                type="sphere"
-                size="0.15"
-                pos="0.65 0 0.22"
-                rgba="0.88 0.70 0.54 1"
-                mass="5"/>
+        <body name="fallen_worker_4" pos="2.5 2.0 0.115" quat="0.707 0.707 0 0">
+            <geom name="fw4_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.90 0.70 0.60 1" mass="5.0"/>
+            <geom name="fw4_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.22 0.26 0.30 1" mass="30.0"/>
+            <geom name="fw4_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.22 0.26 0.30 1" mass="8.0"/>
+            <geom name="fw4_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.22 0.26 0.30 1" mass="8.0"/>
+            <geom name="fw4_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.22 0.26 0.30 1" mass="4.0"/>
+            <geom name="fw4_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.22 0.26 0.30 1" mass="8.0"/>
+            <geom name="fw4_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.22 0.26 0.30 1" mass="4.0"/>
+            <geom name="fw4_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+            <geom name="fw4_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
         </body>
 
         <!-- =================================================== -->
         <!-- Standing workers (standing_worker_0 ~ 2)             -->
         <!-- =================================================== -->
 
-
         <!-- 중앙 -->
-        <body name="standing_worker_0"
-            pos="-2.5 0.8 0">
-
-            <geom name="standing_worker_0_body"
-                type="cylinder"
-                size="0.22 0.60"
-                pos="0 0 0.60"
-                rgba="0.15 0.20 0.25 1"/>
-
-            <geom name="standing_worker_0_head"
-                type="sphere"
-                size="0.16"
-                pos="0 0 1.35"
-                rgba="0.8 0.65 0.5 1"/>
+        <body name="standing_worker_0" pos="-2.5 0.8 0">
+            <geom name="sw0_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.90 0.70 0.60 1" mass="5.0"/>
+            <geom name="sw0_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.15 0.20 0.25 1" mass="30.0"/>
+            <geom name="sw0_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <geom name="sw0_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <geom name="sw0_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.15 0.20 0.25 1" mass="4.0"/>
+            <geom name="sw0_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <geom name="sw0_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.15 0.20 0.25 1" mass="4.0"/>
+            <geom name="sw0_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+            <geom name="sw0_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
         </body>
-
 
         <!-- 남쪽 -->
-        <body name="standing_worker_1"
-            pos="0 -3.0 0">
-
-            <geom name="standing_worker_1_body"
-                type="cylinder"
-                size="0.22 0.60"
-                pos="0 0 0.60"
-                rgba="0.20 0.25 0.30 1"/>
-
-            <geom name="standing_worker_1_head"
-                type="sphere"
-                size="0.16"
-                pos="0 0 1.35"
-                rgba="0.8 0.65 0.5 1"/>
+        <body name="standing_worker_1" pos="0 -3.0 0">
+            <geom name="sw1_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.90 0.70 0.60 1" mass="5.0"/>
+            <geom name="sw1_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.20 0.25 0.30 1" mass="30.0"/>
+            <geom name="sw1_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.20 0.25 0.30 1" mass="8.0"/>
+            <geom name="sw1_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.20 0.25 0.30 1" mass="8.0"/>
+            <geom name="sw1_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.20 0.25 0.30 1" mass="4.0"/>
+            <geom name="sw1_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.20 0.25 0.30 1" mass="8.0"/>
+            <geom name="sw1_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.20 0.25 0.30 1" mass="4.0"/>
+            <geom name="sw1_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+            <geom name="sw1_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
         </body>
 
-
         <!-- 오른쪽 -->
-        <body name="standing_worker_2"
-            pos="1.8 -0.5 0">
-
-            <geom name="standing_worker_2_body"
-                type="cylinder"
-                size="0.22 0.60"
-                pos="0 0 0.60"
-                rgba="0.25 0.28 0.32 1"/>
-
-            <geom name="standing_worker_2_head"
-                type="sphere"
-                size="0.16"
-                pos="0 0 1.35"
-                rgba="0.8 0.65 0.5 1"/>
+        <body name="standing_worker_2" pos="1.8 -0.5 0">
+            <geom name="sw2_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.90 0.70 0.60 1" mass="5.0"/>
+            <geom name="sw2_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.25 0.28 0.32 1" mass="30.0"/>
+            <geom name="sw2_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <geom name="sw2_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <geom name="sw2_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.25 0.28 0.32 1" mass="4.0"/>
+            <geom name="sw2_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <geom name="sw2_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.25 0.28 0.32 1" mass="4.0"/>
+            <geom name="sw2_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+            <geom name="sw2_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
         </body>
 
     </worldbody>
