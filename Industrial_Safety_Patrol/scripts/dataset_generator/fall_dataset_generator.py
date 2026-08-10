@@ -48,11 +48,15 @@ DEBUG_IMAGE_DIR=os.path.join(DATASET,"debug")
 DEBUG_COLORS={
     0:(0,0,255),
     1:(0,220,50),
+    2:(0,255,255),
+    3:(255,0,255),
 }
 
 DEBUG_CLASS_NAMES={
     0:"fallen",
     1:"standing",
+    2:"bending",
+    3:"sitting",
 }
 
 for path in [TRAIN_IMAGE,VAL_IMAGE,TRAIN_LABEL,VAL_LABEL]:
@@ -64,8 +68,6 @@ if DEBUG_BBOX:
 # ============================================================
 # Load MuJoCo
 # ============================================================
-
-print("Loading MuJoCo model...")
 
 model=mujoco.MjModel.from_xml_path(XML_PATH)
 data=mujoco.MjData(model)
@@ -79,33 +81,40 @@ cam_id=mujoco.mj_name2id(
 if cam_id<0:
     raise RuntimeError("dataset_camera not found")
 
-print("MuJoCo model loaded")
-
 # ============================================================
 # Workers
 # ============================================================
 
-NUM_FALLEN=5
-NUM_STANDING=3
+workers_info = []
 
-fallen_ids=[]
-standing_ids=[]
+categories = [
+    ("fallen_faceup", 2, 0, "ffu", True),
+    ("fallen_facedown", 2, 0, "ffd", True),
+    ("standing_worker", 2, 1, "sw", True),
+    ("bending_worker", 2, 2, "bw", True),
+    ("sitting_worker", 2, 3, "stw", False),
+]
 
-for i in range(NUM_FALLEN):
-    bid=mujoco.mj_name2id(model,mujoco.mjtObj.mjOBJ_BODY,f"fallen_worker_{i}")
-
-    if bid<0:
-        raise RuntimeError(f"fallen_worker_{i} not found")
-
-    fallen_ids.append(bid)
-
-for i in range(NUM_STANDING):
-    bid=mujoco.mj_name2id(model,mujoco.mjtObj.mjOBJ_BODY,f"standing_worker_{i}")
-
-    if bid<0:
-        raise RuntimeError(f"standing_worker_{i} not found")
-
-    standing_ids.append(bid)
+for name_prefix, count, cls_id, geom_prefix, rand_pos in categories:
+    for i in range(count):
+        body_name = f"{name_prefix}_{i}"
+        bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        if bid < 0:
+            raise RuntimeError(f"{body_name} not found")
+            
+        initial_pos = np.array(model.body_pos[bid])
+        initial_quat = np.array(model.body_quat[bid])
+        
+        workers_info.append({
+            "name": body_name,
+            "id": bid,
+            "class_id": cls_id,
+            "geom_prefix": geom_prefix,
+            "rand_pos": rand_pos,
+            "initial_pos": initial_pos,
+            "initial_quat": initial_quat,
+            "worker_idx": i
+        })
 
 # ============================================================
 # Renderer
@@ -130,6 +139,8 @@ BODY_PARTS=[
     "larm",
     "rarm",
     "head",
+    "lthigh",
+    "rthigh",
 ]
 
 BODY_PART_NAMES=BODY_PARTS[:-1]
@@ -191,12 +202,11 @@ def is_valid_position(x,y,radius=0.5):
             i
         )
 
-        if name and (
-            name.startswith("fallen_worker")
-            or name.startswith("standing_worker")
-            or name=="floor"
-        ):
-            continue
+        if name:
+            if any(name.startswith(p) for p in ["ffu", "ffd", "sw", "bw", "stw"]):
+                continue
+            if name == "floor":
+                continue
 
         pos=model.geom_pos[i]
         size=model.geom_size[i]
@@ -554,200 +564,83 @@ def calculate_worker_visibility(parts,owner_prefix):
     }
 
 # ============================================================
-# Fallen quaternion
-# ============================================================
-
-def make_fallen_quat(yaw):
-
-    tilt_quat=np.zeros(4)
-
-    mujoco.mju_axisAngle2Quat(
-        tilt_quat,
-        np.array([1.0,0.0,0.0]),
-        np.pi/2
-    )
-
-    yaw_quat=np.zeros(4)
-
-    mujoco.mju_axisAngle2Quat(
-        yaw_quat,
-        np.array([0.0,0.0,1.0]),
-        yaw
-    )
-
-    result=np.zeros(4)
-
-    mujoco.mju_mulQuat(
-        result,
-        yaw_quat,
-        tilt_quat
-    )
-
-    return result
-
-# ============================================================
 # Random Scene
 # ============================================================
 
 def randomize_scene():
 
-    workers=[]
+    active_workers = []
+    
+    fallen_candidates = [w for w in workers_info if w["class_id"] == 0]
+    other_candidates = [w for w in workers_info if w["class_id"] != 0]
+    
+    n_fallen = random.randint(1, len(fallen_candidates))
+    active_fallen = random.sample(fallen_candidates, n_fallen)
+    
+    n_other = random.randint(0, len(other_candidates))
+    active_other = random.sample(other_candidates, n_other)
+    
+    selected_workers = active_fallen + active_other
+    placed_positions = []
 
-    # ========================================================
-    # Fallen workers
-    # ========================================================
-
-    n_fallen=random.randint(
-        1,
-        NUM_FALLEN
-    )
-
-    for i,bid in enumerate(fallen_ids):
-
-        if i>=n_fallen:
-
-            model.body_pos[bid]=[
-                100.0,
-                100.0,
-                -10.0
-            ]
-
+    for w in workers_info:
+        bid = w["id"]
+        
+        if w not in selected_workers:
+            model.body_pos[bid] = [100.0, 100.0, -10.0]
             continue
-
-        x=0.0
-        y=0.0
-
-        for _ in range(100):
-
-            x=np.random.uniform(-4.0,4.0)
-            y=np.random.uniform(-4.0,4.0)
-
-            if is_valid_position(
-                x,
-                y,
-                0.7
-            ):
+            
+        w_x, w_y = 0.0, 0.0
+        
+        if w["rand_pos"]:
+            for _ in range(100):
+                x = np.random.uniform(-4.0, 4.0)
+                y = np.random.uniform(-4.0, 4.0)
+                
+                if not is_valid_position(x, y, 0.6):
+                    continue
+                    
+                overlap = False
+                for px, py in placed_positions:
+                    if np.hypot(x - px, y - py) < 1.0:
+                        overlap = True
+                        break
+                if overlap:
+                    continue
+                
+                w_x, w_y = x, y
                 break
-
-        yaw=np.random.uniform(
-            0,
-            2*np.pi
-        )
-
-        fallen_quat=make_fallen_quat(yaw)
-
-        model.body_pos[bid]=[
-            x,
-            y,
-            0.06
-        ]
-
-        model.body_quat[bid]=fallen_quat
-
-        color=random_color(
-            np.array([
-                0.2,
-                0.24,
-                0.28
-            ])
-        )
-
+                
+            model.body_pos[bid] = [w_x, w_y, w["initial_pos"][2]]
+            
+            yaw = np.random.uniform(0, 2*np.pi)
+            yaw_quat = np.zeros(4)
+            mujoco.mju_axisAngle2Quat(yaw_quat, np.array([0.0, 0.0, 1.0]), yaw)
+            
+            result_quat = np.zeros(4)
+            mujoco.mju_mulQuat(result_quat, yaw_quat, w["initial_quat"])
+            model.body_quat[bid] = result_quat
+        else:
+            model.body_pos[bid] = w["initial_pos"]
+            model.body_quat[bid] = w["initial_quat"]
+            w_x, w_y = w["initial_pos"][0], w["initial_pos"][1]
+            
+        placed_positions.append((w_x, w_y))
+        
+        color = random_color(np.array([0.2, 0.24, 0.28]))
+        geom_prefix_full = f"{w['geom_prefix']}{w['worker_idx']}_"
+        
         for part in BODY_PARTS:
+            gid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, f"{geom_prefix_full}{part}")
+            if gid >= 0:
+                model.geom_rgba[gid][:3] = color
 
-            gid=mujoco.mj_name2id(
-                model,
-                mujoco.mjtObj.mjOBJ_GEOM,
-                f"fw{i}_{part}"
-            )
-
-            if gid>=0:
-                model.geom_rgba[gid][:3]=color
-
-        workers.append({
-            "id":i,
-            "type":"fallen",
-            "x":float(x),
-            "y":float(y),
-        })
-
-    # ========================================================
-    # Standing workers
-    # ========================================================
-
-    n_standing=random.randint(
-        0,
-        NUM_STANDING
-    )
-
-    for i,bid in enumerate(standing_ids):
-
-        if i>=n_standing:
-
-            model.body_pos[bid]=[
-                100.0,
-                100.0,
-                -10.0
-            ]
-
-            continue
-
-        x=0.0
-        y=0.0
-
-        for _ in range(100):
-
-            x=np.random.uniform(-4.0,4.0)
-            y=np.random.uniform(-4.0,4.0)
-
-            if is_valid_position(
-                x,
-                y,
-                0.5
-            ):
-                break
-
-        yaw=np.random.uniform(
-            0,
-            2*np.pi
-        )
-
-        model.body_pos[bid]=[
-            x,
-            y,
-            0.0
-        ]
-
-        model.body_quat[bid]=[
-            np.cos(yaw/2),
-            0,
-            0,
-            np.sin(yaw/2)
-        ]
-
-        color=random_color(
-            np.array([
-                0.2,
-                0.24,
-                0.28
-            ])
-        )
-
-        for part in BODY_PARTS:
-
-            gid=mujoco.mj_name2id(
-                model,
-                mujoco.mjtObj.mjOBJ_GEOM,
-                f"sw{i}_{part}"
-            )
-
-            if gid>=0:
-                model.geom_rgba[gid][:3]=color
-
-        workers.append({
-            "id":i,
-            "type":"standing",
-            "x":float(x),
-            "y":float(y),
+        active_workers.append({
+            "name": w["name"],
+            "class_id": w["class_id"],
+            "geom_prefix": geom_prefix_full,
+            "x": float(w_x),
+            "y": float(w_y),
         })
 
     # ========================================================
@@ -757,8 +650,8 @@ def randomize_scene():
     CAM_Z=0.383
 
     fallen_workers=[
-        w for w in workers
-        if w["type"]=="fallen"
+        w for w in active_workers
+        if w["class_id"] == 0
     ]
 
     if not fallen_workers:
@@ -852,17 +745,19 @@ def randomize_scene():
 
     model.cam_quat[cam_id]=result
 
-    return workers
+    return active_workers
 
 # ============================================================
 # Dataset generation
 # ============================================================
 
-NUM_DATA=8000
+NUM_DATA=10000
 TRAIN_RATIO=0.8
 
 CLASS_FALLEN=0
 CLASS_STANDING=1
+CLASS_BENDING=2
+CLASS_SITTING=3
 
 indices=list(range(NUM_DATA))
 
@@ -924,15 +819,8 @@ for i in range(NUM_DATA):
 
         for worker in workers:
 
-            idx=worker["id"]
-            worker_type=worker["type"]
-
-            if worker_type=="fallen":
-                prefix=f"fw{idx}_"
-                class_id=CLASS_FALLEN
-            else:
-                prefix=f"sw{idx}_"
-                class_id=CLASS_STANDING
+            class_id = worker["class_id"]
+            prefix = worker["geom_prefix"]
 
             # ------------------------------------------------
             # Geometry
