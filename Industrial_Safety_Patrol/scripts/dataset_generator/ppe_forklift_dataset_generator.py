@@ -11,10 +11,10 @@ import json
 import random
 import shutil
 
-XML_PATH = "/workspace/worlds/dataset/ppe_dataset_world.xml"
+XML_PATH = "/workspace/worlds/dataset/ppe_forklift_dataset_world.xml"
 
 # Dataset root
-DATASET = "/workspace/datasets/ppe_dataset"
+DATASET = "/workspace/datasets/ppe_forklift_dataset"
 
 TRAIN_IMAGE = os.path.join(DATASET, "images/train")
 VAL_IMAGE = os.path.join(DATASET, "images/val")
@@ -26,7 +26,7 @@ META_PATH = os.path.join(DATASET, "metadata.json")
 
 # ── 디버그 설정 ──────────────────────────────────────────────────────
 # True로 설정하면 bbox가 시각화된 디버그 이미지를 debug/ 폴더에 저장합니다.
-DEBUG_BBOX      = True
+DEBUG_BBOX      = False
 DEBUG_IMAGE_DIR = os.path.join(DATASET, "debug")
 # 클래스별 색상 (BGR): 0=person(파랑), 1=helmet(노란), 2=vest(초록), 3=forklift(주황)
 DEBUG_COLORS = {
@@ -200,10 +200,10 @@ def is_visible(point, owner_prefix):
 
 def sample_geom_points(
     gid,
-    n_circle=32,
-    n_height=16,
-    n_phi=16,
-    n_theta=32
+    n_circle=12,
+    n_height=6,
+    n_phi=8,
+    n_theta=12
 ):
 
     center = data.geom_xpos[gid]
@@ -432,14 +432,9 @@ def sample_geom_points(
 
     return pts
 
-################################################
-# Visible ratio
-################################################
+def analyze_geoms(names, owner_prefix):
 
-def visible_ratio(names, owner_prefix):
-
-    visible = 0
-    total = 0
+    results = {}
 
     for name in names:
 
@@ -452,63 +447,51 @@ def visible_ratio(names, owner_prefix):
         if gid < 0:
             continue
 
+        pixels = []
+        visible = 0
+        total = 0
+
         for p in sample_geom_points(gid):
 
             total += 1
 
-            if is_visible(p, owner_prefix):
-                visible += 1
-
-    if total == 0:
-        return 0.0
-
-    return visible / total
-
-################################################
-# Generic BBox
-################################################
-
-def bbox_from_geoms(names, owner_prefix):
-
-    pixels=[]
-
-    for name in names:
-
-        gid=mujoco.mj_name2id(
-            model,
-            mujoco.mjtObj.mjOBJ_GEOM,
-            name
-        )
-
-        if gid < 0:
-            continue
-
-        for p in sample_geom_points(gid):
-
             if not is_visible(p, owner_prefix):
                 continue
 
-            pix=project(p)
+            visible += 1
+
+            pix = project(p)
 
             if pix is not None:
                 pixels.append(pix)
 
-    if len(pixels)<20:
+        ratio = visible / total if total else 0.0
+
+        results[name] = {
+            "ratio": ratio,
+            "pixels": pixels
+        }
+
+    return results
+
+def bbox_from_pixels(pixels):
+
+    if len(pixels) < 20:
         return None
 
-    xs=[p[0] for p in pixels]
-    ys=[p[1] for p in pixels]
+    xs = [p[0] for p in pixels]
+    ys = [p[1] for p in pixels]
 
-    x1=np.clip(min(xs),0,WIDTH-1)
-    y1=np.clip(min(ys),0,HEIGHT-1)
+    x1 = np.clip(min(xs), 0, WIDTH - 1)
+    y1 = np.clip(min(ys), 0, HEIGHT - 1)
 
-    x2=np.clip(max(xs),0,WIDTH-1)
-    y2=np.clip(max(ys),0,HEIGHT-1)
+    x2 = np.clip(max(xs), 0, WIDTH - 1)
+    y2 = np.clip(max(ys), 0, HEIGHT - 1)
 
     if x2 <= x1 or y2 <= y1:
         return None
 
-    if (x2-x1)<6 or (y2-y1)<6:
+    if (x2 - x1) < 6 or (y2 - y1) < 6:
         return None
 
     return (
@@ -715,7 +698,7 @@ def randomize_scene():
 # Generate Dataset
 ################################################
 
-NUM_DATA=100
+NUM_DATA=10000
 
 TRAIN_RATIO = 0.8
 
@@ -741,26 +724,6 @@ for i in range(NUM_DATA):
     img=renderer.render()
     img=cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
-    ################################################
-    # Debug projection (All workers)
-    ################################################
-
-    for worker in workers:
-
-        idx = worker["id"]
-
-        parts = [
-            f"w{idx}_torso", f"w{idx}_pelvis", f"w{idx}_luleg", f"w{idx}_llleg", 
-            f"w{idx}_ruleg", f"w{idx}_rlleg", f"w{idx}_larm", f"w{idx}_rarm",
-            f"w{idx}_head"
-        ]
-
-        if worker["helmet"]:
-            parts.append(f"w{idx}_helmet")
-
-        if worker["vest"]:
-            parts.append(f"w{idx}_vest")
-
     labels=[]
 
     ############################################
@@ -772,85 +735,189 @@ for i in range(NUM_DATA):
         idx=worker["id"]
 
         ################################################
-        # Skip if head or body is not visible
+        # Worker geom analysis
         ################################################
 
-        head_ratio = visible_ratio(
-            [f"w{idx}_head"],
+        body_parts = [
+            f"w{idx}_torso",
+            f"w{idx}_pelvis",
+            f"w{idx}_luleg",
+            f"w{idx}_llleg",
+            f"w{idx}_ruleg",
+            f"w{idx}_rlleg",
+            f"w{idx}_larm",
+            f"w{idx}_rarm"
+        ]
+
+        all_parts = body_parts + [
+            f"w{idx}_head"
+        ]
+
+        if worker["helmet"]:
+            all_parts.append(
+                f"w{idx}_helmet"
+            )
+
+        if worker["vest"]:
+            all_parts.append(
+                f"w{idx}_vest"
+            )
+
+        analysis = analyze_geoms(
+            all_parts,
             f"w{idx}_"
         )
 
-        if head_ratio < 0.5:
+        ################################################
+        # Head visibility
+        ################################################
+
+        head_name = f"w{idx}_head"
+
+        if analysis[head_name]["ratio"] < 0.5:
             continue
 
-        body_parts = [
-            f"w{idx}_torso", f"w{idx}_pelvis", f"w{idx}_luleg", f"w{idx}_llleg", 
-            f"w{idx}_ruleg", f"w{idx}_rlleg", f"w{idx}_larm", f"w{idx}_rarm"
-        ]
-        body_ratio = visible_ratio(
-            body_parts,
-            f"w{idx}_"
-        )
+        ################################################
+        # Body visibility
+        ################################################
+
+        body_visible = 0
+        body_total = 0
+
+        for name in body_parts:
+
+            result = analysis[name]
+
+            body_visible += result["ratio"]
+            body_total += 1
+
+        body_ratio = body_visible / body_total
 
         if body_ratio < 0.5:
             continue
 
-        # person
-        parts = [
-            f"w{idx}_torso", f"w{idx}_pelvis", f"w{idx}_luleg", f"w{idx}_llleg", 
-            f"w{idx}_ruleg", f"w{idx}_rlleg", f"w{idx}_larm", f"w{idx}_rarm",
-            f"w{idx}_head"
-        ]
-        if worker["helmet"]:
-            parts.append(
-                f"w{idx}_helmet"
-            )
-        if worker["vest"]:
-            parts.append(
-                f"w{idx}_vest"
-            )
-        bbox=bbox_from_geoms(parts, f"w{idx}_")
+        ################################################
+        # Person bbox
+        ################################################
 
-        if bbox:
+        person_pixels = []
+
+        for name in all_parts:
+            person_pixels.extend(
+                analysis[name]["pixels"]
+            )
+
+        person_bbox = bbox_from_pixels(
+            person_pixels
+        )
+
+        if person_bbox:
+
             labels.append(
                 (
                     0,
-                    bbox
+                    person_bbox
                 )
             )
+
+        ################################################
+        # Helmet bbox
+        ################################################
 
         if worker["helmet"]:
-            helmet=bbox_from_geoms(
-                [
-                    f"w{idx}_helmet"
-                ], f"w{idx}_"
+
+            helmet_name = f"w{idx}_helmet"
+
+            helmet_bbox = bbox_from_pixels(
+                analysis[helmet_name]["pixels"]
             )
-            if helmet:
+
+            if helmet_bbox:
+
                 labels.append(
-                    (1, helmet)
+                    (
+                        1,
+                        helmet_bbox
+                    )
                 )
 
+        ################################################
+        # Vest bbox
+        ################################################
+
         if worker["vest"]:
-            vest=bbox_from_geoms(
-                [
-                    f"w{idx}_vest"
-                ], f"w{idx}_"
+
+            vest_name = f"w{idx}_vest"
+
+            vest_bbox = bbox_from_pixels(
+                analysis[vest_name]["pixels"]
             )
-            if vest:
+
+            if vest_bbox:
+
                 labels.append(
-                    (2, vest)
+                    (
+                        2,
+                        vest_bbox
+                    )
                 )
 
     ############################################
     # forklift labels
     ############################################
 
-    forklift_parts = ["fl_body", "fl_fork", "fl_mast", "fl_wheel_fl", "fl_wheel_fr", "fl_wheel_rl", "fl_wheel_rr"]
-    forklift_bbox = bbox_from_geoms(forklift_parts, "fl_")
-    if forklift_bbox:
-        fl_ratio = visible_ratio(forklift_parts, "fl_")
-        if fl_ratio > 0.3:
-            labels.append((3, forklift_bbox))
+    forklift_parts = [
+        "fl_body",
+        "fl_fork",
+        "fl_mast",
+        "fl_wheel_fl",
+        "fl_wheel_fr",
+        "fl_wheel_rl",
+        "fl_wheel_rr"
+    ]
+
+    forklift_analysis = analyze_geoms(
+        forklift_parts,
+        "fl_"
+    )
+
+    forklift_pixels = []
+
+    fl_visible = 0
+    fl_total = 0
+
+    for name in forklift_parts:
+
+        if name not in forklift_analysis:
+            continue
+
+        result = forklift_analysis[name]
+
+        forklift_pixels.extend(
+            result["pixels"]
+        )
+
+        fl_visible += result["ratio"]
+        fl_total += 1
+
+    fl_ratio = (
+        fl_visible / fl_total
+        if fl_total > 0
+        else 0.0
+    )
+
+    forklift_bbox = bbox_from_pixels(
+        forklift_pixels
+    )
+
+    if forklift_bbox and fl_ratio > 0.3:
+
+        labels.append(
+            (
+                3,
+                forklift_bbox
+            )
+        )
 
     ############################################
     # Save image
