@@ -1,0 +1,315 @@
+<mujoco model="ppe_dataset_world">
+
+    <compiler angle="radian"/>
+    <option timestep="0.005"/>
+
+    <worldbody>
+
+        <camera
+            name="dataset_camera"
+            pos="0 -8 2.5"
+            quat="0.5 0.5 -0.5 -0.5"
+            fovy="58"/>
+
+        <geom name="floor" type="plane" size="5 5 0.1" rgba="0.45 0.45 0.42 1" friction="1.0 0.005 0.0001"/>
+        <light directional="true" diffuse=".8 .8 .8" specular=".3 .3 .3" pos="0 0 5" dir="0 0 -1"/>
+        <!-- 보조 조명 -->
+        <light directional="false" diffuse=".4 .4 .4" specular=".1 .1 .1" pos="3 3 3.5" dir="-0.3 -0.3 -1"/>
+        <light directional="false" diffuse=".4 .4 .4" specular=".1 .1 .1" pos="-3 -3 3.5" dir="0.3 0.3 -1"/>
+
+        <!-- 벽면 -->
+        <geom name="wall_north" type="box" size="5.1 0.05 1.5" pos="0 5.05 1.5" rgba="0.75 0.75 0.72 1"/>
+        <geom name="wall_south" type="box" size="5.1 0.05 1.5" pos="0 -5.05 1.5" rgba="0.75 0.75 0.72 1"/>
+        <geom name="wall_east" type="box" size="0.05 5.0 1.5" pos="5.05 0 1.5" rgba="0.75 0.75 0.72 1"/>
+        <geom name="wall_west" type="box" size="0.05 5.0 1.5" pos="-5.05 0 1.5" rgba="0.75 0.75 0.72 1"/>
+
+        <!-- 기둥 -->
+        <body name="column_1" pos="-1.5 -3.5 0">
+            <geom name="column_1_geom" type="cylinder" size="0.15 1.5" pos="0 0 1.5" rgba="0.5 0.5 0.5 1" mass="80.0"/>
+        </body>
+        <body name="column_2" pos="1 1 0">
+            <geom name="column_2_geom" type="cylinder" size="0.15 1.5" pos="0 0 1.5" rgba="0.5 0.5 0.5 1" mass="80.0"/>
+        </body>
+        <body name="column_3" pos="3.5 -1.9 0">
+            <geom name="column_3_geom" type="cylinder" size="0.15 1.5" pos="0 0 1.5" rgba="0.5 0.5 0.5 1" mass="80.0"/>
+        </body>
+        <body name="column_4" pos="-3.5 -2 0">
+            <geom name="column_4_geom" type="cylinder" size="0.15 1.5" pos="0 0 1.5" rgba="0.5 0.5 0.5 1" mass="80.0"/>
+        </body>
+
+        <!-- 서쪽 벽면 선반 -->
+        <body name="wall_shelf_west" pos="-4.85 2.0 0">
+            <geom name="shelf_west_back" type="box" size="0.05 0.6 0.9" pos="0 0 0.9" rgba="0.55 0.55 0.58 1" mass="8.0"/>
+            <geom name="shelf_west_tier1" type="box" size="0.35 0.6 0.02" pos="0.35 0 0.4" rgba="0.6 0.45 0.3 1" mass="5.0"/>
+            <geom name="shelf_west_tier2" type="box" size="0.35 0.6 0.02" pos="0.35 0 0.9" rgba="0.6 0.45 0.3 1" mass="5.0"/>
+            <geom name="shelf_west_tier3" type="box" size="0.35 0.6 0.02" pos="0.35 0 1.4" rgba="0.6 0.45 0.3 1" mass="5.0"/>
+            <geom name="shelf_west_item1" type="box" size="0.15 0.15 0.12" pos="0.3 -0.2 0.54" rgba="0.7 0.5 0.2 1" mass="3.0"/>
+            <geom name="shelf_west_item2" type="box" size="0.12 0.12 0.1" pos="0.35 0.15 1.02" rgba="0.3 0.3 0.7 1" mass="2.0"/>
+        </body>
+
+        <!-- 동쪽 벽면 선반 1 -->
+        <body name="wall_shelf_east_1" pos="4.85 -1.5 0">
+            <geom name="shelf_east1_back" type="box" size="0.05 0.6 0.9" pos="0 0 0.9" rgba="0.55 0.55 0.58 1" mass="8.0"/>
+            <geom name="shelf_east1_tier1" type="box" size="0.35 0.6 0.02" pos="-0.35 0 0.4" rgba="0.6 0.45 0.3 1" mass="5.0"/>
+            <geom name="shelf_east1_tier2" type="box" size="0.35 0.6 0.02" pos="-0.35 0 0.9" rgba="0.6 0.45 0.3 1" mass="5.0"/>
+            <geom name="shelf_east1_tier3" type="box" size="0.35 0.6 0.02" pos="-0.35 0 1.4" rgba="0.6 0.45 0.3 1" mass="5.0"/>
+            <geom name="shelf_east1_item1" type="box" size="0.15 0.15 0.12" pos="-0.3 0.2 0.54" rgba="0.4 0.6 0.3 1" mass="3.0"/>
+        </body>
+
+        <!-- 동쪽 벽면 선반 2 -->
+        <body name="wall_shelf_east_2" pos="4.85 2.5 0">
+            <geom name="shelf_east2_back" type="box" size="0.05 0.6 0.9" pos="0 0 0.9" rgba="0.55 0.55 0.58 1" mass="8.0"/>
+            <geom name="shelf_east2_tier1" type="box" size="0.35 0.6 0.02" pos="-0.35 0 0.4" rgba="0.6 0.45 0.3 1" mass="5.0"/>
+            <geom name="shelf_east2_tier2" type="box" size="0.35 0.6 0.02" pos="-0.35 0 0.9" rgba="0.6 0.45 0.3 1" mass="5.0"/>
+            <geom name="shelf_east2_tier3" type="box" size="0.35 0.6 0.02" pos="-0.35 0 1.4" rgba="0.6 0.45 0.3 1" mass="5.0"/>
+            <geom name="shelf_east2_item1" type="box" size="0.12 0.12 0.1" pos="-0.35 -0.15 1.02" rgba="0.7 0.3 0.3 1" mass="2.0"/>
+        </body>
+
+        <!-- 벽면 전기 배전반 & 소화기함 (기본 인프라) -->
+        <body name="electrical_panel" pos="0 -4.85 0">
+            <geom name="panel_box" type="box" size="0.3 0.08 0.4" pos="0 0 1.5" rgba="0.4 0.45 0.35 1" mass="15.0"/>
+            <geom name="panel_warning_stripe" type="box" size="0.32 0.09 0.02" pos="0 0 1.9" rgba="1 0.8 0 1" contype="0" conaffinity="0"/>
+        </body>
+
+        <body name="fire_extinguisher_1" pos="4.85 3.7 0">
+            <geom name="extinguisher_cabinet_1" type="box" size="0.06 0.18 0.28" pos="0 0 1.0" rgba="0.69 0.09 0.08 1" mass="5.0"/>
+        </body>
+        <body name="fire_extinguisher_2" pos="-4.85 -1.0 0">
+            <geom name="extinguisher_cabinet_2" type="box" size="0.06 0.18 0.28" pos="0 0 1.0" rgba="0.69 0.09 0.08 1" mass="5.0"/>
+        </body>
+
+        <!-- 북쪽 벽 하역장 셔터도어 -->
+        <body name="loading_dock_door" pos="-3.5 5.0 0">
+            <geom name="shutter_door" type="box" size="1.0 0.08 1.3" pos="0 0 1.3" rgba="0.55 0.57 0.6 1"/>
+            <geom name="shutter_line_1" type="box" size="1.0 0.09 0.02" pos="0 0 0.8" rgba="0.35 0.37 0.4 1" contype="0" conaffinity="0"/>
+            <geom name="shutter_line_2" type="box" size="1.0 0.09 0.02" pos="0 0 1.6" rgba="0.35 0.37 0.4 1" contype="0" conaffinity="0"/>
+            <geom name="shutter_line_3" type="box" size="1.0 0.09 0.02" pos="0 0 2.3" rgba="0.35 0.37 0.4 1" contype="0" conaffinity="0"/>
+        </body>
+
+        <!-- 남쪽 벽 비상구 -->
+        <body name="emergency_exit" pos="1.5 -5.0 0">
+            <geom name="exit_door" type="box" size="0.6 0.08 1.1" pos="0 0 1.1" rgba="0.0 0.62 0.38 1"/>
+            <site name="exit_sign" pos="0 -0.1 2.3" size="0.15 0.08 0.03" type="box" rgba="0 1 0 0.8"/>
+        </body>
+
+        <!-- 돌출 격벽 - 전기/설비실 (기본 인프라) -->
+        <body name="utility_room_wall_1" pos="3.3 -4.0 0">
+            <geom name="utility_wall_1_geom" type="box" size="0.05 1.0 1.5" pos="0 0 1.5" rgba="0.7 0.7 0.68 1"/>
+        </body>
+        <body name="utility_room_wall_2" pos="4.175 -3.0 0">
+            <geom name="utility_wall_2_geom" type="box" size="0.875 0.05 1.5" pos="0 0 1.5" rgba="0.7 0.7 0.68 1"/>
+        </body>
+        <!-- 격벽 내부 변압기/설비 박스 -->
+        <body name="utility_equipment" pos="4.2 -4.2 0">
+            <geom name="transformer_box" type="box" size="0.4 0.3 0.5" pos="0 0 0.5" rgba="0.3 0.5 0.3 1" mass="150.0"/>
+            <!-- 고전압 경고 표시 -->
+            <geom name="transformer_warning" type="box" size="0.4 0.31 0.05" pos="0 0 0.85" rgba="1 0.8 0 1" contype="0" conaffinity="0"/>
+        </body>
+
+        <!-- ================================================= -->
+        <!-- Worker 0 -->
+        <!-- ================================================= -->
+        <body name="worker_0" pos="0 0 0">
+            <!-- 머리 (head) -->
+            <geom name="w0_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.82 0.65 0.50 1" mass="5.0"/>
+            <!-- PPE: 안전모 (하드햇, 머리 상단에 씌움) -->
+            <geom name="w0_helmet" type="ellipsoid" size="0.125 0.125 0.075" pos="0 0 1.70" rgba="1.0 1.0 1.0 1" mass="0.5"/>
+            <!-- 몸통 (torso: 골반~어깨) -->
+            <geom name="w0_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.15 0.20 0.25 1" mass="30.0"/>
+            <!-- PPE: 안전조끼 (torso 위에 약간 크게 씌움) -->
+            <geom name="w0_vest" type="capsule" fromto="0 0 0.84 0 0 1.40" size="0.100" rgba="0.85 0.95 0.10 0.90" mass="0.1" contype="0" conaffinity="0"/>
+            <!-- 골반 (pelvis) -->
+            <geom name="w0_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <!-- 왼쪽 대퇴 (left upper leg) -->
+            <geom name="w0_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <!-- 왼쪽 하퇴 (left lower leg) -->
+            <geom name="w0_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.15 0.20 0.25 1" mass="4.0"/>
+            <!-- 오른쪽 대퇴 (right upper leg) -->
+            <geom name="w0_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <!-- 오른쪽 하퇴 (right lower leg) -->
+            <geom name="w0_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.15 0.20 0.25 1" mass="4.0"/>
+            <!-- 왼팔 (left arm: 어깨~손목, 약간 내린 자세) -->
+            <geom name="w0_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+            <!-- 오른팔 (right arm: 어깨~손목) -->
+            <geom name="w0_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+        </body>
+
+        <!-- ================================================= -->
+        <!-- Worker 1 -->
+        <!-- ================================================= -->
+        <body name="worker_1" pos="0 0 0">
+            <!-- 머리 (head) -->
+            <geom name="w1_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.82 0.65 0.50 1" mass="5.0"/>
+            <!-- PPE: 안전모 -->
+            <geom name="w1_helmet" type="ellipsoid" size="0.125 0.125 0.075" pos="0 0 1.70" rgba="1.0 1.0 1.0 1" mass="0.5"/>
+            <!-- 몸통 -->
+            <geom name="w1_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.20 0.25 0.30 1" mass="30.0"/>
+            <!-- PPE: 안전조끼 -->
+            <geom name="w1_vest" type="capsule" fromto="0 0 0.84 0 0 1.40" size="0.100" rgba="0.85 0.95 0.10 0.90" mass="0.1" contype="0" conaffinity="0"/>
+            <!-- 골반 -->
+            <geom name="w1_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.20 0.25 0.30 1" mass="8.0"/>
+            <!-- 왼쪽 대퇴 -->
+            <geom name="w1_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.20 0.25 0.30 1" mass="8.0"/>
+            <!-- 왼쪽 하퇴 -->
+            <geom name="w1_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.20 0.25 0.30 1" mass="4.0"/>
+            <!-- 오른쪽 대퇴 -->
+            <geom name="w1_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.20 0.25 0.30 1" mass="8.0"/>
+            <!-- 오른쪽 하퇴 -->
+            <geom name="w1_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.20 0.25 0.30 1" mass="4.0"/>
+            <!-- 왼팔 -->
+            <geom name="w1_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+            <!-- 오른팔 -->
+            <geom name="w1_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+        </body>
+
+        <!-- ================================================= -->
+        <!-- Worker 2 -->
+        <!-- ================================================= -->
+        <body name="worker_2" pos="0 0 0">
+            <!-- 머리 (head) -->
+            <geom name="w2_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.82 0.65 0.50 1" mass="5.0"/>
+            <!-- PPE: 안전모 -->
+            <geom name="w2_helmet" type="ellipsoid" size="0.125 0.125 0.075" pos="0 0 1.70" rgba="1.0 1.0 1.0 1" mass="0.5"/>
+            <!-- 몸통 -->
+            <geom name="w2_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.15 0.18 0.22 1" mass="30.0"/>
+            <!-- PPE: 안전조끼 -->
+            <geom name="w2_vest" type="capsule" fromto="0.0 0 0.84 0 0 1.40" size="0.100" rgba="0.85 0.95 0.10 0.90" mass="0.1" contype="0" conaffinity="0"/>
+            <!-- 골반 -->
+            <geom name="w2_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.15 0.18 0.22 1" mass="8.0"/>
+            <!-- 왼쪽 대퇴 -->
+            <geom name="w2_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.15 0.18 0.22 1" mass="8.0"/>
+            <!-- 왼쪽 하퇴 -->
+            <geom name="w2_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.15 0.18 0.22 1" mass="4.0"/>
+            <!-- 오른쪽 대퇴 -->
+            <geom name="w2_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.15 0.18 0.22 1" mass="8.0"/>
+            <!-- 오른쪽 하퇴 -->
+            <geom name="w2_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.15 0.18 0.22 1" mass="4.0"/>
+            <!-- 왼팔 -->
+            <geom name="w2_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+            <!-- 오른팔 -->
+            <geom name="w2_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+        </body>
+
+        <!-- ================================================= -->
+        <!-- Worker 3 -->
+        <!-- ================================================= -->
+        <body name="worker_3" pos="0 0 0">
+            <!-- 머리 (head) -->
+            <geom name="w3_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.82 0.65 0.50 1" mass="5.0"/>
+            <!-- PPE: 안전모 -->
+            <geom name="w3_helmet" type="ellipsoid" size="0.125 0.125 0.075" pos="0 0 1.70" rgba="1.0 1.0 1.0 1" mass="0.5"/>
+            <!-- 몸통 -->
+            <geom name="w3_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.25 0.28 0.32 1" mass="30.0"/>
+            <!-- PPE: 안전조끼 -->
+            <geom name="w3_vest" type="capsule" fromto="0 0 0.84 0 0 1.40" size="0.100" rgba="0.85 0.95 0.10 0.90" mass="0.1" contype="0" conaffinity="0"/>
+            <!-- 골반 -->
+            <geom name="w3_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <!-- 왼쪽 대퇴 -->
+            <geom name="w3_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <!-- 왼쪽 하퇴 -->
+            <geom name="w3_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.25 0.28 0.32 1" mass="4.0"/>
+            <!-- 오른쪽 대퇴 -->
+            <geom name="w3_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <!-- 오른쪽 하퇴 -->
+            <geom name="w3_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.25 0.28 0.32 1" mass="4.0"/>
+            <!-- 왼팔 -->
+            <geom name="w3_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+            <!-- 오른팔 -->
+            <geom name="w3_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+        </body>
+
+        <!-- ================================================= -->
+        <!-- Worker 4 -->
+        <!-- ================================================= -->
+        <body name="worker_4" pos="0 0 0">
+            <!-- 머리 (head) -->
+            <geom name="w4_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.82 0.65 0.50 1" mass="5.0"/>
+            <!-- PPE: 안전모 -->
+            <geom name="w4_helmet" type="ellipsoid" size="0.125 0.125 0.075" pos="0 0 1.70" rgba="1.0 1.0 1.0 1" mass="0.5"/>
+            <!-- 몸통 -->
+            <geom name="w4_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.18 0.20 0.25 1" mass="30.0"/>
+            <!-- PPE: 안전조끼 -->
+            <geom name="w4_vest" type="capsule" fromto="0 0 0.84 0 0 1.40" size="0.100" rgba="0.85 0.95 0.10 0.90" mass="0.1" contype="0" conaffinity="0"/>
+            <!-- 골반 -->
+            <geom name="w4_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.18 0.20 0.25 1" mass="8.0"/>
+            <!-- 왼쪽 대퇴 -->
+            <geom name="w4_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.18 0.20 0.25 1" mass="8.0"/>
+            <!-- 왼쪽 하퇴 -->
+            <geom name="w4_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.18 0.20 0.25 1" mass="4.0"/>
+            <!-- 오른쪽 대퇴 -->
+            <geom name="w4_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.18 0.20 0.25 1" mass="8.0"/>
+            <!-- 오른쪽 하퇴 -->
+            <geom name="w4_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.18 0.20 0.25 1" mass="4.0"/>
+            <!-- 왼팔 -->
+            <geom name="w4_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+            <!-- 오른팔 -->
+            <geom name="w4_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+        </body>
+
+        <!-- 지게차 모델 (간단한 형태) - 움직이는 물체 감지 시나리오용 -->
+        <body name="forklift" pos="-3 0 0">
+
+            <!-- 지게차 전체를 자유롭게 이동/회전시키기 위한 free joint -->
+            <freejoint name="forklift_freejoint"/>
+
+            <!-- 질량/관성 직접 지정 -->
+            <inertial
+                pos="0 0 0.5"
+                mass="260"
+                diaginertia="100 100 100"/>
+
+            <!-- 차체 -->
+            <geom name="fl_body"
+                type="box"
+                size="0.8 0.5 0.4"
+                pos="0 0 0.4"
+                rgba="0.95 0.5 0.05 1.0"/>
+
+            <!-- 포크 -->
+            <geom name="fl_fork"
+                type="box"
+                size="0.5 0.3 0.02"
+                pos="1.3 0 0.1"
+                rgba="0.2 0.2 0.2 1"/>
+
+            <!-- 마스트 -->
+            <geom name="fl_mast"
+                type="box"
+                size="0.05 0.3 0.8"
+                pos="0.85 0 0.8"
+                rgba="0.1 0.1 0.1 1"/>
+
+            <!-- 앞 왼쪽 바퀴 -->
+            <geom name="fl_wheel_fl"
+                  type="cylinder"
+                  size="0.18 0.12"
+                  pos="0.55 0.52 0.18"
+                  quat="0.7071 0 0.7071 0"
+                  rgba="0.05 0.05 0.05 1"/>
+
+            <!-- 앞 오른쪽 바퀴 -->
+            <geom name="fl_wheel_fr"
+                  type="cylinder"
+                  size="0.18 0.12"
+                  pos="0.55 -0.52 0.18"
+                  quat="0.7071 0 0.7071 0"
+                  rgba="0.05 0.05 0.05 1"/>
+
+            <!-- 뒤 왼쪽 바퀴 -->
+            <geom name="fl_wheel_rl"
+                  type="cylinder"
+                  size="0.18 0.12"
+                  pos="-0.55 0.52 0.18"
+                  quat="0.7071 0 0.7071 0"
+                  rgba="0.05 0.05 0.05 1"/>
+
+            <!-- 뒤 오른쪽 바퀴 -->
+            <geom name="fl_wheel_rr"
+                  type="cylinder"
+                  size="0.18 0.12"
+                  pos="-0.55 -0.52 0.18"
+                  quat="0.7071 0 0.7071 0"
+                  rgba="0.05 0.05 0.05 1"/>
+        </body>
+    </worldbody>
+</mujoco>
