@@ -27,7 +27,7 @@ import os
 import json
 import random
 
-XML_PATH = "/workspace/worlds/fall_dataset_world.xml"
+XML_PATH = "/workspace/worlds/dataset/fall_dataset_world.xml"
 
 DATASET = "/workspace/datasets/fall_dataset"
 
@@ -37,8 +37,23 @@ TRAIN_LABEL = os.path.join(DATASET, "labels/train")
 VAL_LABEL   = os.path.join(DATASET, "labels/val")
 META_PATH   = os.path.join(DATASET, "metadata.json")
 
+# ── 디버그 설정 ──────────────────────────────────────────────────────
+# True로 설정하면 bbox가 시각화된 디버그 이미지를 debug/ 폴더에 저장합니다.
+DEBUG_BBOX       = False
+DEBUG_IMAGE_DIR  = os.path.join(DATASET, "debug")
+# 클래스별 색상 (BGR): 0=fallen(빨강), 1=standing(초록)
+DEBUG_COLORS = {
+    0: (0,   0, 255),   # fallen   → 빨강
+    1: (0, 220,  50),   # standing → 초록
+}
+DEBUG_CLASS_NAMES = {0: "fallen", 1: "standing"}
+# ─────────────────────────────────────────────────────────────────────
+
 for path in [TRAIN_IMAGE, VAL_IMAGE, TRAIN_LABEL, VAL_LABEL]:
     os.makedirs(path, exist_ok=True)
+
+if DEBUG_BBOX:
+    os.makedirs(DEBUG_IMAGE_DIR, exist_ok=True)
 
 ################################################
 # Load MuJoCo
@@ -237,6 +252,7 @@ def bbox_from_geoms(geom_names, prefix):
             pix = project(p)
             if pix is not None:
                 pixels.append(pix)
+    # 픽셀 20개 이상 아니면 패스
     if len(pixels) < 20:
         return None
     xs = [p[0] for p in pixels]
@@ -247,6 +263,7 @@ def bbox_from_geoms(geom_names, prefix):
     y2 = int(np.clip(max(ys), 0, HEIGHT - 1))
     if x2 <= x1 or y2 <= y1:
         return None
+    # Bounding box 너비/높이 6px 미만이면 패스
     if (x2 - x1) < 6 or (y2 - y1) < 6:
         return None
     return (x1, y1, x2, y2)
@@ -312,8 +329,7 @@ def randomize_scene():
         fallen_quat = make_fallen_quat(yaw)
 
         # 쓰러진 몸체의 지면 높이 조정
-        # 실린더 반지름(0.20) 만큼 위로 올려서 바닥에 닿게
-        model.body_pos[bid]  = [x, y, 0.20]
+        model.body_pos[bid]  = [x, y, 0.06]
         model.body_quat[bid] = fallen_quat
 
         # 색상 랜덤화
@@ -367,7 +383,7 @@ def randomize_scene():
         })
 
     # ─── 카메라 위치 / 방향 랜덤화 ────────────────────────────────
-    CAM_Z = 2.0  # 감시 카메라 높이 (쓰러진 작업자를 위에서 내려다봄)
+    CAM_Z = 0.383  # 감시 카메라 높이 (쓰러진 작업자를 위에서 내려다봄)
 
     # 바라볼 쓰러진 작업자 1명 선택
     fallen_workers = [w for w in workers if w["type"] == "fallen"]
@@ -440,6 +456,7 @@ for i in range(NUM_DATA):
             f"{prefix}ruleg", f"{prefix}rlleg", f"{prefix}larm", f"{prefix}rarm"
         ]
 
+        # 몸통, 팔다리 가시율 30% 미만 무시
         body_ratio = visible_ratio(body_parts, prefix)
         if body_ratio < 0.3:
             continue
@@ -457,6 +474,7 @@ for i in range(NUM_DATA):
         idx    = w["id"]
         prefix = f"sw{idx}_"
 
+        # 머리 가시율 50% 미만 무시
         head_ratio = visible_ratio([f"{prefix}head"], prefix)
         if head_ratio < 0.5:
             continue
@@ -466,6 +484,7 @@ for i in range(NUM_DATA):
             f"{prefix}ruleg", f"{prefix}rlleg", f"{prefix}larm", f"{prefix}rarm"
         ]
 
+        # 몸통, 팔다리 가시율 50% 미만 무시
         body_ratio = visible_ratio(body_parts, prefix)
         if body_ratio < 0.5:
             continue
@@ -486,6 +505,31 @@ for i in range(NUM_DATA):
 
     # ─── 이미지 저장 ─────────────────────────────────────────────
     cv2.imwrite(os.path.join(image_dir, f"{name}.jpg"), img)
+
+    # ─── 디버그 bbox 시각화 ──────────────────────────────────────
+    if DEBUG_BBOX:
+        debug_img = img.copy()
+        for cls, bbox in labels:
+            x1, y1, x2, y2 = bbox
+            color = DEBUG_COLORS.get(cls, (255, 255, 0))
+            cv2.rectangle(debug_img, (x1, y1), (x2, y2), color, 2)
+            label_text = DEBUG_CLASS_NAMES.get(cls, str(cls))
+            (tw, th), _ = cv2.getTextSize(
+                label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1
+            )
+            # 레이블 배경 박스
+            cv2.rectangle(
+                debug_img,
+                (x1, max(y1 - th - 6, 0)),
+                (x1 + tw + 6, max(y1, th + 6)),
+                color, -1
+            )
+            cv2.putText(
+                debug_img, label_text,
+                (x1 + 3, max(y1 - 4, th + 2)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA
+            )
+        cv2.imwrite(os.path.join(DEBUG_IMAGE_DIR, f"{name}.jpg"), debug_img)
 
     # ─── YOLO 라벨 저장 ──────────────────────────────────────────
     with open(os.path.join(label_dir, f"{name}.txt"), "w") as f:
