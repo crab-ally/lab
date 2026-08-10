@@ -11,7 +11,7 @@ import json
 import random
 import shutil
 
-XML_PATH = "/workspace/worlds/ppe_dataset_world.xml"
+XML_PATH = "/workspace/worlds/dataset/ppe_dataset_world.xml"
 
 # Dataset root
 DATASET = "/workspace/datasets/ppe_dataset"
@@ -24,6 +24,19 @@ VAL_LABEL = os.path.join(DATASET, "labels/val")
 
 META_PATH = os.path.join(DATASET, "metadata.json")
 
+# ── 디버그 설정 ──────────────────────────────────────────────────────
+# True로 설정하면 bbox가 시각화된 디버그 이미지를 debug/ 폴더에 저장합니다.
+DEBUG_BBOX      = True
+DEBUG_IMAGE_DIR = os.path.join(DATASET, "debug")
+# 클래스별 색상 (BGR): 0=person(파랑), 1=helmet(노란), 2=vest(초록)
+DEBUG_COLORS = {
+    0: (220,  80,   0),   # person  → 코발트 파랑
+    1: (0,   200, 255),   # helmet  → 노란
+    2: (0,   220,  50),   # vest    → 초록
+}
+DEBUG_CLASS_NAMES = {0: "person", 1: "helmet", 2: "vest"}
+# ─────────────────────────────────────────────────────────────────────
+
 for path in [
     TRAIN_IMAGE,
     VAL_IMAGE,
@@ -31,6 +44,9 @@ for path in [
     VAL_LABEL,
 ]:
     os.makedirs(path, exist_ok=True)
+
+if DEBUG_BBOX:
+    os.makedirs(DEBUG_IMAGE_DIR, exist_ok=True)
 
 # Load MuJoCo
 model = mujoco.MjModel.from_xml_path(XML_PATH)
@@ -181,71 +197,234 @@ def is_visible(point, worker_idx):
 # Sample geom surface
 ################################################
 
-def sample_geom_points(gid, n_circle=24, n_height=8):
+def sample_geom_points(
+    gid,
+    n_circle=32,
+    n_height=16,
+    n_phi=16,
+    n_theta=32
+):
 
     center = data.geom_xpos[gid]
     R = data.geom_xmat[gid].reshape(3, 3)
+
     size = model.geom_size[gid]
     gtype = model.geom_type[gid]
 
     pts = []
 
-    # Cylinder
-    if gtype == mujoco.mjtGeom.mjGEOM_CYLINDER:
+    if gtype == mujoco.mjtGeom.mjGEOM_SPHERE:
 
         r = size[0]
-        h = size[1]
 
-        for theta in np.linspace(0, 2*np.pi, n_circle, endpoint=False):
+        for phi in np.linspace(
+            0,
+            np.pi,
+            n_phi
+        ):
 
-            c = np.cos(theta)
-            s = np.sin(theta)
-
-            for z in np.linspace(-h, h, n_height):
+            for theta in np.linspace(
+                0,
+                2*np.pi,
+                n_theta,
+                endpoint=False
+            ):
 
                 local = np.array([
-                    r*c,
-                    r*s,
+                    r * np.sin(phi) * np.cos(theta),
+                    r * np.sin(phi) * np.sin(theta),
+                    r * np.cos(phi)
+                ])
+
+                pts.append(
+                    center + R @ local
+                )
+
+    elif gtype == mujoco.mjtGeom.mjGEOM_ELLIPSOID:
+
+        rx = size[0]
+        ry = size[1]
+        rz = size[2]
+
+        for phi in np.linspace(
+            0,
+            np.pi,
+            n_phi
+        ):
+
+            for theta in np.linspace(
+                0,
+                2*np.pi,
+                n_theta,
+                endpoint=False
+            ):
+
+                local = np.array([
+                    rx * np.sin(phi) * np.cos(theta),
+                    ry * np.sin(phi) * np.sin(theta),
+                    rz * np.cos(phi)
+                ])
+
+                pts.append(
+                    center + R @ local
+                )
+
+    elif gtype == mujoco.mjtGeom.mjGEOM_CAPSULE:
+
+        r = size[0]
+        half_length = size[1]
+
+        # Cylinder side
+        for z in np.linspace(
+            -half_length,
+            half_length,
+            n_height
+        ):
+
+            for theta in np.linspace(
+                0,
+                2*np.pi,
+                n_circle,
+                endpoint=False
+            ):
+
+                local = np.array([
+                    r * np.cos(theta),
+                    r * np.sin(theta),
                     z
                 ])
 
-                pts.append(center + R @ local)
+                pts.append(
+                    center + R @ local
+                )
 
-    # Sphere
-    elif gtype == mujoco.mjtGeom.mjGEOM_SPHERE:
+        # top cap
+        for phi in np.linspace(
+            0,
+            np.pi / 2,
+            n_phi // 2
+        ):
 
-        r = size[0]
+            z = half_length + r * np.cos(phi)
+            rr = r * np.sin(phi)
 
-        for phi in np.linspace(0, np.pi, 10):
-
-            for theta in np.linspace(0, 2*np.pi, 20, endpoint=False):
+            for theta in np.linspace(
+                0,
+                2*np.pi,
+                n_circle,
+                endpoint=False
+            ):
 
                 local = np.array([
-                    r*np.sin(phi)*np.cos(theta),
-                    r*np.sin(phi)*np.sin(theta),
-                    r*np.cos(phi)
+                    rr * np.cos(theta),
+                    rr * np.sin(theta),
+                    z
                 ])
 
-                pts.append(center + R @ local)
+                pts.append(
+                    center + R @ local
+                )
 
-    # Box
+        # bottom cap
+        for phi in np.linspace(
+            0,
+            np.pi / 2,
+            n_phi // 2
+        ):
+
+            z = -half_length - r * np.cos(phi)
+            rr = r * np.sin(phi)
+
+            for theta in np.linspace(
+                0,
+                2*np.pi,
+                n_circle,
+                endpoint=False
+            ):
+
+                local = np.array([
+                    rr * np.cos(theta),
+                    rr * np.sin(theta),
+                    z
+                ])
+
+                pts.append(
+                    center + R @ local
+                )
+
     elif gtype == mujoco.mjtGeom.mjGEOM_BOX:
 
         sx, sy, sz = size
 
-        for dx in (-sx, sx):
-            for dy in (-sy, sy):
-                for dz in (-sz, sz):
+        values_x = np.linspace(
+            -sx,
+            sx,
+            8
+        )
+
+        values_y = np.linspace(
+            -sy,
+            sy,
+            8
+        )
+
+        values_z = np.linspace(
+            -sz,
+            sz,
+            8
+        )
+
+        # X faces
+        for x in [-sx, sx]:
+
+            for y in values_y:
+
+                for z in values_z:
 
                     local = np.array([
-                        dx,
-                        dy,
-                        dz
+                        x,
+                        y,
+                        z
                     ])
 
-                    pts.append(center + R @ local)
+                    pts.append(
+                        center + R @ local
+                    )
 
-    # 기타 geom은 중심점만
+        # Y faces
+        for y in [-sy, sy]:
+
+            for x in values_x:
+
+                for z in values_z:
+
+                    local = np.array([
+                        x,
+                        y,
+                        z
+                    ])
+
+                    pts.append(
+                        center + R @ local
+                    )
+
+        # Z faces
+        for z in [-sz, sz]:
+
+            for x in values_x:
+
+                for y in values_y:
+
+                    local = np.array([
+                        x,
+                        y,
+                        z
+                    ])
+
+                    pts.append(
+                        center + R @ local
+                    )
+
     else:
 
         pts.append(center)
@@ -517,7 +696,7 @@ def randomize_scene():
 # Generate Dataset
 ################################################
 
-NUM_DATA=8000
+NUM_DATA=10
 
 TRAIN_RATIO = 0.8
 
@@ -660,6 +839,34 @@ for i in range(NUM_DATA):
         os.path.join(image_dir, f"{name}.jpg"),
         img
     )
+
+    ############################################
+    # Debug bbox 시각화
+    ############################################
+
+    if DEBUG_BBOX:
+        debug_img = img.copy()
+        for cls, bbox in labels:
+            x1, y1, x2, y2 = bbox
+            color = DEBUG_COLORS.get(cls, (255, 255, 0))
+            cv2.rectangle(debug_img, (x1, y1), (x2, y2), color, 2)
+            label_text = DEBUG_CLASS_NAMES.get(cls, str(cls))
+            (tw, th), _ = cv2.getTextSize(
+                label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1
+            )
+            # 레이블 배경 박스
+            cv2.rectangle(
+                debug_img,
+                (x1, max(y1 - th - 6, 0)),
+                (x1 + tw + 6, max(y1, th + 6)),
+                color, -1
+            )
+            cv2.putText(
+                debug_img, label_text,
+                (x1 + 3, max(y1 - 4, th + 2)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA
+            )
+        cv2.imwrite(os.path.join(DEBUG_IMAGE_DIR, f"{name}.jpg"), debug_img)
     ############################################
     # Save YOLO
     ############################################
