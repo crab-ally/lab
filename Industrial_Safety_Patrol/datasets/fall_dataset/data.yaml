@@ -3,7 +3,10 @@ path: /content/fall_dataset
 train: images/train
 val: images/val
 
-names:
+kpt_shape: [12, 3]
 
+names:
   0: fallen
   1: standing
+  2: bending
+  3: sitting
