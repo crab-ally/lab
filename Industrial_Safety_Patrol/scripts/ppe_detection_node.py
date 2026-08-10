@@ -32,7 +32,7 @@ class PPEDetectionNode(Node):
         ####################################################
 
         self.get_logger().info('Loading YOLOv8 model...')
-        self.model = YOLO('/workspace/models/ppe_yolov8n/best.pt')
+        self.model = YOLO('/workspace/models/ppe_forklift_yolov8n/best.pt')
         self.get_logger().info('YOLOv8 model loaded successfully.')
 
         ####################################################
