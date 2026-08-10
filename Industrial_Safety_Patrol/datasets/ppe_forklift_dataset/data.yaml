@@ -1,4 +1,4 @@
-path: /content/ppe_dataset
+path: /content/ppe_forklift_dataset
 
 train: images/train
 val: images/val
@@ -8,3 +8,4 @@ names:
   0: person
   1: helmet
   2: vest
+  3: forklift
