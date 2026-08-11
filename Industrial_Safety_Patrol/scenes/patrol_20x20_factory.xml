@@ -1,0 +1,4 @@
+<mujoco model="turtlebot_20x20_factory_patrol">
+    <include file="../worlds/20x20_industrial_factory.xml"/>
+    <include file="../models/turtlebot_patrol.xml"/>
+</mujoco>
