@@ -50,3 +50,6 @@ imgsz=640 \
 batch=2 \
 project=/workspace/models \
 name=ppe_yolov8n
+
+# 사람의 쓰러짐 감지(Yolo Pose 기반)
+python3 scripts/fall_detection_node.py
