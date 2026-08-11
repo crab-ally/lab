@@ -1,0 +1,254 @@
+<mujoco model="industrial_factory_20x20_v3">
+    <compiler inertiafromgeom="true"/>
+    
+    <worldbody>
+        <!-- ================================================================
+             1. 공장 바닥, 조명 및 십자형 안전 보행로 (20x20m)
+             ================================================================ -->
+        <geom name="floor" type="plane" size="10 10 0.1" rgba="0.45 0.45 0.42 1" friction="1.0 0.005 0.0001"/>
+        
+        <light directional="true" diffuse=".8 .8 .8" specular=".3 .3 .3" pos="0 0 8" dir="0 0 -1"/>
+        <light directional="false" diffuse=".4 .4 .4" specular=".1 .1 .1" pos="6 6 5" dir="-0.3 -0.3 -1"/>
+        <light directional="false" diffuse=".4 .4 .4" specular=".1 .1 .1" pos="-6 6 5" dir="0.3 -0.3 -1"/>
+        <light directional="false" diffuse=".4 .4 .4" specular=".1 .1 .1" pos="-6 -6 5" dir="0.3 0.3 -1"/>
+        <light directional="false" diffuse=".4 .4 .4" specular=".1 .1 .1" pos="6 -6 5" dir="-0.3 0.3 -1"/>
+
+        <!-- 십자형 메인 안전 보행로 & 차로 -->
+        <geom name="walkway_cross_y" type="box" size="1.5 10.0 0.001" pos="0 0 0.001" rgba="0.2 0.8 0.2 0.35" contype="0" conaffinity="0"/>
+        <geom name="walkway_cross_x" type="box" size="10.0 1.5 0.001" pos="0 0 0.001" rgba="0.2 0.8 0.2 0.35" contype="0" conaffinity="0"/>
+
+        <!-- 구역 구획선 -->
+        <geom name="zone_nw_inbound" type="box" size="3.5 3.5 0.001" pos="-5.5 5.5 0.001" rgba="0.92 0.72 0.1 0.3" contype="0" conaffinity="0"/>
+        <geom name="zone_ne_warehouse" type="box" size="3.5 3.5 0.001" pos="5.5 5.5 0.001" rgba="0.92 0.72 0.1 0.3" contype="0" conaffinity="0"/>
+        <geom name="zone_sw_production" type="box" size="3.5 3.5 0.001" pos="-5.5 -5.5 0.001" rgba="0.92 0.72 0.1 0.3" contype="0" conaffinity="0"/>
+        <geom name="zone_se_utility" type="box" size="3.5 3.5 0.001" pos="5.5 -5.5 0.001" rgba="0.9 0.2 0.2 0.2" contype="0" conaffinity="0"/>
+
+        <!-- ================================================================
+             2. 외벽 및 구조 기둥 (8개 균등 배치)
+             ================================================================ -->
+        <geom name="wall_north" type="box" size="10.1 0.05 1.5" pos="0 10.05 1.5" rgba="0.75 0.75 0.72 1"/>
+        <geom name="wall_south" type="box" size="10.1 0.05 1.5" pos="0 -10.05 1.5" rgba="0.75 0.75 0.72 1"/>
+        <geom name="wall_east" type="box" size="0.05 10.0 1.5" pos="10.05 0 1.5" rgba="0.75 0.75 0.72 1"/>
+        <geom name="wall_west" type="box" size="0.05 10.0 1.5" pos="-10.05 0 1.5" rgba="0.75 0.75 0.72 1"/>
+
+        <body name="column_1" pos="-6 1.75 0"><geom type="cylinder" size="0.18 1.5" pos="0 0 1.5" rgba="0.5 0.5 0.5 1" mass="100"/></body>
+        <body name="column_2" pos="-1.75 6 0"><geom type="cylinder" size="0.18 1.5" pos="0 0 1.5" rgba="0.5 0.5 0.5 1" mass="100"/></body>
+        <body name="column_3" pos="1.75 6 0"><geom type="cylinder" size="0.18 1.5" pos="0 0 1.5" rgba="0.5 0.5 0.5 1" mass="100"/></body>
+        <body name="column_4" pos="6 1.75 0"><geom type="cylinder" size="0.18 1.5" pos="0 0 1.5" rgba="0.5 0.5 0.5 1" mass="100"/></body>
+        <body name="column_5" pos="-6 -1.75 0"><geom type="cylinder" size="0.18 1.5" pos="0 0 1.5" rgba="0.5 0.5 0.5 1" mass="100"/></body>
+        <body name="column_6" pos="-1.75 -6 0"><geom type="cylinder" size="0.18 1.5" pos="0 0 1.5" rgba="0.5 0.5 0.5 1" mass="100"/></body>
+        <body name="column_7" pos="1.75 -6 0"><geom type="cylinder" size="0.18 1.5" pos="0 0 1.5" rgba="0.5 0.5 0.5 1" mass="100"/></body>
+        <body name="column_8" pos="6 -1.75 0"><geom type="cylinder" size="0.18 1.5" pos="0 0 1.5" rgba="0.5 0.5 0.5 1" mass="100"/></body>
+
+        <!-- ================================================================
+             3. 물류 인프라, 로봇 충전 스테이션 & 지게차 2대
+             ================================================================ -->
+        <!-- 로봇 충전 스테이션 -->
+        <body name="charging_station" pos="-9.5 -9.5 0">
+            <!-- <geom name="station_base" type="box" size="0.2 0.15 0.005" pos="0 0 0.005" rgba="0.2 0.6 0.2 0.7" mass="5.0"/> -->
+            <geom name="station_body" type="box" size="0.2 0.02 0.075" pos="0 -0.13 0.075" rgba="0.3 0.3 0.3 1" mass="2.0"/>
+            <site name="docking_port" pos="0 0 0.01" size="0.03" rgba="0 1 0 0.3"/>
+        </body>
+
+        <!-- 하역장 셔터 도어 -->
+        <body name="dock_door_1" pos="-7 10 0"><geom type="box" size="1.0 0.08 1.3" pos="0 0 1.3" rgba="0.55 0.57 0.6 1"/></body>
+        <body name="dock_door_2" pos="-4 10 0"><geom type="box" size="1.0 0.08 1.3" pos="0 0 1.3" rgba="0.55 0.57 0.6 1"/></body>
+        <body name="dock_door_3" pos="-1 10 0"><geom type="box" size="1.0 0.08 1.3" pos="0 0 1.3" rgba="0.55 0.57 0.6 1"/></body>
+
+        <!-- 지게차 1 (NW) -->
+        <body name="forklift_1" pos="-8.2 8.5 0">
+            <freejoint name="fl1_freejoint"/>
+            <inertial pos="0 0 0.5" mass="260" diaginertia="100 100 100"/>
+            <geom name="fl1_body" type="box" size="0.8 0.5 0.4" pos="0 0 0.4" rgba="0.95 0.5 0.05 1"/>
+            <geom name="fl1_fork" type="box" size="0.5 0.3 0.02" pos="1.3 0 0.1" rgba="0.2 0.2 0.2 1"/>
+            <geom name="fl1_mast" type="box" size="0.05 0.3 0.8" pos="0.85 0 0.8" rgba="0.1 0.1 0.1 1"/>
+            <geom name="fl1_wheel_fl" type="cylinder" size="0.18 0.12" pos="0.55 0.52 0.18" quat="0.7071 0 0.7071 0" rgba="0.05 0.05 0.05 1"/>
+            <geom name="fl1_wheel_fr" type="cylinder" size="0.18 0.12" pos="0.55 -0.52 0.18" quat="0.7071 0 0.7071 0" rgba="0.05 0.05 0.05 1"/>
+            <geom name="fl1_wheel_rl" type="cylinder" size="0.18 0.12" pos="-0.55 0.52 0.18" quat="0.7071 0 0.7071 0" rgba="0.05 0.05 0.05 1"/>
+            <geom name="fl1_wheel_rr" type="cylinder" size="0.18 0.12" pos="-0.55 -0.52 0.18" quat="0.7071 0 0.7071 0" rgba="0.05 0.05 0.05 1"/>
+        </body>
+
+        <!-- 지게차 2 (NE) -->
+        <body name="forklift_2" pos="2.8 8.2 0" quat="0.7071 0 0 -0.7071">
+            <freejoint name="fl2_freejoint"/>
+            <inertial pos="0 0 0.5" mass="260" diaginertia="100 100 100"/>
+            <geom name="fl2_body" type="box" size="0.8 0.5 0.4" pos="0 0 0.4" rgba="0.85 0.4 0.1 1"/>
+            <geom name="fl2_fork" type="box" size="0.5 0.3 0.02" pos="1.3 0 0.1" rgba="0.2 0.2 0.2 1"/>
+            <geom name="fl2_mast" type="box" size="0.05 0.3 0.8" pos="0.85 0 0.8" rgba="0.1 0.1 0.1 1"/>
+            <geom name="fl2_wheel_fl" type="cylinder" size="0.18 0.12" pos="0.55 0.52 0.18" quat="0.7071 0 0.7071 0" rgba="0.05 0.05 0.05 1"/>
+            <geom name="fl2_wheel_fr" type="cylinder" size="0.18 0.12" pos="0.55 -0.52 0.18" quat="0.7071 0 0.7071 0" rgba="0.05 0.05 0.05 1"/>
+            <geom name="fl2_wheel_rl" type="cylinder" size="0.18 0.12" pos="-0.55 0.52 0.18" quat="0.7071 0 0.7071 0" rgba="0.05 0.05 0.05 1"/>
+            <geom name="fl2_wheel_rr" type="cylinder" size="0.18 0.12" pos="-0.55 -0.52 0.18" quat="0.7071 0 0.7071 0" rgba="0.05 0.05 0.05 1"/>
+        </body>
+
+        <!-- 파렛트 랙 -->
+        <body name="pallet_rack_1" pos="5.5 5.5 0">
+            <geom type="box" size="0.1 1.2 1.2" pos="-0.5 0 1.2" rgba="0.3 0.4 0.6 1"/>
+            <geom type="box" size="0.1 1.2 1.2" pos="0.5 0 1.2" rgba="0.3 0.4 0.6 1"/>
+            <geom type="box" size="0.6 1.2 0.03" pos="0 0 0.8" rgba="0.6 0.6 0.65 1"/>
+            <geom type="box" size="0.6 1.2 0.03" pos="0 0 1.6" rgba="0.6 0.6 0.65 1"/>
+            <geom type="box" size="0.25 0.3 0.25" pos="0 -0.5 1.08" rgba="0.8 0.5 0.2 1"/>
+            <geom type="box" size="0.25 0.3 0.25" pos="0 0.4 1.88" rgba="0.3 0.6 0.3 1"/>
+        </body>
+
+        <!-- ================================================================
+             4. 책상, 의자, 앉아있는 작업자 세트
+             ================================================================ -->
+        <body name="workbench_0" pos="-8.2 -8.5 0">
+            <geom name="wb0_top" type="box" size="0.65 0.35 0.02" pos="0 0 0.90" rgba="0.55 0.42 0.30 1" mass="20.0"/>
+            <geom name="wb0_leg_fl" type="cylinder" size="0.025 0.45" pos="-0.60 -0.30 0.45" rgba="0.40 0.40 0.40 1" mass="3.0"/>
+            <geom name="wb0_leg_fr" type="cylinder" size="0.025 0.45" pos="0.60 -0.30 0.45" rgba="0.40 0.40 0.40 1" mass="3.0"/>
+            <geom name="wb0_leg_bl" type="cylinder" size="0.025 0.45" pos="-0.60 0.30 0.45" rgba="0.40 0.40 0.40 1" mass="3.0"/>
+            <geom name="wb0_leg_br" type="cylinder" size="0.025 0.45" pos="0.60 0.30 0.45" rgba="0.40 0.40 0.40 1" mass="3.0"/>
+            <geom name="wb0_tool_box" type="box" size="0.12 0.10 0.06" pos="-0.40 0.10 0.98" rgba="0.60 0.50 0.20 1" mass="2.0"/>
+            <geom name="wb0_monitor_base" type="box" size="0.08 0.05 0.10" pos="0.35 0 0.98" rgba="0.20 0.20 0.20 1" mass="1.5"/>
+            <geom name="wb0_monitor_screen" type="box" size="0.18 0.02 0.14" pos="0.35 -0.03 1.16" rgba="0.10 0.15 0.20 1" mass="3.0"/>
+        </body>
+
+        <body name="chair_0" pos="-8.2 -7.7 0">
+            <geom name="ch0_seat" type="box" size="0.22 0.22 0.025" pos="0 0 0.47" rgba="0.35 0.25 0.18 1" mass="4.0"/>
+            <geom name="ch0_back" type="box" size="0.22 0.025 0.20" pos="0 0.22 0.68" rgba="0.35 0.25 0.18 1" mass="3.0"/>
+            <geom name="ch0_leg_fl" type="cylinder" size="0.018 0.235" pos="-0.19 -0.19 0.235" rgba="0.30 0.30 0.30 1" mass="1.0"/>
+            <geom name="ch0_leg_fr" type="cylinder" size="0.018 0.235" pos="0.19 -0.19 0.235" rgba="0.30 0.30 0.30 1" mass="1.0"/>
+            <geom name="ch0_leg_bl" type="cylinder" size="0.018 0.235" pos="-0.19 0.19 0.235" rgba="0.30 0.30 0.30 1" mass="1.0"/>
+            <geom name="ch0_leg_br" type="cylinder" size="0.018 0.235" pos="0.19 0.19 0.235" rgba="0.30 0.30 0.30 1" mass="1.0"/>
+        </body>
+
+        <body name="worker_seated" pos="-8.2 -7.7 0">
+            <geom name="ws_pelvis" type="capsule" fromto="-0.09 0 0.50 0.09 0 0.50" size="0.075" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <geom name="ws_luleg" type="capsule" fromto="-0.09 0 0.50 -0.09 -0.40 0.50" size="0.055" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <geom name="ws_llleg" type="capsule" fromto="-0.09 -0.40 0.50 -0.09 -0.40 0.08" size="0.045" rgba="0.15 0.20 0.25 1" mass="4.0"/>
+            <geom name="ws_ruleg" type="capsule" fromto="0.09 0 0.50 0.09 -0.40 0.50" size="0.055" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <geom name="ws_rlleg" type="capsule" fromto="0.09 -0.40 0.50 0.09 -0.40 0.08" size="0.045" rgba="0.15 0.20 0.25 1" mass="4.0"/>
+            <geom name="ws_torso" type="capsule" fromto="0 0 0.52 0 0 1.15" size="0.092" rgba="0.15 0.20 0.25 1" mass="30.0"/>
+            <geom name="ws_vest" type="capsule" fromto="0 0 0.54 0 0 1.10" size="0.100" rgba="0.85 0.95 0.10 0.90" mass="0.1" contype="0" conaffinity="0"/>
+            <geom name="ws_head" type="sphere" size="0.115" pos="0 0 1.28" rgba="0.82 0.65 0.50 1" mass="5.0"/>
+            <geom name="ws_helmet" type="ellipsoid" size="0.125 0.125 0.075" pos="0 0 1.36" rgba="1.0 1.0 1.0 1" mass="0.5" contype="0" conaffinity="0"/>
+            <geom name="ws_larm" type="capsule" fromto="-0.17 0 1.10 -0.25 -0.30 0.92" size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+            <geom name="ws_rarm" type="capsule" fromto="0.17 0 1.10 0.25 -0.30 0.92" size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+        </body>
+
+        <!-- ================================================================
+             5. 작업자 조건 세분화 반영 (총 5명)
+             ================================================================ -->
+        <!-- 0) 정상 PPE 작업자: 안전모 O, 조끼 O -->
+        <body name="worker_normal" pos="3 -4.5 0">
+            <geom name="wn_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.82 0.65 0.50 1" mass="5.0"/>
+            <geom name="wn_helmet" type="ellipsoid" size="0.125 0.125 0.075" pos="0 0 1.70" rgba="1.0 1.0 1.0 1" mass="0.5"/>
+            <geom name="wn_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.15 0.20 0.25 1" mass="30.0"/>
+            <geom name="wn_vest" type="capsule" fromto="0 0 0.84 0 0 1.40" size="0.100" rgba="0.85 0.95 0.10 0.90" mass="0.1" contype="0" conaffinity="0"/>
+            <geom name="wn_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <geom name="wn_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <geom name="wn_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.15 0.20 0.25 1" mass="4.0"/>
+            <geom name="wn_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.15 0.20 0.25 1" mass="8.0"/>
+            <geom name="wn_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.15 0.20 0.25 1" mass="4.0"/>
+            <geom name="wn_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+            <geom name="wn_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.82 0.65 0.50 1" mass="4.0"/>
+        </body>
+
+        <!-- 1) 불량 PPE 작업자: 안전모 X, 조끼 O -->
+        <body name="worker_bad_ppe" pos="4 5 0">
+            <geom name="wp_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.90 0.70 0.60 1" mass="5.0"/>
+            <geom name="wp_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.25 0.28 0.32 1" mass="30.0"/>
+            <geom name="wp_vest" type="capsule" fromto="0 0 0.84 0 0 1.40" size="0.100" rgba="0.85 0.95 0.10 0.90" mass="0.1" contype="0" conaffinity="0"/>
+            <geom name="wp_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <geom name="wp_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <geom name="wp_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.25 0.28 0.32 1" mass="4.0"/>
+            <geom name="wp_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <geom name="wp_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.25 0.28 0.32 1" mass="4.0"/>
+            <geom name="wp_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+            <geom name="wp_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+        </body>
+
+        <!-- 2) 쓰러진 작업자: 안전모 O, 조끼 O -->
+        <body name="worker_fallen" pos="-4.5 -7.5 0.115" quat="0.5 0.5 0.5 0.5">
+            <geom name="wf_head" type="sphere" size="0.115" pos="0 0 1.62" rgba="0.90 0.70 0.60 1" mass="5.0"/>
+            <geom name="wf_helmet" type="ellipsoid" size="0.125 0.125 0.075" pos="0 0 1.70" rgba="1.0 1.0 1.0 1" mass="0.5" contype="0" conaffinity="0"/>
+            <geom name="wf_torso" type="capsule" fromto="0 0 0.82 0 0 1.48" size="0.092" rgba="0.25 0.28 0.32 1" mass="30.0"/>
+            <geom name="wf_vest" type="capsule" fromto="0 0 0.84 0 0 1.40" size="0.100" rgba="0.85 0.95 0.10 0.90" mass="0.1" contype="0" conaffinity="0"/>
+            <geom name="wf_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <geom name="wf_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <geom name="wf_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.25 0.28 0.32 1" mass="4.0"/>
+            <geom name="wf_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.25 0.28 0.32 1" mass="8.0"/>
+            <geom name="wf_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.25 0.28 0.32 1" mass="4.0"/>
+            <geom name="wf_larm" type="capsule" fromto="-0.17 0 1.44 -0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+            <geom name="wf_rarm" type="capsule" fromto="0.17 0 1.44 0.30 0 0.90" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+        </body>
+
+        <!-- 3) 45도 Bending 작업자: 안전모 X, 조끼 X -->
+        <body name="bending_worker_45" pos="0.5 3.5 0">
+            <geom name="bw45_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.10 0.18 0.28 1" mass="8.0"/>
+            <geom name="bw45_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.10 0.18 0.28 1" mass="4.0"/>
+            <geom name="bw45_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.10 0.18 0.28 1" mass="8.0"/>
+            <geom name="bw45_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.10 0.18 0.28 1" mass="4.0"/>
+            <geom name="bw45_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.10 0.18 0.28 1" mass="8.0"/>
+            <geom name="bw45_torso" type="capsule" fromto="0 0 0.80 0 0.467 1.267" size="0.092" rgba="0.10 0.18 0.28 1" mass="30.0"/>
+            <geom name="bw45_head" type="sphere" size="0.115" pos="0 0.58 1.36" rgba="0.90 0.70 0.60 1" mass="5.0"/>
+            <geom name="bw45_larm" type="capsule" fromto="-0.17 0.40 1.18 -0.20 0.68 0.80" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+            <geom name="bw45_rarm" type="capsule" fromto="0.17 0.40 1.18 0.20 0.68 0.80" size="0.037" rgba="0.90 0.70 0.60 1" mass="4.0"/>
+        </body>
+
+        <!-- 4) 90도 Bending 작업자: 안전모 O, 조끼 X -->
+        <body name="bending_worker_90" pos="-5.5 5.5 0">
+            <geom name="bw90_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.22 0.28 0.20 1" mass="8.0"/>
+            <geom name="bw90_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.22 0.28 0.20 1" mass="4.0"/>
+            <geom name="bw90_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.22 0.28 0.20 1" mass="8.0"/>
+            <geom name="bw90_rlleg" type="capsule" fromto="0.09 0 0.38 0.09 0 0.00" size="0.045" rgba="0.22 0.28 0.20 1" mass="4.0"/>
+            <geom name="bw90_pelvis" type="capsule" fromto="-0.09 0 0.80 0.09 0 0.80" size="0.075" rgba="0.22 0.28 0.20 1" mass="8.0"/>
+            <geom name="bw90_torso" type="capsule" fromto="0 0 0.80 0 0.66 0.80" size="0.092" rgba="0.22 0.28 0.20 1" mass="30.0"/>
+            <geom name="bw90_head" type="sphere" size="0.115" pos="0 0.79 0.89" rgba="0.85 0.65 0.55 1" mass="5.0"/>
+            <geom name="bw90_helmet" type="ellipsoid" size="0.125 0.125 0.075" pos="0 0.79 0.97" rgba="1.0 1.0 1.0 1" mass="0.5" contype="0" conaffinity="0"/>
+            <geom name="bw90_larm" type="capsule" fromto="-0.17 0.56 0.80 -0.20 0.82 0.48" size="0.037" rgba="0.85 0.65 0.55 1" mass="4.0"/>
+            <geom name="bw90_rarm" type="capsule" fromto="0.17 0.56 0.80 0.20 0.82 0.48" size="0.037" rgba="0.85 0.65 0.55 1" mass="4.0"/>
+        </body>
+
+        <!-- ================================================================
+             6. 화재 시뮬레이션 2곳 (SE 화물 + 동쪽 벽면)
+             ================================================================ -->
+        <!-- 화재 1: SE 화물 발화 -->
+        <body name="fire_zone_cargo" pos="4.0 -7.0 0">
+            <geom name="burning_cargo" type="box" size="0.4 0.4 0.4" pos="0 0 0.4" rgba="0.18 0.18 0.18 1" mass="30"/>
+            <geom name="flame_base" type="sphere" size="0.35" pos="0 0 0.9" rgba="1.0 0.28 0.03 0.9" contype="0" conaffinity="0"/>
+            <geom name="flame_mid" type="sphere" size="0.25" pos="0.03 -0.02 1.1" rgba="1.0 0.55 0.06 0.8" contype="0" conaffinity="0"/>
+            <geom name="flame_top" type="sphere" size="0.18" pos="-0.02 0.02 1.3" rgba="1.0 0.85 0.18 0.7" contype="0" conaffinity="0"/>
+            <geom name="smoke_1" type="sphere" size="0.4" pos="-0.08 -0.05 1.55" rgba="0.18 0.18 0.18 0.35" contype="0" conaffinity="0"/>
+            <geom name="smoke_2" type="sphere" size="0.5" pos="0.05 0.02 1.9" rgba="0.25 0.25 0.25 0.22" contype="0" conaffinity="0"/>
+        </body>
+
+        <!-- 화재 2: 동쪽 벽면 발화 -->
+        <body name="fire_zone_wall" pos="9.7 3.5 0">
+            <geom name="wall_scorch" type="box" size="0.02 0.6 0.8" pos="0.25 0 1.2" rgba="0.1 0.1 0.1 0.8" contype="0" conaffinity="0"/>
+            <geom name="wflame_base" type="sphere" size="0.30" pos="0 0 0.80" rgba="1.0 0.25 0.02 0.90" contype="0" conaffinity="0"/>
+            <geom name="wflame_mid" type="sphere" size="0.22" pos="-0.02 0.05 1.05" rgba="1.0 0.50 0.05 0.80" contype="0" conaffinity="0"/>
+            <geom name="wflame_top" type="sphere" size="0.15" pos="-0.04 0.08 1.25" rgba="1.0 0.80 0.15 0.70" contype="0" conaffinity="0"/>
+            <geom name="wsmoke_1" type="sphere" size="0.35" pos="-0.10 0.10 1.50" rgba="0.2 0.2 0.2 0.4" contype="0" conaffinity="0"/>
+            <geom name="wsmoke_2" type="sphere" size="0.45" pos="-0.15 0.15 1.85" rgba="0.25 0.25 0.25 0.25" contype="0" conaffinity="0"/>
+        </body>
+
+        <!-- ================================================================
+             7. 기타 부대 설비 (컨베이어, 전기실, 소화기함)
+             ================================================================ -->
+        <body name="conveyor_belt" pos="-5.5 -4.0 0">
+            <geom name="conveyor_frame" type="box" size="1.8 0.4 0.35" pos="0 0 0.35" rgba="0.35 0.35 0.35 1" mass="80.0"/>
+            <geom name="conveyor_surface" type="box" size="1.75 0.35 0.02" pos="0 0 0.55" rgba="0.1 0.1 0.1 1" contype="0" conaffinity="0"/>
+            <geom name="conveyor_cargo" type="box" size="0.25 0.25 0.2" pos="0.8 0 0.77" rgba="0.6 0.45 0.25 1" mass="10.0"/>
+        </body>
+
+        <body name="utility_room">
+            <geom name="utility_north_wall" type="box" size="2.0 0.08 1.5" pos="8.0 -6.4 1.5" rgba="0.70 0.70 0.68 1"/>
+            <geom name="utility_west_wall" type="box" size="0.08 1.8 1.5" pos="6.0 -8.2 1.5" rgba="0.70 0.70 0.68 1"/>
+            <geom name="utility_panel" type="box" size="0.35 0.25 0.70" pos="7.5 -8.2 0.70" rgba="0.25 0.28 0.30 1" mass="30.0"/>
+            <geom name="utility_control" type="box" size="0.25 0.12 0.45" pos="8.5 -8.2 0.45" rgba="0.18 0.20 0.22 1" mass="15.0"/>
+            <site name="utility_warning" type="box" pos="8.0 -6.28 2.3" size="0.35 0.02 0.15" rgba="1 0.15 0.05 0.9"/>
+        </body>
+
+        <body name="emergency_exit" pos="4.5 -10.0 0">
+            <geom name="exit_door" type="box" size="0.8 0.08 1.2" pos="0 0 1.2" rgba="0.0 0.62 0.38 1"/>
+            <site name="exit_sign" pos="0 -0.1 2.5" size="0.2 0.1 0.04" type="box" rgba="0 1 0 0.9"/>
+        </body>
+
+        <body name="fire_extinguisher_se" pos="9.8 -3.0 0"><geom type="box" size="0.06 0.18 0.28" pos="0 0 1.0" rgba="0.69 0.09 0.08 1" mass="5.0"/></body>
+        <body name="fire_extinguisher_nw" pos="-9.8 2.0 0"><geom type="box" size="0.06 0.18 0.28" pos="0 0 1.0" rgba="0.69 0.09 0.08 1" mass="5.0"/></body>
+
+    </worldbody>
+</mujoco>
