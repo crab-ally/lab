@@ -325,7 +325,8 @@ def main():
     rclpy.init()
 
     BASE_DIR = Path(__file__).resolve().parent
-    xml_path = BASE_DIR.parent / "scenes" / "patrol_factory.xml"
+    # 10x10 factory - patrol_10x10_factory.xml
+    xml_path = BASE_DIR.parent / "scenes" / "patrol_20x20_factory.xml"
 
     print(f"Loading model from: {xml_path}")
     model = mujoco.MjModel.from_xml_path(str(xml_path))
@@ -356,10 +357,10 @@ def main():
         )
         spin_thread.start()
 
-        viewer.cam.lookat[:] = [0, 0, 0.9]
-        viewer.cam.distance = 15.8
-        viewer.cam.azimuth = 85
-        viewer.cam.elevation = -85
+        viewer.cam.lookat[:] = [0, 0, 0]
+        viewer.cam.distance = 28
+        viewer.cam.azimuth = 90  # +y 방향
+        viewer.cam.elevation = -90
 
         # 뷰어 동기화(sync) 프레임 제한 변수 (60Hz)
         sync_interval = 1.0 / 60.0
