@@ -57,7 +57,7 @@ class FireDetectionNode(Node):
         # ==========================================================
         # 3. 화재/소화전 붉은색 영역 추출
         # ==========================================================
-        lower_bound1 = np.array([0, 120, 120])
+        lower_bound1 = np.array([0, 70, 70])
         upper_bound1 = np.array([10, 255, 255])
         mask1 = cv2.inRange(hsv, lower_bound1, upper_bound1)
         
@@ -78,42 +78,57 @@ class FireDetectionNode(Node):
         # 5. Contour 영역 탐색 및 Depth 검증
         # ==========================================================
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
+        self.get_logger().info(f"mask_pixels={cv2.countNonZero(mask)}, contours={len(contours)}")
         fire_detected = False
         min_area = 500  # 최소 면적 임계값
 
         for contour in contours:
-            area = cv2.contourArea(contour)
-            if area > min_area:
-                x, y, w, h = cv2.boundingRect(contour)
-        
-                roi_depth = depth_image[y:y+h, x:x+w]
-                valid_depths = roi_depth[np.isfinite(roi_depth) & (roi_depth > 0)]
-        
-                if len(valid_depths) < 10:
-                    continue
+            area=cv2.contourArea(contour)
+            if area<min_area:
+                continue
 
-                depth_std = np.std(valid_depths)
-                depth_mean = np.mean(valid_depths) # 평균 거리
-        
-                if depth_image.dtype == np.uint16:
-                    depth_std /= 1000.0
-                    depth_mean /= 1000.0
+            x,y,w,h=cv2.boundingRect(contour)
+            aspect_ratio=h/float(w) if w>0 else 0
 
-                # 지게차/배경 구조물 제외 판정
-                is_hydrant_or_vehicle = (depth_std < 0.04) or (w > 200 and depth_std < 0.08)
+            # 너무 넓고 낮은 영역은 바닥/배경으로 판단
+            if aspect_ratio<0.25:
+                continue
 
-                if is_hydrant_or_vehicle:
-                    # 지게차/소화전 등 구조물로 판단하여 Ignored
-                    cv2.rectangle(cv_image, (x, y), (x+w, y+h), (0, 255, 255), 1)
-                    cv2.putText(cv_image, 'Object (Ignored)', (x, y-10), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-                else:
-                    # 불꽃 탐지
-                    cv2.rectangle(cv_image, (x, y), (x+w, y+h), (0, 0, 255), 2)
-                    cv2.putText(cv_image, f'FIRE DETECTED', (x, y-10), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                    fire_detected = True
+            roi_depth=depth_image[y:y+h,x:x+w]
+            valid_depths=roi_depth[np.isfinite(roi_depth)&(roi_depth>0)]
+
+            if len(valid_depths)<10:
+                continue
+
+            depth_std=np.std(valid_depths)
+            depth_mean=np.mean(valid_depths)
+            depth_range=np.percentile(valid_depths,95)-np.percentile(valid_depths,5)
+
+            if depth_image.dtype==np.uint16:
+                depth_std/=1000.0
+                depth_mean/=1000.0
+                depth_range/=1000.0
+
+            self.get_logger().info(
+                f'area={area:.0f}, x={x}, y={y}, w={w}, h={h}, '
+                f'aspect={aspect_ratio:.2f}, depth_mean={depth_mean:.2f}, '
+                f'depth_std={depth_std:.3f}, depth_range={depth_range:.3f}'
+            )
+
+            # 깊이 변화가 거의 없는 평평한 물체/바닥 제거
+            is_flat_object=(depth_std<0.04 and depth_range<0.12)
+
+            if is_flat_object:
+                continue
+
+            # 화재
+            cv2.rectangle(cv_image,(x,y),(x+w,y+h),(0,0,255),2)
+            cv2.putText(
+                cv_image,'FIRE DETECTED',
+                (x,y-10),
+                cv2.FONT_HERSHEY_SIMPLEX,0.5,(0,0,255),2
+            )
+            fire_detected=True
 
         # ==========================================================
         # 6. 화재 감지 여부에 따른 모니터링 창 제어 [수정된 부분]
