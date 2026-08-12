@@ -44,6 +44,8 @@ class MujocoRosBridge(Node):
             ]
         )
 
+        self.max_linear_vel = 0.25
+        self.max_angular_vel = 1.0
         self.last_odom_time = 0.0
         self.sim_time = 0.0
         self.last_scan_time = 0.0
@@ -166,8 +168,12 @@ class MujocoRosBridge(Node):
         return ranges
 
     def cmd_vel_callback(self, msg: Twist):
-        v = msg.linear.x
-        w = msg.angular.z
+        """
+        ctrlrange=±7.58, wheel radius=0.033 m > 최대 선속도: 0.25m/s
+        track_width = 0.160 m > 최대 각속도: 3.13 rad/s > 1.0 rad/s으로 제한
+        """
+        v = np.clip(msg.linear.x, -self.max_linear_vel, self.max_linear_vel)
+        w = np.clip(msg.angular.z, -self.max_angular_vel, self.max_angular_vel)
 
         v_left = v - (w * self.track_width / 2.0)
         v_right = v + (w * self.track_width / 2.0)
