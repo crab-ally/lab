@@ -11,7 +11,7 @@ viewer.sync(): 60Hz
 
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist, TransformStamped
+from geometry_msgs.msg import Twist, TransformStamped, PoseStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan, Image
 from tf2_ros import TransformBroadcaster
@@ -68,6 +68,13 @@ class MujocoRosBridge(Node):
             self.cmd_vel_callback,
             10
         )
+        
+        self.fl1_cmd_vel_sub = self.create_subscription(Twist, '/forklift_1/cmd_vel', self.fl1_cmd_vel_callback, 10)
+        self.fl2_cmd_vel_sub = self.create_subscription(Twist, '/forklift_2/cmd_vel', self.fl2_cmd_vel_callback, 10)
+        
+        # Get freejoint IDs for forklifts
+        self.fl1_joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "fl1_freejoint")
+        self.fl2_joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "fl2_freejoint")
 
         clock_qos = QoSProfile(
             depth=10,
@@ -89,6 +96,10 @@ class MujocoRosBridge(Node):
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
         self.scan_pub = self.create_publisher(LaserScan, '/scan', 10)
         self.camera_pub = self.create_publisher(Image, '/camera/image_raw', 10)
+        
+        # Forklift Pose Publishers
+        self.fl1_pose_pub = self.create_publisher(PoseStamped, '/forklift_1/pose', 10)
+        self.fl2_pose_pub = self.create_publisher(PoseStamped, '/forklift_2/pose', 10)
         
         # Depth 이미지 Publisher
         self.depth_pub = self.create_publisher(Image, '/camera/depth/image_raw', 10)
@@ -166,6 +177,48 @@ class MujocoRosBridge(Node):
             adr = self.model.sensor_adr[sensor_id]
             ranges.append(float(self.data.sensordata[adr]))
         return ranges
+
+    def _apply_forklift_vel(self, msg: Twist, joint_id):
+        if joint_id == -1: return
+        
+        qvel_adr = self.model.jnt_dofadr[joint_id]
+        qpos_adr = self.model.jnt_qposadr[joint_id]
+        
+        # 선속도 적용 (World 좌표계 x, y)
+        self.data.qvel[qvel_adr] = msg.linear.x
+        self.data.qvel[qvel_adr+1] = msg.linear.y
+        
+        # 주행 방향에 맞춰 회전각 동기화 (움직임이 있을 때만)
+        if abs(msg.linear.x) > 0.01 or abs(msg.linear.y) > 0.01:
+            yaw = math.atan2(msg.linear.y, msg.linear.x)
+            self.data.qpos[qpos_adr+3] = math.cos(yaw/2.0)
+            self.data.qpos[qpos_adr+4] = 0.0
+            self.data.qpos[qpos_adr+5] = 0.0
+            self.data.qpos[qpos_adr+6] = math.sin(yaw/2.0)
+
+    def fl1_cmd_vel_callback(self, msg: Twist):
+        self._apply_forklift_vel(msg, self.fl1_joint_id)
+
+    def fl2_cmd_vel_callback(self, msg: Twist):
+        self._apply_forklift_vel(msg, self.fl2_joint_id)
+
+    def publish_forklift_pose(self, stamp, joint_id, publisher, frame_id):
+        if joint_id == -1: return
+        qpos_adr = self.model.jnt_qposadr[joint_id]
+        pos = self.data.qpos[qpos_adr:qpos_adr+3]
+        quat = self.data.qpos[qpos_adr+3:qpos_adr+7]
+        
+        msg = PoseStamped()
+        msg.header.stamp = stamp
+        msg.header.frame_id = 'odom'
+        msg.pose.position.x = float(pos[0])
+        msg.pose.position.y = float(pos[1])
+        msg.pose.position.z = float(pos[2])
+        msg.pose.orientation.w = float(quat[0])
+        msg.pose.orientation.x = float(quat[1])
+        msg.pose.orientation.y = float(quat[2])
+        msg.pose.orientation.z = float(quat[3])
+        publisher.publish(msg)
 
     def cmd_vel_callback(self, msg: Twist):
         """
@@ -326,7 +379,6 @@ class MujocoRosBridge(Node):
 def ros_spin_thread(node):
     rclpy.spin(node)
 
-
 def main():
     rclpy.init()
 
@@ -391,6 +443,8 @@ def main():
             # 1. Odom (50Hz / 0.02초 간격)
             if data.time >= node.last_odom_time + 0.02:
                 node.publish_odom(stamp)
+                node.publish_forklift_pose(stamp, node.fl1_joint_id, node.fl1_pose_pub, 'forklift_1')
+                node.publish_forklift_pose(stamp, node.fl2_joint_id, node.fl2_pose_pub, 'forklift_2')
                 node.last_odom_time = data.time
 
                 # clock을 Odom과 동일하게 50Hz로 퍼블리시
