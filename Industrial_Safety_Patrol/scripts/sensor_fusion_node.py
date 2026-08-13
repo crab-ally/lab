@@ -1,31 +1,4 @@
 #!/usr/bin/env python3
-"""
-## 13. Camera + LiDAR Sensor Fusion Node
-
-카메라 Depth Projection + LiDAR 거리 검증으로
-감지된 객체의 3D 월드 좌표(odom 프레임)를 추정합니다.
-
-### 융합 전략
-  1차: Depth Projection  — BBox 중심 픽셀의 depth 값으로 Camera 3D 좌표 계산
-  2차: LiDAR Fallback    — Depth가 무효(inf, 0, NaN)일 때 LiDAR 빔으로 대체
-
-### 구독 토픽
-  /camera/image_raw           — RGB 이미지 (YOLO 입력)
-  /camera/depth/image_raw     — Depth 이미지 (32FC1, meters)
-  /scan                       — LaserScan (LiDAR 거리 검증)
-
-### 발행 토픽
-  /detected_objects            — visualization_msgs/MarkerArray (RViz 3D 마커)
-  /detected_objects/poses      — geometry_msgs/PoseArray (3D 위치 배열)
-  /camera/fusion/image         — sensor_msgs/Image (디버그 오버레이)
-
-### 카메라 파라미터 (turtlebot_patrol.xml 기준)
-  렌더 해상도: 480(H) x 640(W)
-  fovy = 58°
-  fx = fy = (H/2) / tan(fovy_rad/2)
-  cx = W/2, cy = H/2
-"""
-
 import math
 
 import cv2
@@ -35,52 +8,52 @@ import rclpy.duration
 import tf2_ros
 from cv_bridge import CvBridge
 from geometry_msgs.msg import Point, Pose, PoseArray, Quaternion
-from nav_msgs.msg import Odometry  # noqa: F401 (가능한 확장을 위해 유지)
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time as RclpyTime
 from sensor_msgs.msg import Image, LaserScan
 from std_msgs.msg import ColorRGBA
-from ultralytics import YOLO
+from vision_msgs.msg import Detection2DArray
 from visualization_msgs.msg import Marker, MarkerArray
 import message_filters
 
-# ──────────────────────────────────────────────
-# 감지 클래스 설정 (ppe_forklift_yolov8n 기준)
-# ──────────────────────────────────────────────
 CLASS_NAMES = {0: 'Person', 1: 'Helmet', 2: 'Vest', 3: 'Forklift'}
 CLASS_COLORS_BGR = {
-    0: (0, 200, 255),    # Person   — 주황
-    1: (0, 255, 80),     # Helmet   — 초록
-    2: (255, 200, 0),    # Vest     — 파랑
-    3: (0, 80, 255),     # Forklift — 빨강
+    0: (0, 255, 255),    # Person   — 노랑
+    1: (255, 0, 0),      # Helmet   — 파랑
+    2: (255, 255, 0),    # Vest     — 청록
+    3: (0, 165, 255),    # Forklift — 주황
 }
 CLASS_MARKER_RGBA = {
-    0: (1.0, 0.78, 0.0, 0.85),   # Person
-    1: (0.0, 1.0, 0.31, 0.85),   # Helmet
-    2: (1.0, 0.78, 0.0, 0.85),   # Vest
-    3: (1.0, 0.31, 0.0, 0.85),   # Forklift
+    0: (1.0, 1.0, 0.0, 0.85),    # Person
+    1: (0.0, 0.0, 1.0, 0.85),    # Helmet
+    2: (0.0, 1.0, 1.0, 0.85),    # Vest
+    3: (1.0, 0.647, 0.0, 0.85),  # Forklift
 }
 
-# 3D 위치 추정 대상 클래스 (Person, Forklift)
 TARGET_CLASSES = {0, 3}
 
 
 class SensorFusionNode(Node):
-    """Camera + LiDAR Sensor Fusion ROS2 Node."""
-
+    """
+    Subscribe:
+        /camera/image_raw
+        /camera/depth/image_raw
+        /yolo/detections
+        /scan
+    Publish:
+        /detected_objects (Rviz Marker)
+        /detected_objects/poses (odom 3D 좌표)
+        /camera/fusion/image (debug Image)
+    """
     def __init__(self):
         super().__init__('sensor_fusion_node')
 
-        # ──────────────────────────────────────────────
-        # 카메라 Intrinsics
-        # turtlebot_patrol.xml: fovy=58°, render 480x640
-        # ──────────────────────────────────────────────
         self._img_h = 480
         self._img_w = 640
         fovy_rad = math.radians(58.0)
         self._fy = (self._img_h / 2.0) / math.tan(fovy_rad / 2.0)
-        self._fx = self._fy          # 정사각형 픽셀
+        self._fx = self._fy
         self._cx = self._img_w / 2.0
         self._cy = self._img_h / 2.0
 
@@ -89,49 +62,26 @@ class SensorFusionNode(Node):
             f'cx={self._cx:.1f}, cy={self._cy:.1f}'
         )
 
-        # ──────────────────────────────────────────────
-        # YOLO 모델 (독립 인스턴스 — ppe_detection_node와 분리)
-        # ──────────────────────────────────────────────
-        model_path = '/workspace/models/ppe_forklift_yolov8n/best.pt'
-        self.get_logger().info(f'Loading YOLO model: {model_path}')
-        self._yolo = YOLO(model_path)
-        self._yolo_conf = 0.45
-        self.get_logger().info('YOLO model loaded.')
-
-        # ──────────────────────────────────────────────
-        # TF2
-        # ──────────────────────────────────────────────
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
 
-        # ──────────────────────────────────────────────
-        # 최신 LaserScan 캐시 (LiDAR Fallback용)
-        # ──────────────────────────────────────────────
         self._latest_scan: LaserScan | None = None
         self.create_subscription(LaserScan, '/scan', self._scan_callback, 10)
 
-        # ──────────────────────────────────────────────
-        # RGB + Depth 시간 동기화
-        # ──────────────────────────────────────────────
         sensor_qos = QoSProfile(
             depth=10,
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.VOLATILE,
         )
-        self._rgb_sub = message_filters.Subscriber(
-            self, Image, '/camera/image_raw', qos_profile=sensor_qos
-        )
-        self._depth_sub = message_filters.Subscriber(
-            self, Image, '/camera/depth/image_raw', qos_profile=sensor_qos
-        )
+        self._rgb_sub = message_filters.Subscriber(self, Image, '/camera/image_raw', qos_profile=sensor_qos)
+        self._depth_sub = message_filters.Subscriber(self, Image, '/camera/depth/image_raw', qos_profile=sensor_qos)
+        self._det_sub = message_filters.Subscriber(self, Detection2DArray, '/yolo/detections', qos_profile=sensor_qos)
+        
         self._sync = message_filters.ApproximateTimeSynchronizer(
-            [self._rgb_sub, self._depth_sub], queue_size=10, slop=0.12
+            [self._rgb_sub, self._depth_sub, self._det_sub], queue_size=10, slop=0.12
         )
-        self._sync.registerCallback(self._image_callback)
+        self._sync.registerCallback(self._fusion_callback)
 
-        # ──────────────────────────────────────────────
-        # Publishers
-        # ──────────────────────────────────────────────
         self._marker_pub = self.create_publisher(MarkerArray, '/detected_objects', 10)
         self._pose_pub = self.create_publisher(PoseArray, '/detected_objects/poses', 10)
         self._debug_pub = self.create_publisher(Image, '/camera/fusion/image', 10)
@@ -141,29 +91,18 @@ class SensorFusionNode(Node):
 
         self.get_logger().info('Sensor Fusion Node ready.')
 
-    # ──────────────────────────────────────────────────────────
-    # 콜백: LiDAR 캐시
-    # ──────────────────────────────────────────────────────────
     def _scan_callback(self, msg: LaserScan):
         self._latest_scan = msg
 
-    # ──────────────────────────────────────────────────────────
-    # 콜백: RGB + Depth 메인 처리
-    # ──────────────────────────────────────────────────────────
-    def _image_callback(self, rgb_msg: Image, depth_msg: Image):
-        # 1. 이미지 변환
+    def _fusion_callback(self, rgb_msg: Image, depth_msg: Image, det_msg: Detection2DArray):
         try:
             bgr = self._bridge.imgmsg_to_cv2(rgb_msg, desired_encoding='bgr8')
             depth = self._bridge.imgmsg_to_cv2(depth_msg, desired_encoding='passthrough')
             if depth.dtype == np.uint16:
-                depth = depth.astype(np.float32) / 1000.0   # mm → m
+                depth = depth.astype(np.float32) / 1000.0
         except Exception as e:
             self.get_logger().error(f'Image conversion error: {e}', once=True)
             return
-
-        # 2. YOLO 탐지
-        results = self._yolo(bgr, conf=self._yolo_conf, verbose=False)
-        boxes = results[0].boxes if results else None
 
         debug_img = bgr.copy()
         markers = MarkerArray()
@@ -171,54 +110,60 @@ class SensorFusionNode(Node):
         poses.header.stamp = rgb_msg.header.stamp
         poses.header.frame_id = 'odom'
 
-        # 이전 프레임 마커 클리어
         clr = Marker()
         clr.action = Marker.DELETEALL
         clr.header.frame_id = 'odom'
         clr.header.stamp = rgb_msg.header.stamp
         markers.markers.append(clr)
 
-        if boxes is not None and len(boxes) > 0:
-            for box in boxes:
-                cls_id = int(box.cls[0].item())
-                conf = float(box.conf[0].item())
-                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+        if det_msg.detections and len(det_msg.detections) > 0:
+            for det in det_msg.detections:
+                if not det.results:
+                    continue
+                cls_id = int(det.results[0].hypothesis.class_id)
+                conf = float(det.results[0].hypothesis.score)
 
-                # BBox 중심 픽셀
-                u = int(np.clip((x1 + x2) // 2, 0, self._img_w - 1))
-                v = int(np.clip((y1 + y2) // 2, 0, self._img_h - 1))
+                cx = det.bbox.center.position.x
+                cy = det.bbox.center.position.y
+                w = det.bbox.size_x
+                h = det.bbox.size_y
 
-                world_pos = None
+                x1 = int(cx - w / 2.0)
+                y1 = int(cy - h / 2.0)
+                x2 = int(cx + w / 2.0)
+                y2 = int(cy + h / 2.0)
+
+                u = int(np.clip(cx, 0, self._img_w - 1))
+                v = int(np.clip(cy, 0, self._img_h - 1))
+
+                odom_pos = None
                 depth_source = ''
 
                 if cls_id in TARGET_CLASSES:
-                    # ── 1차: Depth Projection
                     r = 7
                     roi = depth[
                         max(0, v - r):min(self._img_h, v + r),
                         max(0, u - r):min(self._img_w, u + r),
                     ]
-                    valid = roi[np.isfinite(roi) & (roi > 0.1) & (roi < 10.0)]
+                    valid = roi[np.isfinite(roi) & (roi > 0.1) & (roi < 6.0)]
                     d = float(np.median(valid)) if len(valid) >= 5 else 0.0
 
                     if d > 0.1:
                         depth_source = 'depth'
                     else:
-                        # ── 2차: LiDAR Fallback
                         d = self._lidar_distance_at_pixel(u)
                         if d > 0.1:
                             depth_source = 'lidar'
 
                     if d > 0.1:
-                        world_pos = self._project_to_world(u, v, d, rgb_msg.header.stamp)
+                        odom_pos = self._project_to_odom(u, v, d, rgb_msg.header.stamp)
 
-                # ── 디버그 오버레이
                 color = CLASS_COLORS_BGR.get(cls_id, (180, 180, 180))
                 cv2.rectangle(debug_img, (x1, y1), (x2, y2), color, 2)
                 label = f'{CLASS_NAMES.get(cls_id, str(cls_id))} {conf:.2f}'
 
-                if world_pos is not None:
-                    wx, wy, wz = world_pos
+                if odom_pos is not None:
+                    wx, wy, wz = odom_pos
                     label += f' [{depth_source}] ({wx:.2f},{wy:.2f})'
                     markers.markers.append(
                         self._sphere_marker(rgb_msg.header.stamp, cls_id, wx, wy, wz)
@@ -235,7 +180,6 @@ class SensorFusionNode(Node):
                 )
                 cv2.circle(debug_img, (u, v), 4, (255, 255, 255), -1)
 
-        # 3. 발행
         self._marker_pub.publish(markers)
         self._pose_pub.publish(poses)
         try:
@@ -245,18 +189,7 @@ class SensorFusionNode(Node):
         except Exception as e:
             self.get_logger().error(f'Debug publish error: {e}', once=True)
 
-    # ──────────────────────────────────────────────────────────
-    # Depth Projection: 픽셀 → Camera 3D → odom
-    # ──────────────────────────────────────────────────────────
-    def _project_to_world(self, u: int, v: int, d: float, stamp) -> tuple | None:
-        """
-        픽셀 (u, v) + depth d [m] → odom 프레임 3D 좌표 (x, y, z)
-
-        카메라 광학 좌표:
-            X_cam = (u - cx) * d / fx
-            Y_cam = (v - cy) * d / fy
-            Z_cam = d   (전방)
-        """
+    def _project_to_odom(self, u: int, v: int, d: float, stamp) -> tuple | None:
         x_cam = (u - self._cx) * d / self._fx
         y_cam = (v - self._cy) * d / self._fy
         z_cam = d
@@ -281,36 +214,25 @@ class SensorFusionNode(Node):
         qx, qy, qz, qw = t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w
 
         R = self._quat_to_rot(qx, qy, qz, qw)
-        world = R @ np.array([x_cam, y_cam, z_cam]) + np.array([tx, ty, tz])
-        return float(world[0]), float(world[1]), float(world[2])
+        odom_pos = R @ np.array([x_cam, y_cam, z_cam]) + np.array([tx, ty, tz])
+        return float(odom_pos[0]), float(odom_pos[1]), float(odom_pos[2])
 
     @staticmethod
     def _quat_to_rot(qx: float, qy: float, qz: float, qw: float) -> np.ndarray:
-        """단위 쿼터니언 → 3×3 회전 행렬"""
         return np.array([
             [1 - 2*(qy**2 + qz**2),   2*(qx*qy - qz*qw),   2*(qx*qz + qy*qw)],
-            [    2*(qx*qy + qz*qw), 1 - 2*(qx**2 + qz**2), 2*(qy*qz - qx*qw)],
-            [    2*(qx*qz - qy*qw),   2*(qy*qz + qx*qw), 1 - 2*(qx**2 + qy**2)],
+            [   2*(qx*qy + qz*qw), 1 - 2*(qx**2 + qz**2), 2*(qy*qz - qx*qw)],
+            [   2*(qx*qz - qy*qw),   2*(qy*qz + qx*qw), 1 - 2*(qx**2 + qy**2)],
         ], dtype=np.float64)
 
-    # ──────────────────────────────────────────────────────────
-    # LiDAR Fallback
-    # ──────────────────────────────────────────────────────────
     def _lidar_distance_at_pixel(self, u: int) -> float:
-        """
-        BBox 수평 중심 픽셀 u → 카메라 수평 각도 → LiDAR 빔 거리 반환
-
-        카메라 수평 각도: θ = atan((u - cx) / fx)   (오른쪽 = +)
-        LiDAR 매핑:       전방=0°, 반시계 양수
-        """
         if self._latest_scan is None:
             return 0.0
 
         scan = self._latest_scan
         angle_cam = math.atan2(u - self._cx, self._fx)
-        lidar_angle = -angle_cam   # 카메라 오른쪽 → LiDAR 시계 방향(음수)
+        lidar_angle = -angle_cam
 
-        # 각도 범위 정규화
         while lidar_angle < scan.angle_min:
             lidar_angle += 2 * math.pi
         while lidar_angle > scan.angle_max:
@@ -319,18 +241,21 @@ class SensorFusionNode(Node):
         idx = int(round((lidar_angle - scan.angle_min) / scan.angle_increment))
         idx = max(0, min(idx, len(scan.ranges) - 1))
 
-        # ±5 빔 중 유효 최솟값
-        lo = max(0, idx - 5)
-        hi = min(len(scan.ranges), idx + 6)
-        near = [
-            r for r in scan.ranges[lo:hi]
-            if math.isfinite(r) and scan.range_min < r < scan.range_max
+        beam_count = len(scan.ranges)
+        indices = [
+            (idx + offset) % beam_count
+            for offset in range(-5, 6)
         ]
+
+        near = [
+            scan.ranges[i]
+            for i in indices
+            if math.isfinite(scan.ranges[i])
+            and scan.range_min < scan.ranges[i] < scan.range_max
+        ]
+
         return min(near) if near else 0.0
 
-    # ──────────────────────────────────────────────────────────
-    # RViz Sphere Marker
-    # ──────────────────────────────────────────────────────────
     def _sphere_marker(
         self, stamp, cls_id: int,
         wx: float, wy: float, wz: float
@@ -345,7 +270,7 @@ class SensorFusionNode(Node):
         m.action = Marker.ADD
         m.pose.position.x = wx
         m.pose.position.y = wy
-        m.pose.position.z = wz + 0.5   # 객체 위에 표시
+        m.pose.position.z = wz + 0.5
         m.pose.orientation.w = 1.0
         radius = 0.30 if cls_id == 3 else 0.20
         m.scale.x = radius
