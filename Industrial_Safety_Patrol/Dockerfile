@@ -86,7 +86,8 @@ RUN pip install \
     matplotlib \
     psycopg2-binary \
     filterpy \
-    pytest
+    pytest \
+    deep-sort-realtime
 
 # ================================================================
 # 5. MuJoCo Rendering
