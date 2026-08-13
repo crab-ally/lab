@@ -14,7 +14,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist, TransformStamped, PoseStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan, Image
-from tf2_ros import TransformBroadcaster
+from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
 import mujoco
 import mujoco.viewer
 import numpy as np
@@ -105,6 +105,7 @@ class MujocoRosBridge(Node):
         self.depth_pub = self.create_publisher(Image, '/camera/depth/image_raw', 10)
         
         self.tf_broadcaster = TransformBroadcaster(self)
+        self.static_tf_broadcaster = StaticTransformBroadcaster(self)
 
         self.lidar_beam_count = 360
         self._init_lidar_sensors()
@@ -134,10 +135,56 @@ class MujocoRosBridge(Node):
             f"world quat={self.origin_quat.tolist()}"
         )
 
+        self._publish_static_transforms()
+
         self.get_logger().info(
             f"MuJoCo-ROS2 Bridge Node initialized "
             f"(LiDAR beams: {self.lidar_beam_count}, mode: {self.lidar_mode})"
         )
+
+    def _publish_static_transforms(self):
+        """
+        Static TF 발행: base_footprint → camera_link / lidar_link
+
+        XML 모델 기준 오프셋 (base_link 좌표계):
+          - lidar_link : sensor_tower(z=0.1375) + lidar_body(z=0.030) = z=0.1675m
+          - camera_link: sensor_tower(z=0.1375) + camera_body(x=-0.05, z=0.2125) = x=-0.05, z=0.35m
+            카메라 방향: quat=(0.5, 0.5, -0.5, -0.5) [MuJoCo w,x,y,z → ROS x,y,z,w]
+        """
+        now = self.get_clock().now().to_msg()
+        transforms = []
+
+        # base_footprint → lidar_link
+        lidar_tf = TransformStamped()
+        lidar_tf.header.stamp = now
+        lidar_tf.header.frame_id = 'base_footprint'
+        lidar_tf.child_frame_id = 'lidar_link'
+        lidar_tf.transform.translation.x = 0.0
+        lidar_tf.transform.translation.y = 0.0
+        lidar_tf.transform.translation.z = 0.1675
+        lidar_tf.transform.rotation.w = 1.0
+        lidar_tf.transform.rotation.x = 0.0
+        lidar_tf.transform.rotation.y = 0.0
+        lidar_tf.transform.rotation.z = 0.0
+        transforms.append(lidar_tf)
+
+        # base_footprint → camera_link
+        # MuJoCo camera quat (w,x,y,z) = (0.5, 0.5, -0.5, -0.5) → ROS (x,y,z,w) = (0.5, -0.5, -0.5, 0.5)
+        camera_tf = TransformStamped()
+        camera_tf.header.stamp = now
+        camera_tf.header.frame_id = 'base_footprint'
+        camera_tf.child_frame_id = 'camera_link'
+        camera_tf.transform.translation.x = -0.05
+        camera_tf.transform.translation.y = 0.0
+        camera_tf.transform.translation.z = 0.35
+        camera_tf.transform.rotation.x = 0.5
+        camera_tf.transform.rotation.y = -0.5
+        camera_tf.transform.rotation.z = -0.5
+        camera_tf.transform.rotation.w = 0.5
+        transforms.append(camera_tf)
+
+        self.static_tf_broadcaster.sendTransform(transforms)
+        self.get_logger().info('Static TFs published: base_footprint → camera_link, lidar_link')
 
     def _init_lidar_sensors(self):
         combined_id = mujoco.mj_name2id(
