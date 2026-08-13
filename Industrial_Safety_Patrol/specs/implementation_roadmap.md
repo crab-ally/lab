@@ -248,7 +248,7 @@ ROS2 Topic:
 
 ---
 
-## 11. Pose 기반 쓰러짐 감지 ⭐⭐⭐⭐☆
+## 11. Pose 기반 쓰러짐 감지 ⭐⭐⭐⭐☆ ⭕
 
 난이도: ★★★★☆
 
@@ -274,7 +274,7 @@ ROS2 Topic:
 
 # Level 5. 고급 인지 시스템
 
-## 12. DeepSORT 객체 추적 ⭐⭐⭐⭐⭐
+## 12. DeepSORT 객체 추적 ⭐⭐⭐⭐⭐ ⭕
 
 난이도: ★★★★★
 
@@ -304,7 +304,7 @@ ROS2 Topic:
 
 ---
 
-## 13. Camera + LiDAR Sensor Fusion ⭐⭐⭐⭐⭐
+## 13. Camera + LiDAR Sensor Fusion ⭐⭐⭐⭐⭐ ⭕
 
 난이도: ★★★★★
 
