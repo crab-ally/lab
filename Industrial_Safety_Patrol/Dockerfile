@@ -3,10 +3,16 @@
 # ROS2 Humble + MuJoCo 3.6.0 + AI Vision Environment
 # ================================================================
 
-FROM osrf/ros:humble-desktop-full AS robot
 
 # ================================================================
-# 1. System Package Installation
+# 1. Robot Image
+# ================================================================
+
+FROM osrf/ros:humble-desktop-full AS robot
+
+
+# ================================================================
+# 2. System Package Installation
 # ================================================================
 
 RUN apt-get update && apt-get install -y \
@@ -19,7 +25,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     vim \
     \
-    # MuJoCo Viewer (GLFW) + Headless Rendering
+    # ------------------------------------------------------------
+    # MuJoCo / OpenGL / GLFW
+    # ------------------------------------------------------------
     libgl1-mesa-glx \
     libglu1-mesa \
     mesa-utils \
@@ -32,7 +40,9 @@ RUN apt-get update && apt-get install -y \
     libxcursor1 \
     libxinerama1 \
     \
-    # ROS2 Packages
+    # ------------------------------------------------------------
+    # ROS2
+    # ------------------------------------------------------------
     ros-humble-rclpy \
     ros-humble-cv-bridge \
     ros-humble-sensor-msgs \
@@ -42,7 +52,9 @@ RUN apt-get update && apt-get install -y \
     ros-humble-tf2-geometry-msgs \
     ros-humble-teleop-twist-keyboard \
     \
-    # Navigation
+    # ------------------------------------------------------------
+    # Navigation / SLAM
+    # ------------------------------------------------------------
     ros-humble-navigation2 \
     ros-humble-nav2-bringup \
     ros-humble-diagnostic-updater \
@@ -52,28 +64,51 @@ RUN apt-get update && apt-get install -y \
     ros-humble-robot-state-publisher \
     ros-humble-joint-state-publisher \
     ros-humble-joint-state-publisher-gui \
-    ros-humble-navigation2 \
-    ros-humble-nav2-bringup \
+    \
     && rm -rf /var/lib/apt/lists/*
 
+
 # ================================================================
-# 2. Workspace
+# 3. Workspace
 # ================================================================
 
 WORKDIR /workspace
 
+
 # ================================================================
-# 3. Python Virtual Environment
+# 4. Python Virtual Environment
+#
+# --system-site-packages
+#   → ROS2의 Python 패키지(rclpy, cv_bridge 등)를 사용하기 위함
+#
+# venv 자체의 site-packages
+#   → Ultralytics, DeepSORT, MuJoCo 등을 설치
 # ================================================================
 
 RUN python3 -m venv --system-site-packages /opt/venv
 
 ENV PATH="/opt/venv/bin:$PATH"
 
-RUN pip install --upgrade pip setuptools wheel
+# Python 실행 파일 확인
+RUN which python3 && \
+    python3 --version && \
+    which pip && \
+    pip --version
+
 
 # ================================================================
-# 4. Python Packages
+# 5. Python Package Manager
+# ================================================================
+
+RUN pip install --upgrade \
+    pip \
+    setuptools \
+    wheel \
+    colcon-core \
+    colcon-common-extensions
+
+# ================================================================
+# 6. AI / Simulation Python Packages
 # ================================================================
 
 RUN pip install \
@@ -89,37 +124,58 @@ RUN pip install \
     pytest \
     deep-sort-realtime
 
+
 # ================================================================
-# 5. MuJoCo Rendering
+# 7. Verify Python Environment
+# ================================================================
+
+RUN python3 -c "import numpy; print('NumPy:', numpy.__version__)" && \
+    python3 -c "import mujoco; print('MuJoCo:', mujoco.__version__)" && \
+    python3 -c "import cv2; print('OpenCV:', cv2.__version__)" && \
+    python3 -c "import ultralytics; print('Ultralytics:', ultralytics.__version__)" && \
+    python3 -c "import deep_sort_realtime; print('DeepSORT: OK')"
+
+
+# ================================================================
+# 8. MuJoCo Rendering
 # ================================================================
 
 ENV MUJOCO_GL=glfw
+
 ENV PYTHONUNBUFFERED=1
 
-# ================================================================
-# 6. ROS2 Environment
-# ================================================================
-
-RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
 
 # ================================================================
-# 7. Copy Project
+# 9. ROS2 Environment
+# ================================================================
+
+RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc && \
+    echo 'export PATH="/opt/venv/bin:$PATH"' >> /root/.bashrc
+
+
+# ================================================================
+# 10. Project
 # ================================================================
 
 COPY . /workspace
 
+
 # ================================================================
-# 8. Default Command
+# 11. Default Command
 # ================================================================
 
 CMD ["bash"]
 
-# ================================================================
-# 9. Database Service
-# ================================================================
-FROM timescale/timescaledb:latest-pg15 AS db
 
 # ================================================================
-# 10. Dashboard Service
+# 12. Database Image
 # ================================================================
+
+FROM timescale/timescaledb:latest-pg15 AS db
+
+
+# ================================================================
+# 13. Dashboard Image
+# ================================================================
+
 FROM grafana/grafana:latest AS dashboard
