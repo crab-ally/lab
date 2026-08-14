@@ -176,7 +176,7 @@
         </body>
 
         <!-- 3) 45도 Bending 작업자: 안전모 X, 조끼 X -->
-        <body name="bending_worker_45" pos="0.5 3.5 0">
+        <body name="bending_worker_45" pos="-2.7 0.5 0">
             <geom name="bw45_luleg" type="capsule" fromto="-0.09 0 0.80 -0.09 0 0.38" size="0.055" rgba="0.10 0.18 0.28 1" mass="8.0"/>
             <geom name="bw45_llleg" type="capsule" fromto="-0.09 0 0.38 -0.09 0 0.00" size="0.045" rgba="0.10 0.18 0.28 1" mass="4.0"/>
             <geom name="bw45_ruleg" type="capsule" fromto="0.09 0 0.80 0.09 0 0.38" size="0.055" rgba="0.10 0.18 0.28 1" mass="8.0"/>
