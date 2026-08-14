@@ -37,8 +37,13 @@ slam_params_file:=/workspace/config/slam_toolbox_factory.yaml
 # 화재감지 실행
 7. [터미널8] python scripts/fire_detection_node.py
 
-# PPE 탐지
-8. [터미널9] docker-compose --profile vision up
+# yolo + ppe + sensor fusion + ttc
+1. cd ros2_ws
+2. colcon build --packages-select perception_safety_pkg
+3. source install/setup.bash
+4. ros2 launch perception_safety_pkg safety_pipeline.launch.py
+or
+1. docker compose --profile vision up perception_safety
 
 # Yolo 학습
 [터미널]
