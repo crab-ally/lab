@@ -232,6 +232,9 @@ class PPEDetectionNode(Node):
             cv2.rectangle(cv_image, (vx1, vy1), (vx2, vy2), (255, 255, 0), 2)
             cv2.putText(cv_image, "Vest", (vx1, vy1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
 
+        cv2.imshow("PPE Detection Monitor", cv_image)
+        cv2.waitKey(1)
+
         try:
             processed_msg = self.bridge.cv2_to_imgmsg(
                 cv_image,
