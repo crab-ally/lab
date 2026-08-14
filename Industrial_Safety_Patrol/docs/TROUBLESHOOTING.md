@@ -982,3 +982,72 @@ if data.time >= last_camera_time + 0.1:
         node.publish_camera(stamp)
     last_camera_time = data.time
 ```
+
+---
+
+# 24. ROS2 Python 패키지 Ultralytics import 오류
+
+## 파일
+
+`Dockerfile`
+
+## 에러코드
+
+perception_node 실행 시 Ultralytics가 설치되어 있음에도 다음 오류 발생.
+
+```txt
+ModuleNotFoundError: No module named 'ultralytics'
+```
+
+Docker 컨테이너 내부에서 직접 Python을 실행하면 Ultralytics가 정상적으로 import됨.
+하지만 ros2 launch로 실행하면 perception_node의 실행 스크립트가 system Python을 사용함.
+
+```
+#!/usr/bin/python3
+```
+
+이로 인해 /usr/bin/python3 환경에서 ultralytics를 찾지 못함.
+
+## 원인
+
+Dockerfile에서 ROS2의 colcon은 apt를 통해 system Python 환경에 설치되어 있었음.
+반면 AI 관련 패키지는 /opt/venv에 설치되어 있었음
+
+```txt
+/usr/bin/python3
+└── ROS2 / colcon
+    └── ultralytics 없음
+
+/opt/venv/bin/python3
+└── ultralytics
+└── DeepSORT
+└── MuJoCo
+└── NumPy
+```
+
+따라서 /usr/bin/colcon으로 ROS2 Python 패키지를 빌드하면 perception_node 실행 스크립트가 다음과 같이 생성됨.
+
+```
+#!/usr/bin/python3
+```
+
+## 해결
+
+Dockerfile에서 venv 환경에 colcon을 추가 설치하도록 수정.
+
+```
+RUN pip install --upgrade \
+    pip \
+    setuptools \
+    wheel \
+      ↓
+    (추가)
+    colcon-core \
+    colcon-common-extensions
+```
+
+```
+ENV PATH="/opt/venv/bin:$PATH"
+```
+
+설정을 통해 /opt/venv/bin/colcon이 우선 사용되도록 구성.
