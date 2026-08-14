@@ -42,9 +42,11 @@ class SensorFusionNode(Node):
         /yolo/detections
         /scan
     Publish:
-        /detected_objects (Rviz Marker)
-        /detected_objects/poses (odom 3D 좌표)
-        /camera/fusion/image (debug Image)
+        /detected_objects          (Rviz Marker)
+        /detected_objects/poses    (odom 3D 좌표 — Person+Forklift 혼합)
+        /detected_objects/person_poses   (odom 3D 좌표 — Person만)
+        /detected_objects/forklift_poses (odom 3D 좌표 — Forklift만)
+        /camera/fusion/image       (debug Image)
     """
     def __init__(self):
         super().__init__('sensor_fusion_node')
@@ -84,6 +86,8 @@ class SensorFusionNode(Node):
 
         self._marker_pub = self.create_publisher(MarkerArray, '/detected_objects', 10)
         self._pose_pub = self.create_publisher(PoseArray, '/detected_objects/poses', 10)
+        self._person_pose_pub = self.create_publisher(PoseArray, '/detected_objects/person_poses', 10)
+        self._forklift_pose_pub = self.create_publisher(PoseArray, '/detected_objects/forklift_poses', 10)
         self._debug_pub = self.create_publisher(Image, '/camera/fusion/image', 10)
 
         self._bridge = CvBridge()
@@ -109,6 +113,12 @@ class SensorFusionNode(Node):
         poses = PoseArray()
         poses.header.stamp = rgb_msg.header.stamp
         poses.header.frame_id = 'odom'
+
+        # 클래스별 PoseArray (TTC 노드 입력용)
+        person_poses = PoseArray()
+        person_poses.header = poses.header
+        forklift_poses = PoseArray()
+        forklift_poses.header = poses.header
 
         clr = Marker()
         clr.action = Marker.DELETEALL
@@ -173,6 +183,15 @@ class SensorFusionNode(Node):
                     p.orientation = Quaternion(w=1.0)
                     poses.poses.append(p)
 
+                    # 클래스별 PoseArray에도 동일 odom 좌표 분리 수집
+                    wp = Pose()
+                    wp.position = Point(x=wx, y=wy, z=wz)
+                    wp.orientation = Quaternion(w=1.0)
+                    if cls_id == 0:    # Person
+                        person_poses.poses.append(wp)
+                    elif cls_id == 3:  # Forklift
+                        forklift_poses.poses.append(wp)
+
                 cv2.putText(
                     debug_img, label,
                     (x1, max(y1 - 8, 0)),
@@ -182,6 +201,9 @@ class SensorFusionNode(Node):
 
         self._marker_pub.publish(markers)
         self._pose_pub.publish(poses)
+        self._person_pose_pub.publish(person_poses)
+        self._forklift_pose_pub.publish(forklift_poses)
+
         try:
             dbg_msg = self._bridge.cv2_to_imgmsg(debug_img, encoding='bgr8')
             dbg_msg.header = rgb_msg.header
