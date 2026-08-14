@@ -25,7 +25,7 @@ version: "3.8"
 
   # --profile vision
   #  │
-  #  └── ppe_detection
+  #  └── perception_safety
   # ===========================================================================
 
 services:
@@ -60,6 +60,7 @@ services:
       - ./data:/workspace/data        # 원본 데이터
       - ./results:/workspace/results  # 결과 저장
       - ./datasets:/workspace/datasets
+      - ./ros2_ws:/workspace/ros2_ws
 
     environment:
 
@@ -165,7 +166,9 @@ services:
     command: >
       bash -c "
       source /opt/ros/humble/setup.bash &&
-      ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args"
+      ros2 run teleop_twist_keyboard teleop_twist_keyboard \
+      --ros-args
+      -r cmd_vel:=/cmd_vel_teleop"
 
     environment:
       - ROS_DOMAIN_ID=50
@@ -399,7 +402,9 @@ services:
       use_sim_time:=true \
       autostart:=true \
       map:=/workspace/maps/factory_map.yaml \
-      params_file:=/workspace/config/nav2_params.yaml"
+      params_file:=/workspace/config/nav2_params.yaml \
+      --ros-args \
+      -r cmd_vel:=/cmd_vel_nav"
 
     volumes:
       - ./config:/workspace/config
@@ -500,42 +505,29 @@ services:
     networks:
       - patrol_network
 
-  # ===========================================================================
-  # YOLO Vision AI (PPE Detection)
-  # ===========================================================================
-
-  ppe_detection:
+  perception_safety:
 
     build:
       context: .
       target: robot
 
-    container_name: safety_patrol_ppe_detection
+    container_name: safety_patrol_perception
 
     profiles:
       - vision
 
-    stdin_open: true
-    tty: true
-
-    # GUI(OpenCV imshow)를 위한 X11 포워딩 설정
     command: >
       bash -c "
       source /opt/ros/humble/setup.bash &&
-      python /workspace/scripts/ppe_detection_node.py
-      --ros-args
-      -p use_sim_time:=true"
+      source /workspace/ros2_ws/install/setup.bash &&
+      ros2 launch perception_safety_pkg safety_pipeline.launch.py"
 
     volumes:
-      - ./scripts:/workspace/scripts
+      - ./ros2_ws:/workspace/ros2_ws
+      - ./config:/workspace/config
       - ./models:/workspace/models
-      - /tmp/.X11-unix:/tmp/.X11-unix
 
     environment:
-      - DISPLAY=host.docker.internal:0.0
-      - LIBGL_ALWAYS_SOFTWARE=1
-      - QT_X11_NO_MITSHM=1
-      - YOLO_CONFIG_DIR=/workspace/models/ppe_yolov8n # Ultralytics 설정(config) 디렉터리
       - ROS_DOMAIN_ID=50
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
