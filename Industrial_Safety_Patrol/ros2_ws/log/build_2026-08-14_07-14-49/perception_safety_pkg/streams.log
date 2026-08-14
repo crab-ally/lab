@@ -1,0 +1,49 @@
+[2.997s] Invoking command in '/workspace/ros2_ws/src/perception_safety_pkg': PS1=(venv) \[\e]0;\u@\h: \w\a\]${debian_chroot:+($debian_chroot)}\u@\h:\w\$ PYTHONPATH=/workspace/ros2_ws/build/perception_safety_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages:${PYTHONPATH} VIRTUAL_ENV_PROMPT=(venv) /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/perception_safety_pkg build --build-base /workspace/ros2_ws/build/perception_safety_pkg/build install --record /workspace/ros2_ws/build/perception_safety_pkg/install.log --install-scripts $base/lib/perception_safety_pkg --single-version-externally-managed install_data
+[4.366s] running egg_info
+[4.372s] creating ../../build/perception_safety_pkg/perception_safety_pkg.egg-info
+[4.384s] writing ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/PKG-INFO
+[4.393s] writing dependency_links to ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/dependency_links.txt
+[4.401s] writing entry points to ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/entry_points.txt
+[4.416s] writing requirements to ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/requires.txt
+[4.425s] writing top-level names to ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/top_level.txt
+[4.436s] writing manifest file '../../build/perception_safety_pkg/perception_safety_pkg.egg-info/SOURCES.txt'
+[4.488s] reading manifest file '../../build/perception_safety_pkg/perception_safety_pkg.egg-info/SOURCES.txt'
+[4.581s] writing manifest file '../../build/perception_safety_pkg/perception_safety_pkg.egg-info/SOURCES.txt'
+[4.590s] running build
+[4.591s] running build_py
+[4.595s] creating /workspace/ros2_ws/build/perception_safety_pkg/build
+[4.596s] creating /workspace/ros2_ws/build/perception_safety_pkg/build/lib
+[4.599s] creating /workspace/ros2_ws/build/perception_safety_pkg/build/lib/perception_safety_pkg
+[4.624s] copying perception_safety_pkg/fusion_node_3d.py -> /workspace/ros2_ws/build/perception_safety_pkg/build/lib/perception_safety_pkg
+[4.651s] copying perception_safety_pkg/perception_node.py -> /workspace/ros2_ws/build/perception_safety_pkg/build/lib/perception_safety_pkg
+[4.678s] copying perception_safety_pkg/ttc_node.py -> /workspace/ros2_ws/build/perception_safety_pkg/build/lib/perception_safety_pkg
+[4.717s] copying perception_safety_pkg/__init__.py -> /workspace/ros2_ws/build/perception_safety_pkg/build/lib/perception_safety_pkg
+[4.747s] running install
+[4.755s] running install_lib
+[4.786s] creating /workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages/perception_safety_pkg
+[4.827s] copying /workspace/ros2_ws/build/perception_safety_pkg/build/lib/perception_safety_pkg/fusion_node_3d.py -> /workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages/perception_safety_pkg
+[4.880s] copying /workspace/ros2_ws/build/perception_safety_pkg/build/lib/perception_safety_pkg/perception_node.py -> /workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages/perception_safety_pkg
+[4.950s] copying /workspace/ros2_ws/build/perception_safety_pkg/build/lib/perception_safety_pkg/ttc_node.py -> /workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages/perception_safety_pkg
+[4.977s] copying /workspace/ros2_ws/build/perception_safety_pkg/build/lib/perception_safety_pkg/__init__.py -> /workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages/perception_safety_pkg
+[5.031s] byte-compiling /workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages/perception_safety_pkg/fusion_node_3d.py to fusion_node_3d.cpython-310.pyc
+[5.081s] byte-compiling /workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages/perception_safety_pkg/perception_node.py to perception_node.cpython-310.pyc
+[5.117s] byte-compiling /workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages/perception_safety_pkg/ttc_node.py to ttc_node.cpython-310.pyc
+[5.173s] byte-compiling /workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages/perception_safety_pkg/__init__.py to __init__.cpython-310.pyc
+[5.231s] running install_data
+[5.235s] creating /workspace/ros2_ws/install/perception_safety_pkg/share/ament_index
+[5.244s] creating /workspace/ros2_ws/install/perception_safety_pkg/share/ament_index/resource_index
+[5.251s] creating /workspace/ros2_ws/install/perception_safety_pkg/share/ament_index/resource_index/packages
+[5.266s] copying resource/perception_safety_pkg -> /workspace/ros2_ws/install/perception_safety_pkg/share/ament_index/resource_index/packages
+[5.294s] copying package.xml -> /workspace/ros2_ws/install/perception_safety_pkg/share/perception_safety_pkg
+[5.316s] creating /workspace/ros2_ws/install/perception_safety_pkg/share/perception_safety_pkg/launch
+[5.326s] copying launch/safety_pipeline.launch.py -> /workspace/ros2_ws/install/perception_safety_pkg/share/perception_safety_pkg/launch
+[5.350s] creating /workspace/ros2_ws/install/perception_safety_pkg/share/perception_safety_pkg/config
+[5.360s] copying config/safety_params.yaml -> /workspace/ros2_ws/install/perception_safety_pkg/share/perception_safety_pkg/config
+[5.400s] running install_egg_info
+[5.426s] Copying ../../build/perception_safety_pkg/perception_safety_pkg.egg-info to /workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages/perception_safety_pkg-0.1.0-py3.10.egg-info
+[6.369s] running install_scripts
+[6.499s] Installing fusion_node_3d script to /workspace/ros2_ws/install/perception_safety_pkg/lib/perception_safety_pkg
+[6.506s] Installing perception_node script to /workspace/ros2_ws/install/perception_safety_pkg/lib/perception_safety_pkg
+[6.534s] Installing ttc_node script to /workspace/ros2_ws/install/perception_safety_pkg/lib/perception_safety_pkg
+[6.543s] writing list of installed files to '/workspace/ros2_ws/build/perception_safety_pkg/install.log'
+[6.609s] Invoked command in '/workspace/ros2_ws/src/perception_safety_pkg' returned '0': PS1=(venv) \[\e]0;\u@\h: \w\a\]${debian_chroot:+($debian_chroot)}\u@\h:\w\$ PYTHONPATH=/workspace/ros2_ws/build/perception_safety_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages:${PYTHONPATH} VIRTUAL_ENV_PROMPT=(venv) /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/perception_safety_pkg build --build-base /workspace/ros2_ws/build/perception_safety_pkg/build install --record /workspace/ros2_ws/build/perception_safety_pkg/install.log --install-scripts $base/lib/perception_safety_pkg --single-version-externally-managed install_data

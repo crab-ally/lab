@@ -1,0 +1,89 @@
+[0.000000] (-) TimerEvent: {}
+[0.000833] (perception_safety_pkg) JobQueued: {'identifier': 'perception_safety_pkg', 'dependencies': OrderedDict()}
+[0.002087] (perception_safety_pkg) JobStarted: {'identifier': 'perception_safety_pkg'}
+[0.097952] (-) TimerEvent: {}
+[0.198652] (-) TimerEvent: {}
+[0.300346] (-) TimerEvent: {}
+[0.405872] (-) TimerEvent: {}
+[0.507078] (-) TimerEvent: {}
+[0.610902] (-) TimerEvent: {}
+[0.714078] (-) TimerEvent: {}
+[0.815444] (-) TimerEvent: {}
+[0.916945] (-) TimerEvent: {}
+[1.018543] (-) TimerEvent: {}
+[1.121814] (-) TimerEvent: {}
+[1.224011] (-) TimerEvent: {}
+[1.326145] (-) TimerEvent: {}
+[1.429812] (-) TimerEvent: {}
+[1.531086] (-) TimerEvent: {}
+[1.632486] (-) TimerEvent: {}
+[1.733398] (-) TimerEvent: {}
+[1.834705] (-) TimerEvent: {}
+[1.937877] (-) TimerEvent: {}
+[2.039768] (-) TimerEvent: {}
+[2.142173] (-) TimerEvent: {}
+[2.245905] (-) TimerEvent: {}
+[2.347272] (-) TimerEvent: {}
+[2.448180] (-) TimerEvent: {}
+[2.549459] (-) TimerEvent: {}
+[2.651804] (-) TimerEvent: {}
+[2.753098] (-) TimerEvent: {}
+[2.856562] (-) TimerEvent: {}
+[2.961858] (-) TimerEvent: {}
+[3.063040] (-) TimerEvent: {}
+[3.165774] (-) TimerEvent: {}
+[3.266707] (-) TimerEvent: {}
+[3.367930] (-) TimerEvent: {}
+[3.385590] (perception_safety_pkg) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'egg_info', '--egg-base', '../../build/perception_safety_pkg', 'build', '--build-base', '/workspace/ros2_ws/build/perception_safety_pkg/build', 'install', '--record', '/workspace/ros2_ws/build/perception_safety_pkg/install.log', '--install-scripts', '$base/lib/perception_safety_pkg', '--single-version-externally-managed', 'install_data'], 'cwd': '/workspace/ros2_ws/src/perception_safety_pkg', 'env': {'HOSTNAME': '4066bf8e69c9', 'DB_PORT': '5432', 'SHLVL': '1', 'LIBGL_ALWAYS_SOFTWARE': '0', 'LD_LIBRARY_PATH': '/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib', 'HOME': '/root', 'OLDPWD': '/workspace', 'DB_NAME': 'patrol_db', 'PYTHONUNBUFFERED': '1', 'ROS_PYTHON_VERSION': '3', 'PS1': '(venv) \\[\\e]0;\\u@\\h: \\w\\a\\]${debian_chroot:+($debian_chroot)}\\u@\\h:\\w\\$', 'COLCON_PREFIX_PATH': '/workspace/ros2_ws/install', 'ROS_DISTRO': 'humble', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'TERM': 'xterm', 'ROS_LOCALHOST_ONLY': '0', 'QT_X11_NO_MITSHM': '1', 'PATH': '/opt/venv/bin:/opt/venv/bin:/opt/ros/humble/bin:/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'USE_SIM_TIME': 'true', 'DISPLAY': 'host.docker.internal:0.0', 'MUJOCO_GL': 'glfw', 'LANG': 'C.UTF-8', 'VIRTUAL_ENV_PROMPT': '(venv)', 'RMW_IMPLEMENTATION': 'rmw_fastrtps_cpp', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:', 'ROS_DOMAIN_ID': '50', 'AMENT_PREFIX_PATH': '/workspace/ros2_ws/install/perception_safety_pkg:/opt/ros/humble', 'DB_PASS': 'password123', 'VIRTUAL_ENV': '/opt/venv', 'PWD': '/workspace/ros2_ws/build/perception_safety_pkg', 'LC_ALL': 'C.UTF-8', 'MESA_GL_VERSION_OVERRIDE': '4.6', 'PYTHONPATH': '/workspace/ros2_ws/build/perception_safety_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages:/workspace/ros2_ws/build/perception_safety_pkg:/workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages', 'DB_HOST': 'db', 'COLCON': '1', 'DB_USER': 'admin'}, 'shell': False}
+[3.468021] (-) TimerEvent: {}
+[3.573457] (-) TimerEvent: {}
+[3.676742] (-) TimerEvent: {}
+[3.777733] (-) TimerEvent: {}
+[3.885330] (-) TimerEvent: {}
+[3.989772] (-) TimerEvent: {}
+[4.097986] (-) TimerEvent: {}
+[4.202136] (-) TimerEvent: {}
+[4.306591] (-) TimerEvent: {}
+[4.410181] (-) TimerEvent: {}
+[4.512144] (-) TimerEvent: {}
+[4.613034] (-) TimerEvent: {}
+[4.683548] (perception_safety_pkg) StdoutLine: {'line': b'running egg_info\n'}
+[4.687472] (perception_safety_pkg) StdoutLine: {'line': b'writing ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/PKG-INFO\n'}
+[4.704666] (perception_safety_pkg) StdoutLine: {'line': b'writing dependency_links to ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/dependency_links.txt\n'}
+[4.709296] (perception_safety_pkg) StdoutLine: {'line': b'writing entry points to ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/entry_points.txt\n'}
+[4.712956] (perception_safety_pkg) StdoutLine: {'line': b'writing requirements to ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/requires.txt\n'}
+[4.714161] (-) TimerEvent: {}
+[4.718457] (perception_safety_pkg) StdoutLine: {'line': b'writing top-level names to ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/top_level.txt\n'}
+[4.778105] (perception_safety_pkg) StdoutLine: {'line': b"reading manifest file '../../build/perception_safety_pkg/perception_safety_pkg.egg-info/SOURCES.txt'\n"}
+[4.814311] (-) TimerEvent: {}
+[4.853844] (perception_safety_pkg) StdoutLine: {'line': b"writing manifest file '../../build/perception_safety_pkg/perception_safety_pkg.egg-info/SOURCES.txt'\n"}
+[4.856786] (perception_safety_pkg) StdoutLine: {'line': b'running build\n'}
+[4.858847] (perception_safety_pkg) StdoutLine: {'line': b'running build_py\n'}
+[4.914474] (-) TimerEvent: {}
+[4.941900] (perception_safety_pkg) StdoutLine: {'line': b'running install\n'}
+[4.944120] (perception_safety_pkg) StdoutLine: {'line': b'running install_lib\n'}
+[5.014640] (-) TimerEvent: {}
+[5.116095] (-) TimerEvent: {}
+[5.138074] (perception_safety_pkg) StdoutLine: {'line': b'running install_data\n'}
+[5.193533] (perception_safety_pkg) StdoutLine: {'line': b'running install_egg_info\n'}
+[5.210101] (perception_safety_pkg) StdoutLine: {'line': b"removing '/workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages/perception_safety_pkg-0.1.0-py3.10.egg-info' (and everything under it)\n"}
+[5.216235] (-) TimerEvent: {}
+[5.315824] (perception_safety_pkg) StdoutLine: {'line': b'Copying ../../build/perception_safety_pkg/perception_safety_pkg.egg-info to /workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages/perception_safety_pkg-0.1.0-py3.10.egg-info\n'}
+[5.323547] (-) TimerEvent: {}
+[5.429763] (-) TimerEvent: {}
+[5.530590] (-) TimerEvent: {}
+[5.621760] (perception_safety_pkg) StdoutLine: {'line': b'running install_scripts\n'}
+[5.630711] (-) TimerEvent: {}
+[5.733779] (-) TimerEvent: {}
+[5.749461] (perception_safety_pkg) StdoutLine: {'line': b'Installing fusion_node_3d script to /workspace/ros2_ws/install/perception_safety_pkg/lib/perception_safety_pkg\n'}
+[5.765706] (perception_safety_pkg) StdoutLine: {'line': b'Installing perception_node script to /workspace/ros2_ws/install/perception_safety_pkg/lib/perception_safety_pkg\n'}
+[5.776925] (perception_safety_pkg) StdoutLine: {'line': b'Installing ttc_node script to /workspace/ros2_ws/install/perception_safety_pkg/lib/perception_safety_pkg\n'}
+[5.801808] (perception_safety_pkg) StdoutLine: {'line': b"writing list of installed files to '/workspace/ros2_ws/build/perception_safety_pkg/install.log'\n"}
+[5.833932] (-) TimerEvent: {}
+[5.847752] (perception_safety_pkg) CommandEnded: {'returncode': 0}
+[5.936588] (-) TimerEvent: {}
+[6.037931] (-) TimerEvent: {}
+[6.141968] (-) TimerEvent: {}
+[6.246001] (-) TimerEvent: {}
+[6.267561] (perception_safety_pkg) JobEnded: {'identifier': 'perception_safety_pkg', 'rc': 0}
+[6.286861] (-) EventReactorShutdown: {}

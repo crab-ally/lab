@@ -1,0 +1,23 @@
+[3.398s] Invoking command in '/workspace/ros2_ws/src/perception_safety_pkg': PS1=(venv) \[\e]0;\u@\h: \w\a\]${debian_chroot:+($debian_chroot)}\u@\h:\w\$ PYTHONPATH=/workspace/ros2_ws/build/perception_safety_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages:${PYTHONPATH} VIRTUAL_ENV_PROMPT=(venv) /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/perception_safety_pkg build --build-base /workspace/ros2_ws/build/perception_safety_pkg/build install --record /workspace/ros2_ws/build/perception_safety_pkg/install.log --install-scripts $base/lib/perception_safety_pkg --single-version-externally-managed install_data
+[4.682s] running egg_info
+[4.685s] writing ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/PKG-INFO
+[4.703s] writing dependency_links to ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/dependency_links.txt
+[4.708s] writing entry points to ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/entry_points.txt
+[4.711s] writing requirements to ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/requires.txt
+[4.718s] writing top-level names to ../../build/perception_safety_pkg/perception_safety_pkg.egg-info/top_level.txt
+[4.778s] reading manifest file '../../build/perception_safety_pkg/perception_safety_pkg.egg-info/SOURCES.txt'
+[4.852s] writing manifest file '../../build/perception_safety_pkg/perception_safety_pkg.egg-info/SOURCES.txt'
+[4.855s] running build
+[4.857s] running build_py
+[4.941s] running install
+[4.943s] running install_lib
+[5.136s] running install_data
+[5.192s] running install_egg_info
+[5.209s] removing '/workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages/perception_safety_pkg-0.1.0-py3.10.egg-info' (and everything under it)
+[5.320s] Copying ../../build/perception_safety_pkg/perception_safety_pkg.egg-info to /workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages/perception_safety_pkg-0.1.0-py3.10.egg-info
+[5.620s] running install_scripts
+[5.748s] Installing fusion_node_3d script to /workspace/ros2_ws/install/perception_safety_pkg/lib/perception_safety_pkg
+[5.767s] Installing perception_node script to /workspace/ros2_ws/install/perception_safety_pkg/lib/perception_safety_pkg
+[5.777s] Installing ttc_node script to /workspace/ros2_ws/install/perception_safety_pkg/lib/perception_safety_pkg
+[5.801s] writing list of installed files to '/workspace/ros2_ws/build/perception_safety_pkg/install.log'
+[5.846s] Invoked command in '/workspace/ros2_ws/src/perception_safety_pkg' returned '0': PS1=(venv) \[\e]0;\u@\h: \w\a\]${debian_chroot:+($debian_chroot)}\u@\h:\w\$ PYTHONPATH=/workspace/ros2_ws/build/perception_safety_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspace/ros2_ws/install/perception_safety_pkg/lib/python3.10/site-packages:${PYTHONPATH} VIRTUAL_ENV_PROMPT=(venv) /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/perception_safety_pkg build --build-base /workspace/ros2_ws/build/perception_safety_pkg/build install --record /workspace/ros2_ws/build/perception_safety_pkg/install.log --install-scripts $base/lib/perception_safety_pkg --single-version-externally-managed install_data
