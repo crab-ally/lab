@@ -4,7 +4,8 @@ timestep: 0.005
 odom → base_footprint: 50Hz(0.02s)
 /scan: 10Hz(0.1s)
 /camera/image_raw: 10Hz(0.1s)
-/camera/depth/image_raw: 10Hz(0.1s) [추가]
+/camera/depth/image_raw: 10Hz(0.1s)
+/camera/depth/camera_info: 10Hz(0.1s)
 /clock: 50Hz
 viewer.sync(): 60Hz
 """
@@ -13,7 +14,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist, TransformStamped, PoseStamped
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import LaserScan, Image
+from sensor_msgs.msg import LaserScan, Image, CameraInfo
 from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
 import mujoco
 import mujoco.viewer
@@ -61,6 +62,10 @@ class MujocoRosBridge(Node):
         self.track_width = 0.160
         self.wheel_radius = 0.033
 
+        # 이미지 해상도
+        self.img_width = 640
+        self.img_height = 480
+
         # Subscribers
         self.cmd_vel_sub = self.create_subscription(
             Twist,
@@ -89,7 +94,7 @@ class MujocoRosBridge(Node):
         )
 
         self.camera_image = None
-        self.depth_image = None  # [추가] Depth 이미지 저장용
+        self.depth_image = None
         self.camera_lock = threading.Lock()
 
         # Publishers
@@ -101,8 +106,9 @@ class MujocoRosBridge(Node):
         self.fl1_pose_pub = self.create_publisher(PoseStamped, '/forklift_1/pose', 10)
         self.fl2_pose_pub = self.create_publisher(PoseStamped, '/forklift_2/pose', 10)
         
-        # Depth 이미지 Publisher
+        # Depth 이미지 및 CameraInfo Publisher
         self.depth_pub = self.create_publisher(Image, '/camera/depth/image_raw', 10)
+        self.camera_info_pub = self.create_publisher(CameraInfo, '/camera/depth/camera_info', 10)
         
         self.tf_broadcaster = TransformBroadcaster(self)
         self.static_tf_broadcaster = StaticTransformBroadcaster(self)
@@ -143,14 +149,6 @@ class MujocoRosBridge(Node):
         )
 
     def _publish_static_transforms(self):
-        """
-        Static TF 발행: base_footprint → camera_link / lidar_link
-
-        XML 모델 기준 오프셋 (base_link 좌표계):
-          - lidar_link : sensor_tower(z=0.1375) + lidar_body(z=0.030) = z=0.1675m
-          - camera_link: sensor_tower(z=0.1375) + camera_body(x=-0.05, z=0.2125) = x=-0.05, z=0.35m
-            카메라 방향: quat=(0.5, 0.5, -0.5, -0.5) [MuJoCo w,x,y,z → ROS x,y,z,w]
-        """
         now = self.get_clock().now().to_msg()
         transforms = []
 
@@ -169,7 +167,6 @@ class MujocoRosBridge(Node):
         transforms.append(lidar_tf)
 
         # base_footprint → camera_link
-        # MuJoCo camera quat (w,x,y,z) = (0.5, 0.5, -0.5, -0.5) → ROS (x,y,z,w) = (0.5, -0.5, -0.5, 0.5)
         camera_tf = TransformStamped()
         camera_tf.header.stamp = now
         camera_tf.header.frame_id = 'base_footprint'
@@ -231,11 +228,9 @@ class MujocoRosBridge(Node):
         qvel_adr = self.model.jnt_dofadr[joint_id]
         qpos_adr = self.model.jnt_qposadr[joint_id]
         
-        # 선속도 적용 (World 좌표계 x, y)
         self.data.qvel[qvel_adr] = msg.linear.x
         self.data.qvel[qvel_adr+1] = msg.linear.y
         
-        # 주행 방향에 맞춰 회전각 동기화 (움직임이 있을 때만)
         if abs(msg.linear.x) > 0.01 or abs(msg.linear.y) > 0.01:
             yaw = math.atan2(msg.linear.y, msg.linear.x)
             self.data.qpos[qpos_adr+3] = math.cos(yaw/2.0)
@@ -267,11 +262,8 @@ class MujocoRosBridge(Node):
         msg.pose.orientation.z = float(quat[3])
         publisher.publish(msg)
 
+    # /cmd_vel_nav 콜백 함수
     def cmd_vel_callback(self, msg: Twist):
-        """
-        ctrlrange=±7.58, wheel radius=0.033 m > 최대 선속도: 0.25m/s
-        track_width = 0.160 m > 최대 각속도: 3.13 rad/s > 1.0 rad/s으로 제한
-        """
         v = np.clip(msg.linear.x, -self.max_linear_vel, self.max_linear_vel)
         w = np.clip(msg.angular.z, -self.max_angular_vel, self.max_angular_vel)
 
@@ -393,7 +385,38 @@ class MujocoRosBridge(Node):
         except Exception as e:
             self.get_logger().error(f"Scan publish error: {e}", once=True)
 
-    # RGB 및 Depth 카메라 통합 Publish
+    def _get_camera_info(self, stamp) -> CameraInfo:
+        cam_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, "patrol_camera")
+        fovy = self.model.cam_fovy[cam_id] if cam_id != -1 else 45.0
+
+        fovy_rad = math.radians(fovy)
+        fy = (self.img_height / 2.0) / math.tan(fovy_rad / 2.0)
+        fx = fy
+        cx = self.img_width / 2.0
+        cy = self.img_height / 2.0
+
+        info = CameraInfo()
+        info.header.stamp = stamp
+        info.header.frame_id = "camera_link"
+        info.height = self.img_height
+        info.width = self.img_width
+        info.distortion_model = "plumb_bob"
+        info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
+        
+        info.k = [fx, 0.0, cx,
+                  0.0, fy, cy,
+                  0.0, 0.0, 1.0]
+                  
+        info.r = [1.0, 0.0, 0.0,
+                  0.0, 1.0, 0.0,
+                  0.0, 0.0, 1.0]
+                  
+        info.p = [fx, 0.0, cx, 0.0,
+                  0.0, fy, cy, 0.0,
+                  0.0, 0.0, 1.0, 0.0]
+
+        return info
+
     def publish_camera(self, stamp):
         with self.camera_lock:
             if self.camera_image is None or self.depth_image is None:
@@ -402,17 +425,18 @@ class MujocoRosBridge(Node):
             rgb_pixels = self.camera_image.copy()
             depth_pixels = self.depth_image.copy()
 
-        # 1. RGB Image Publish
         rgb_msg = self.cv_bridge.cv2_to_imgmsg(rgb_pixels, encoding="rgb8")
         rgb_msg.header.stamp = stamp
         rgb_msg.header.frame_id = "camera_link"
         self.camera_pub.publish(rgb_msg)
 
-        # 2. Depth Image Publish (32FC1 - meters 단위)
         depth_msg = self.cv_bridge.cv2_to_imgmsg(depth_pixels.astype(np.float32), encoding="32FC1")
         depth_msg.header.stamp = stamp
         depth_msg.header.frame_id = "camera_link"
         self.depth_pub.publish(depth_msg)
+
+        camera_info_msg = self._get_camera_info(stamp)
+        self.camera_info_pub.publish(camera_info_msg)
 
     def get_sim_stamp(self):
         stamp = Time()
@@ -430,7 +454,6 @@ def main():
     rclpy.init()
 
     BASE_DIR = Path(__file__).resolve().parent
-    # 10x10 factory - patrol_10x10_factory.xml
     xml_path = BASE_DIR.parent / "scenes" / "patrol_20x20_factory.xml"
 
     print(f"Loading model from: {xml_path}")
@@ -442,15 +465,13 @@ def main():
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
 
-        # LiDAR ray 표시 끄기
         viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_RANGEFINDER] = 0
 
         print("터틀봇 실내 순찰 시뮬레이션 및 ROS2 브릿지 시작...")
 
         node = MujocoRosBridge(model, data)
-        node.renderer = mujoco.Renderer(model, 480, 640)
+        node.renderer = mujoco.Renderer(model, node.img_height, node.img_width)
 
-        # Camera renderer visualization option
         node.render_option = mujoco.MjvOption()
         node.render_option.flags[mujoco.mjtVisFlag.mjVIS_RANGEFINDER] = 0
         node.render_option.sitegroup[5] = 0
@@ -464,10 +485,9 @@ def main():
 
         viewer.cam.lookat[:] = [0, 0, 0]
         viewer.cam.distance = 28
-        viewer.cam.azimuth = 90  # +y 방향
+        viewer.cam.azimuth = 90
         viewer.cam.elevation = -90
 
-        # 뷰어 동기화(sync) 프레임 제한 변수 (60Hz)
         sync_interval = 1.0 / 60.0
         last_sync_time = time.time()
 
@@ -475,10 +495,8 @@ def main():
 
             step_start = time.time()
 
-            # MuJoCo physics step
             mujoco.mj_step(model, data)
 
-            # viewer.sync() 60Hz
             current_real_time = time.time()
             if (current_real_time - last_sync_time) >= sync_interval:
                 viewer.sync()
@@ -494,7 +512,6 @@ def main():
                 node.publish_forklift_pose(stamp, node.fl2_joint_id, node.fl2_pose_pub, 'forklift_2')
                 node.last_odom_time = data.time
 
-                # clock을 Odom과 동일하게 50Hz로 퍼블리시
                 clock_msg = Clock()
                 clock_msg.clock = stamp
                 node.clock_pub.publish(clock_msg)
@@ -504,16 +521,13 @@ def main():
                 node.publish_scan(stamp)
                 node.last_scan_time = node.sim_time
 
-            # 3. Camera RGB + Depth (10Hz / 0.1초 간격)
+            # 3. Camera RGB + Depth + CameraInfo (10Hz / 0.1초 간격)
             if data.time >= last_camera_time + 0.1:
                 if node.renderer is not None:
-                    # 렌더링 갱신
                     node.renderer.update_scene(data, camera="patrol_camera", scene_option=node.render_option)
                     
-                    # RGB 렌더링
                     rgb_pixels = node.renderer.render()
                     
-                    # Depth 렌더링 활성화 및 추출
                     node.renderer.enable_depth_rendering()
                     depth_pixels = node.renderer.render()
                     node.renderer.disable_depth_rendering()
@@ -526,7 +540,6 @@ def main():
 
                 last_camera_time = data.time
 
-            # realtime factor 1.0 유지
             elapsed = time.time() - step_start
             sleep_time = model.opt.timestep - elapsed
 
