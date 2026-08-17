@@ -79,10 +79,13 @@ class FusionNode3D(Node):
 
         self.bridge = CvBridge()
 
+        # ── Parameters ────────────────────────────────────────────────
+        self.declare_parameter('target_frame', 'base_link')
+        self.target_frame = self.get_parameter('target_frame').get_parameter_value().string_value
+
         # ── TF2 Listener Setup ─────────────────────────────────────────
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
-        self.target_frame = 'base_link'
 
         # ── Camera Intrinsics (CameraInfo 수신 전 기본값) ───────────────
         self.fx = 600.0
@@ -95,6 +98,7 @@ class FusionNode3D(Node):
         self.latest_depth_img: Optional[np.ndarray] = None
         self.latest_depth_encoding: str = "16UC1"
         self.latest_scan: Optional[LaserScan] = None
+        # CameraInfo header.frame_id 기준으로 설정 (depth frame_id와 다를 수 있으므로 여기서 고정)
         self.camera_frame_id: str = "camera_color_optical_frame"
 
         # EKF Trackers
@@ -132,12 +136,18 @@ class FusionNode3D(Node):
             self.fy = msg.k[4]
             self.cx = msg.k[2]
             self.cy = msg.k[5]
+            # TF 트리에 등록된 frame과 일치시키기 위해 CameraInfo의 frame_id로 고정
+            if msg.header.frame_id:
+                self.camera_frame_id = msg.header.frame_id
             self.camera_info_received = True
-            self.get_logger().info(f'Camera Intrinsics Loaded: fx={self.fx:.1f}, fy={self.fy:.1f}, cx={self.cx:.1f}, cy={self.cy:.1f}')
+            self.get_logger().info(
+                f'Camera Intrinsics Loaded: fx={self.fx:.1f}, fy={self.fy:.1f}, '
+                f'cx={self.cx:.1f}, cy={self.cy:.1f}, frame_id={self.camera_frame_id}'
+            )
 
     def _depth_callback(self, msg: Image) -> None:
         try:
-            self.camera_frame_id = msg.header.frame_id if msg.header.frame_id else "camera_color_optical_frame"
+            # camera_frame_id는 _camera_info_callback에서 고정 설정하므로 여기서 덮어쓰지 않음
             if msg.encoding in ['16UC1', 'mono16']:
                 self.latest_depth_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
                 self.latest_depth_encoding = '16UC1'
