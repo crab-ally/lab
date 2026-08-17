@@ -40,6 +40,8 @@ class PerceptionNode(Node):
 
         self.bridge = CvBridge()
 
+        self.last_warning_time = {}  # track_id: last_warn_timestamp
+
         # ── YOLOv8 모델 초기화 ─────────────────────────────────────────
         self.get_logger().info(f'Loading YOLO Model: {self.model_path}...')
         self.model = YOLO(self.model_path)
@@ -106,8 +108,9 @@ class PerceptionNode(Node):
             verbose=False
         )
 
-        # 2. DeepSORT 입력 포맷 변환: ([left, top, w, h], confidence, class_name)
+        # 2. DeepSORT 입력 포맷 변환 및 PPE 박스 추출
         deepsort_input = []
+        ppe_bboxes = []
         if results and len(results) > 0:
             boxes = results[0].boxes
             if boxes is not None and len(boxes) > 0:
@@ -116,6 +119,10 @@ class PerceptionNode(Node):
                     conf = float(box.conf[0].cpu().numpy())
                     cls_id = int(box.cls[0].cpu().numpy())
                     class_name = self.model.names[cls_id]
+
+                    # 헬멧(1) 또는 조끼(2)인 경우 PPE 박스로 저장
+                    if cls_id in [1, 2]:
+                        ppe_bboxes.append(xyxy)
 
                     # DeepSORT 포맷 [left, top, width, height]
                     left = float(xyxy[0])
@@ -141,8 +148,16 @@ class PerceptionNode(Node):
             xmin, ymin, xmax, ymax = map(float, ltrb)
             bbox = [xmin, ymin, xmax, ymax]
 
-            # PPE(안전모/조끼) 착용 여부 간이 검사 (Person 대상)
-            ppe_ok = self._check_ppe(cv_img, bbox) if class_name == 'person' else True
+            # PPE(안전모/조끼) 착용 여부 검사 (Person 대상)
+            if class_name == 'person':
+                ppe_ok = self._check_ppe(bbox, ppe_bboxes)
+                if not ppe_ok:
+                    last_warn = self.last_warning_time.get(track_id, 0.0)
+                    if stamp_sec - last_warn >= 1.0:
+                        self.get_logger().warn(f'Track ID {track_id}: PPE Not Detected!')
+                        self.last_warning_time[track_id] = stamp_sec
+            else:
+                ppe_ok = True
 
             det_item = {
                 'track_id': track_id,
@@ -174,27 +189,17 @@ class PerceptionNode(Node):
             debug_msg.header = msg.header
             self.pub_debug_img.publish(debug_msg)
 
-    def _check_ppe(self, img: np.ndarray, bbox: list[float]) -> bool:
-        """작업자(Person) 머리 영역(상단 25%) 안전모 색상 감지"""
-        h, w, _ = img.shape
-        xmin, ymin, xmax, ymax = map(int, bbox)
-        xmin, ymin = max(0, xmin), max(0, ymin)
-        xmax, ymax = min(w, xmax), min(h, ymax)
-
-        if xmax <= xmin or ymax <= ymin:
-            return False
-
-        head_roi = img[ymin:ymin + int((ymax - ymin) * 0.25), xmin:xmax]
-        if head_roi.size == 0:
-            return False
-
-        hsv = cv2.cvtColor(head_roi, cv2.COLOR_BGR2HSV)
-        yellow_lower = np.array([15, 80, 80])
-        yellow_upper = np.array([35, 255, 255])
-        mask = cv2.inRange(hsv, yellow_lower, yellow_upper)
-
-        ratio = (cv2.countNonZero(mask) / (head_roi.shape[0] * head_roi.shape[1] + 1e-5))
-        return ratio > 0.10
+    def _check_ppe(self, person_bbox: list[float], ppe_bboxes: list[np.ndarray]) -> bool:
+        """YOLO 감지 결과를 활용하여 사람 영역 내에 안전모/조끼가 있는지 확인"""
+        pxmin, pymin, pxmax, pymax = person_bbox
+        for ppe_box in ppe_bboxes:
+            exmin, eymin, exmax, eymax = ppe_box
+            
+            # PPE 박스의 중심점이 사람 박스 내부에 있는지 확인
+            cx, cy = (exmin + exmax) / 2, (eymin + eymax) / 2
+            if pxmin <= cx <= pxmax and pymin <= cy <= pymax:
+                return True
+        return False
 
     def _draw_bbox(self, img: np.ndarray, bbox: list[float], track_id: int, class_name: str, ppe_ok: bool) -> None:
         """디버그 Bounding Box 및 Track ID 시각화"""
