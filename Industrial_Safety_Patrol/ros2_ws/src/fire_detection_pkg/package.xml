@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>fire_detection_pkg</name>
+  <version>0.0.0</version>
+  <description>Fire detection and 3D sensor fusion package</description>
+  <maintainer email="user@example.com">user</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>cv_bridge</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>message_filters</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
