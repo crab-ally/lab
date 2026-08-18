@@ -20,7 +20,6 @@ setup(
     maintainer_email='user@todo.todo',
     description='ROS 2 Perception and Safety Pipeline',
     license='Apache-2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'perception_node = perception_safety_pkg.perception_node:main',
