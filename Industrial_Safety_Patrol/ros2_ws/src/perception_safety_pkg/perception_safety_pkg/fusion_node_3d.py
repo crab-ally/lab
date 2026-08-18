@@ -113,20 +113,44 @@ class FusionNode3D(Node):
 
         # ── Subscriptions & Publishers ─────────────────────────────────
         self.sub_detections = self.create_subscription(
-            String, '/detections_2d', self._detections_callback, 10
-        )
-        self.sub_depth = self.create_subscription(
-            Image, '/camera/depth/image_raw', self._depth_callback, sensor_qos
-        )
-        self.sub_info = self.create_subscription(
-            CameraInfo, '/camera/depth/camera_info', self._camera_info_callback, 10
-        )
-        self.sub_scan = self.create_subscription(
-            LaserScan, '/scan', self._scan_callback, sensor_qos
+            String,
+            '/detections_2d',
+            self._detections_callback,
+            10
         )
 
-        self.pub_tracks_3d = self.create_publisher(String, '/tracks_3d', 10)
-        self.pub_markers = self.create_publisher(MarkerArray, '/perception/debug_markers', 10)
+        self.sub_depth = self.create_subscription(
+            Image,
+            '/camera/depth/image_raw',
+            self._depth_callback,
+            sensor_qos
+        )
+
+        self.sub_info = self.create_subscription(
+            CameraInfo,
+            '/camera/depth/camera_info',
+            self._camera_info_callback,
+            10
+        )
+
+        self.sub_scan = self.create_subscription(
+            LaserScan,
+            '/scan',
+            self._scan_callback,
+            sensor_qos
+        )
+
+        self.pub_tracks_3d = self.create_publisher(
+            String,
+            '/tracks_3d',
+            10
+        )
+
+        self.pub_markers = self.create_publisher(
+            MarkerArray,
+            '/perception/debug_markers',
+            10
+        )
 
         self.get_logger().info('Node 2: 3D Fusion Node (Depth + /scan + TF) is ready.')
 
@@ -141,8 +165,10 @@ class FusionNode3D(Node):
                 self.camera_frame_id = msg.header.frame_id
             self.camera_info_received = True
             self.get_logger().info(
-                f'Camera Intrinsics Loaded: fx={self.fx:.1f}, fy={self.fy:.1f}, '
-                f'cx={self.cx:.1f}, cy={self.cy:.1f}, frame_id={self.camera_frame_id}'
+                f'Camera Intrinsics Loaded: '
+                f'fx={self.fx:.1f}, fy={self.fy:.1f}, '
+                f'cx={self.cx:.1f}, cy={self.cy:.1f}, '
+                f'frame_id={self.camera_frame_id}'
             )
 
     def _depth_callback(self, msg: Image) -> None:
@@ -180,12 +206,25 @@ class FusionNode3D(Node):
                 self.camera_frame_id,
                 rclpy.time.Time()
             )
-        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
-            self.get_logger().warn(f'TF Lookup Failed ({self.camera_frame_id} -> {self.target_frame}): {e}')
+
+        except (
+            tf2_ros.LookupException,
+            tf2_ros.ConnectivityException,
+            tf2_ros.ExtrapolationException
+        ) as e:
+
+            self.get_logger().warn(
+                f'TF Lookup Failed '
+                f'({self.camera_frame_id} -> {self.target_frame}): {e}'
+            )
             return
 
         tracks_3d_payload = []
         active_track_ids = set()
+
+        # 현재 프레임에서 3D Fusion까지 성공한 객체의 person / forklift 존재 여부를 저장할 변수
+        has_person = False
+        has_forklift = False
 
         for det in detections:
             track_id = int(det['track_id'])
@@ -221,6 +260,7 @@ class FusionNode3D(Node):
                 self.track_ekf_map[track_id] = EKF3D(base_x, base_y, stamp)
 
             ekf = self.track_ekf_map[track_id]
+
             ekf.predict(stamp)
             ekf.update(base_x, base_y)
 
@@ -235,34 +275,75 @@ class FusionNode3D(Node):
                 'confidence': confidence,
                 'stamp': stamp
             }
+
             tracks_3d_payload.append(item_3d)
+
+            # 실제 /tracks_3d에 들어가는 객체만 person / forklift 존재 여부에 포함
+            if class_name == 'person':
+                has_person = True
+
+            elif class_name == 'forklift':
+                has_forklift = True
+
+        # person / forklift 존재 여부를 하나의 상태값으로 변환
+        if has_person and has_forklift:
+            presence_state = 'BOTH'
+        elif has_person:
+            presence_state = 'PERSON_ONLY'
+        elif has_forklift:
+            presence_state = 'FORKLIFT_ONLY'
+        else:
+            presence_state = 'NONE'
 
         # 오랫동안 미감지된 Track 정리
         for trk_id in list(self.track_ekf_map.keys()):
             if trk_id not in active_track_ids:
                 self.track_ekf_map[trk_id].miss_count += 1
+
                 if self.track_ekf_map[trk_id].miss_count > 10:
                     del self.track_ekf_map[trk_id]
 
         # ── 1. /tracks_3d 토픽 발행 ────────────────────────────────────
         json_msg = String()
+
         json_msg.data = json.dumps({
-            'header': {'stamp': stamp, 'frame_id': self.target_frame},
+            'header': {
+                'stamp': stamp,
+                'frame_id': self.target_frame
+            },
+            'class_presence': {
+                'person': has_person,
+                'forklift': has_forklift,
+                'state': presence_state
+            },
             'tracks': tracks_3d_payload
         }, ensure_ascii=False)
+
         self.pub_tracks_3d.publish(json_msg)
 
         # ── 2. Debug Marker 발행 ──────────────────────────────────────
-        self._publish_markers(tracks_3d_payload)
+        self._publish_markers(
+            tracks_3d_payload
+        )
 
-    def _calculate_3d_from_depth(self, bbox: List[float]) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    def _calculate_3d_from_depth(
+        self,
+        bbox: List[float]
+    ) -> Tuple[
+        Optional[float],
+        Optional[float],
+        Optional[float]
+    ]:
         """2D BBox 중앙 ROI 영역의 Depth 데이터를 3D 좌표로 변환"""
+
         h_img, w_img = self.latest_depth_img.shape[:2]
         xmin, ymin, xmax, ymax = map(int, bbox)
 
-        # ROI 좁히기 (BBox 중앙 50% 영역만 사용해 경계선 노이즈 제거)
+        # ROI 좁히기
+        # (BBox 중앙 50% 영역만 사용해 경계선 노이즈 제거)
         cx_box = (xmin + xmax) / 2.0
         cy_box = (ymin + ymax) / 2.0
+
         w_box = (xmax - xmin) * 0.5
         h_box = (ymax - ymin) * 0.5
 
@@ -274,20 +355,32 @@ class FusionNode3D(Node):
         if rx2 <= rx1 or ry2 <= ry1:
             return None, None, None
 
-        depth_roi = self.latest_depth_img[ry1:ry2, rx1:rx2]
+        depth_roi = self.latest_depth_img[
+            ry1:ry2,
+            rx1:rx2
+        ]
 
         # 단위 정규화 (미터 단위)
         if self.latest_depth_encoding == '16UC1':
-            valid_depths = depth_roi[depth_roi > 0] / 1000.0
+            valid_depths = (
+                depth_roi[depth_roi > 0] / 1000.0
+            )
+
         else:
-            valid_depths = depth_roi[~np.isnan(depth_roi) & (depth_roi > 0.1)]
+            valid_depths = depth_roi[
+                ~np.isnan(depth_roi) &
+                (depth_roi > 0.1)
+            ]
 
         if len(valid_depths) == 0:
             return None, None, None
 
         # Depth 대표값 (중앙값 사용)
-        z_cam = float(np.median(valid_depths))
-        if z_cam < 0.2 or z_cam > 15.0: # 유효 거리 초과 시 무시
+        z_cam = float(
+            np.median(valid_depths)
+        )
+
+        if z_cam < 0.2 or z_cam > 15.0:
             return None, None, None
 
         # Pin-hole Camera Model 역투영
@@ -296,75 +389,135 @@ class FusionNode3D(Node):
 
         return x_cam, y_cam, z_cam
 
-    def _refine_with_scan(self, cam_x: float, cam_z: float) -> float:
+    def _refine_with_scan(
+        self,
+        cam_x: float,
+        cam_z: float
+    ) -> float:
         """2D LiDAR /scan 데이터로 Depth 센서 측정거리 보정"""
+
         if self.latest_scan is None:
             return cam_z
 
         # 카메라의 Horizontal Angle (azimuth) 계산
-        angle_rad = math.atan2(cam_x, cam_z)
+        angle_rad = math.atan2(
+            cam_x,
+            cam_z
+        )
 
         # /scan 해상도 내 해당 각도 index 계산
         scan = self.latest_scan
-        if angle_rad < scan.angle_min or angle_rad > scan.angle_max:
+
+        if (
+            angle_rad < scan.angle_min or
+            angle_rad > scan.angle_max
+        ):
             return cam_z
 
-        idx = int((angle_rad - scan.angle_min) / scan.angle_increment)
+        idx = int(
+            (angle_rad - scan.angle_min) /
+            scan.angle_increment
+        )
+
         if 0 <= idx < len(scan.ranges):
             scan_dist = scan.ranges[idx]
             if scan.range_min <= scan_dist <= scan.range_max:
                 # Depth와 Scan 오차가 0.5m 이내일 경우 보정 융합 (가중 평균)
                 if abs(scan_dist - cam_z) < 0.5:
-                    return 0.7 * cam_z + 0.3 * scan_dist
+                    return (
+                        0.7 * cam_z +
+                        0.3 * scan_dist
+                    )
 
         return cam_z
 
-    def _publish_markers(self, tracks: List[dict]) -> None:
+    def _publish_markers(
+        self,
+        tracks: List[dict]
+    ) -> None:
         """RViz2 시각화 마커 발행"""
+
         marker_array = MarkerArray()
 
         for trk in tracks:
             marker = Marker()
+
             marker.header.frame_id = self.target_frame
-            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.header.stamp = (
+                self.get_clock().now().to_msg()
+            )
+
             marker.ns = "tracks_3d"
             marker.id = trk['track_id']
             marker.type = Marker.CUBE
             marker.action = Marker.ADD
 
             pos = trk['position']
+
             marker.pose.position.x = float(pos[0])
             marker.pose.position.y = float(pos[1])
             marker.pose.position.z = float(pos[2])
             marker.pose.orientation.w = 1.0
 
             if trk['class_name'] == 'person':
-                marker.scale.x, marker.scale.y, marker.scale.z = 0.6, 0.6, 1.7
-            else:
-                marker.scale.x, marker.scale.y, marker.scale.z = 2.0, 1.2, 1.8
+                marker.scale.x = 0.6
+                marker.scale.y = 0.6
+                marker.scale.z = 1.7
 
-            if trk['class_name'] == 'person' and not trk['ppe_ok']:
-                marker.color.r, marker.color.g, marker.color.b, marker.color.a = 1.0, 0.0, 0.0, 0.8
             else:
-                marker.color.r, marker.color.g, marker.color.b, marker.color.a = 0.0, 0.8, 0.2, 0.8
+                marker.scale.x = 2.0
+                marker.scale.y = 1.2
+                marker.scale.z = 1.8
+
+            if (
+                trk['class_name'] == 'person' and
+                not trk['ppe_ok']
+            ):
+                marker.color.r = 1.0
+                marker.color.g = 0.0
+                marker.color.b = 0.0
+                marker.color.a = 0.8
+
+            else:
+                marker.color.r = 0.0
+                marker.color.g = 0.8
+                marker.color.b = 0.2
+                marker.color.a = 0.8
 
             marker_array.markers.append(marker)
 
             # Text Marker
             text_marker = Marker()
+
             text_marker.header = marker.header
             text_marker.ns = "tracks_3d_text"
-            text_marker.id = trk['track_id'] + 10000
+            text_marker.id = (
+                trk['track_id'] + 10000
+            )
+
             text_marker.type = Marker.TEXT_VIEW_FACING
             text_marker.action = Marker.ADD
+
             text_marker.pose.position.x = float(pos[0])
             text_marker.pose.position.y = float(pos[1])
-            text_marker.pose.position.z = float(pos[2]) + 1.2
-            
+            text_marker.pose.position.z = (
+                float(pos[2]) + 1.2
+            )
+
             vx, vy = trk['velocity']
-            text_marker.text = f"ID:{trk['track_id']} ({trk['class_name']})\nV:{math.hypot(vx, vy):.1f}m/s"
+
+            text_marker.text = (
+                f"ID:{trk['track_id']} "
+                f"({trk['class_name']})\n"
+                f"V:{math.hypot(vx, vy):.1f}m/s"
+            )
+
             text_marker.scale.z = 0.4
-            text_marker.color.r, text_marker.color.g, text_marker.color.b, text_marker.color.a = 1.0, 1.0, 1.0, 1.0
+
+            text_marker.color.r = 1.0
+            text_marker.color.g = 1.0
+            text_marker.color.b = 1.0
+            text_marker.color.a = 1.0
 
             marker_array.markers.append(text_marker)
 
@@ -373,11 +526,17 @@ class FusionNode3D(Node):
 
 def main(args=None) -> None:
     rclpy.init(args=args)
+
     node = FusionNode3D()
+
     try:
         rclpy.spin(node)
+
     except KeyboardInterrupt:
-        node.get_logger().info('3D Fusion Node Stopped.')
+        node.get_logger().info(
+            '3D Fusion Node Stopped.'
+        )
+
     finally:
         node.destroy_node()
         rclpy.shutdown()
