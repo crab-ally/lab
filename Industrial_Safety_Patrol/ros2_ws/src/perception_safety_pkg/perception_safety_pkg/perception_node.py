@@ -164,7 +164,6 @@ class PerceptionNode(Node):
                 'class_name': class_name,
                 'confidence': round(float(track.get_det_conf() or 1.0), 3),
                 'bbox': [round(v, 1) for v in bbox], # [xmin, ymin, xmax, ymax]
-                'ppe_ok': ppe_ok,
                 'stamp': stamp_sec
             }
             detections_payload.append(det_item)
