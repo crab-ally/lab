@@ -3,25 +3,26 @@
 Node 4: Twist Mux Node
 
 Priority:
-    1. EMERGENCY  -> 정지
-    2. WARNING    -> 현재 명령 감속
-    3. TELEOP     -> 수동 조작
-    4. NAV2       -> 자율주행
-    5. timeout    -> 정지
+1. EMERGENCY -> 정지
+2. WARNING   -> 현재 명령 감속
+3. TELEOP    -> 수동 조작
+4. NAV2      -> 자율주행
+5. timeout   -> 정지
 
 Subscribes:
-    - /cmd_vel_nav
-    - /cmd_vel_teleop
-    - /ttc_alerts
+- /cmd_vel_nav
+- /cmd_vel_teleop
+- /ttc_alerts
 
 Publishes:
-    - /cmd_vel
+- /cmd_vel
 """
 
 import json
 
 import rclpy
 from rclpy.node import Node
+
 from std_msgs.msg import String
 from geometry_msgs.msg import Twist
 
@@ -52,8 +53,9 @@ class TwistMuxNode(Node):
         self.latest_teleop_cmd = Twist()
 
         self.last_nav_time = 0.0
-        self.last_teleop_time = 0.0
         self.last_alert_time = 0.0
+
+        self.teleop_received = False
 
         # 현재 TTC 위험 상태
         self.current_risk_level = "NORMAL"
@@ -84,7 +86,7 @@ class TwistMuxNode(Node):
             10
         )
 
-        # ── Publisher ────────────────────────────────────────────────
+        # ── Publisher ─────────────────────────────────────────────────
         self.pub_final_cmd_vel = self.create_publisher(
             Twist,
             '/cmd_vel',
@@ -107,20 +109,22 @@ class TwistMuxNode(Node):
 
     def _nav_cmd_callback(self, msg: Twist) -> None:
         """Nav2 명령 수신"""
+
         self.latest_nav_cmd = msg
+
         self.last_nav_time = (
             self.get_clock().now().nanoseconds * 1e-9
         )
 
     def _teleop_cmd_callback(self, msg: Twist) -> None:
         """Teleop 명령 수신"""
+
         self.latest_teleop_cmd = msg
-        self.last_teleop_time = (
-            self.get_clock().now().nanoseconds * 1e-9
-        )
+        self.teleop_received = True
 
     def _ttc_alerts_callback(self, msg: String) -> None:
         """TTC 위험 상태 수신"""
+
         try:
             payload = json.loads(msg.data)
 
@@ -160,7 +164,11 @@ class TwistMuxNode(Node):
                 'TTC Alert stream timeout! Safety stop applied.'
             )
 
+            self.last_alert_time = 0.0
+
             self.pub_final_cmd_vel.publish(final_cmd)
+
+            # 정지
             return
 
         # --------------------------------------------------------------
@@ -173,16 +181,17 @@ class TwistMuxNode(Node):
             final_cmd.linear.y = 0.0
             final_cmd.angular.z = 0.0
 
+            self.teleop_received = False
+
         # --------------------------------------------------------------
         # 3. WARNING
         # --------------------------------------------------------------
         elif self.current_risk_level == "WARNING":
 
             # Teleop이 최근에 들어왔다면 Teleop 우선
-            if (
-                now - self.last_teleop_time
-                <= self.cmd_timeout
-            ):
+            if self.teleop_received:
+
+                # 감속
                 final_cmd.linear.x = (
                     self.latest_teleop_cmd.linear.x
                     * self.slowdown_ratio
@@ -199,10 +208,9 @@ class TwistMuxNode(Node):
                 )
 
             # Teleop이 없으면 Nav2
-            elif (
-                now - self.last_nav_time
-                <= self.cmd_timeout
-            ):
+            elif now - self.last_nav_time <= self.cmd_timeout:
+
+                # 감속
                 final_cmd.linear.x = (
                     self.latest_nav_cmd.linear.x
                     * self.slowdown_ratio
@@ -229,27 +237,15 @@ class TwistMuxNode(Node):
         # --------------------------------------------------------------
         else:
 
-            # ----------------------------------------------------------
             # Teleop 우선
-            # ----------------------------------------------------------
-            if (
-                now - self.last_teleop_time
-                <= self.cmd_timeout
-            ):
+            if self.teleop_received:
                 final_cmd = self.latest_teleop_cmd
 
-            # ----------------------------------------------------------
             # Teleop이 없으면 Nav2
-            # ----------------------------------------------------------
-            elif (
-                now - self.last_nav_time
-                <= self.cmd_timeout
-            ):
+            elif now - self.last_nav_time <= self.cmd_timeout:
                 final_cmd = self.latest_nav_cmd
 
-            # ----------------------------------------------------------
             # 둘 다 없으면 정지
-            # ----------------------------------------------------------
             else:
                 final_cmd.linear.x = 0.0
                 final_cmd.linear.y = 0.0
