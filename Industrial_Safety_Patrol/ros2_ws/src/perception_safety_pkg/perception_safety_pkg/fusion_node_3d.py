@@ -400,7 +400,9 @@ class FusionNode3D(Node):
             return cam_z
 
         # 카메라의 Horizontal Angle (azimuth) 계산
-        angle_rad = math.atan2(
+        # 카메라 Optical 프레임은 오른쪽이 +X축이므로, 
+        # ROS 표준 LiDAR(CCW: 왼쪽이 +각도, 오른쪽이 -각도)와 맞추기 위해 부호 반전(-) 적용
+        angle_rad = -math.atan2(
             cam_x,
             cam_z
         )
