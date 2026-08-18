@@ -23,9 +23,10 @@ version: "3.8"
   #  ├── nav2
   #  └── rviz
 
-  # --profile vision
+  # --profile vision / fire
   #  │
-  #  └── perception_safety
+  #  ├── perception_safety
+  #  └── fire_detection
   # ===========================================================================
 
 services:
@@ -528,6 +529,55 @@ services:
       - ./models:/workspace/models
 
     environment:
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+    depends_on:
+      - robot_sim
+
+    networks:
+      - patrol_network
+
+  # ===========================================================================
+  # Fire Detection & 3D Sensor Fusion
+  #
+  # RGB + Depth + LiDAR + TF
+  #       ↓
+  # Fire Detection & Fire Fusion Node
+  #       ↓
+  # /fire_tracks_3d, /fire_alarm, /camera/fire_detection/image
+  # ===========================================================================
+
+  fire_detection:
+
+    build:
+      context: .
+      target: robot
+
+    container_name: safety_patrol_fire_detection
+
+    profiles:
+      - vision
+      - fire
+
+    stdin_open: true
+    tty: true
+
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      source /workspace/ros2_ws/install/setup.bash &&
+      ros2 launch fire_detection_pkg fire_pipeline.launch.py"
+
+    volumes:
+      - ./ros2_ws:/workspace/ros2_ws
+      - ./config:/workspace/config
+      - /tmp/.X11-unix:/tmp/.X11-unix
+
+    environment:
+      - DISPLAY=host.docker.internal:0.0
+      - LIBGL_ALWAYS_SOFTWARE=1
+      - QT_X11_NO_MITSHM=1
       - ROS_DOMAIN_ID=50
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
