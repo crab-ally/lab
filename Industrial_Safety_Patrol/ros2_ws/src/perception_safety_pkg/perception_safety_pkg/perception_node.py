@@ -120,11 +120,12 @@ class PerceptionNode(Node):
                     cls_id = int(box.cls[0].cpu().numpy())
                     class_name = self.model.names[cls_id]
 
-                    # 헬멧(1) 또는 조끼(2)인 경우 PPE 박스로 저장
+                    # 헬멧(1) 또는 조끼(2)인 경우 PPE 박스로만 저장 (DeepSORT 추적 대상에서 제외)
                     if cls_id in [1, 2]:
                         ppe_bboxes.append(xyxy)
+                        continue
 
-                    # DeepSORT 포맷 [left, top, width, height]
+                    # DeepSORT 포맷 [left, top, width, height] (person, forklift 등 주 객체만 추적)
                     left = float(xyxy[0])
                     top = float(xyxy[1])
                     w = float(xyxy[2] - xyxy[0])
