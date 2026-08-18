@@ -33,6 +33,12 @@ from rclpy.qos import ReliabilityPolicy
 from rclpy.qos import DurabilityPolicy
 
 class MujocoRosBridge(Node):
+    # ── 주파수 및 뷰어 상수 (Magic Number 제거) ──────────────────────
+    ODOM_INTERVAL   = 1.0 / 50   # 0.020 s → 50 Hz
+    SCAN_INTERVAL   = 1.0 / 10   # 0.100 s → 10 Hz
+    CAMERA_INTERVAL = 1.0 / 10   # 0.100 s → 10 Hz
+    VIEWER_HZ       = 60
+
     def __init__(self, model, data):
         super().__init__(
             'mujoco_ros_bridge',
@@ -136,12 +142,20 @@ class MujocoRosBridge(Node):
         self.origin_quat_inv = np.zeros(4)
         mujoco.mju_negQuat(self.origin_quat_inv, self.origin_quat)
 
+        # odom 계산용 재사용 버퍼 (매 50Hz 호출마다 할당 방지)
+        self._buf_quat_inv     = np.zeros(4)
+        self._buf_vel_base     = np.zeros(3)
+        self._buf_ang_vel_base = np.zeros(3)
+        self._buf_quat_odom    = np.zeros(4)
+        self._buf_pos_odom     = np.zeros(3)
+
         self.get_logger().info(
             f"Odom origin captured — world pos={self.origin_pos.tolist()}, "
             f"world quat={self.origin_quat.tolist()}"
         )
 
         self._publish_static_transforms()
+        self._init_camera_params()  # 카메라 파라미터 1회 계산 후 캐싱
 
         self.get_logger().info(
             f"MuJoCo-ROS2 Bridge Node initialized "
@@ -208,19 +222,21 @@ class MujocoRosBridge(Node):
             )
         self.lidar_mode = "replicated"
         self.lidar_sensor_ids = replicated[: self.lidar_beam_count]
+        # numpy fancy-indexing을 위한 sensordata 주소 배열 사전 계산
+        self._lidar_adrs = np.array(
+            [self.model.sensor_adr[sid] for _, sid in self.lidar_sensor_ids],
+            dtype=np.intp,
+        )
 
     def _read_lidar_ranges(self):
         if self.lidar_mode == "combined":
             sensor_id = self.lidar_sensor_id
             adr = self.model.sensor_adr[sensor_id]
             dim = self.model.sensor_dim[sensor_id]
-            return list(self.data.sensordata[adr : adr + dim])
+            return self.data.sensordata[adr : adr + dim].tolist()
 
-        ranges = []
-        for _, sensor_id in self.lidar_sensor_ids:
-            adr = self.model.sensor_adr[sensor_id]
-            ranges.append(float(self.data.sensordata[adr]))
-        return ranges
+        # numpy fancy indexing으로 360번 Python 루프 제거
+        return self.data.sensordata[self._lidar_adrs].tolist()
 
     def _apply_forklift_vel(self, msg: Twist, joint_id):
         if joint_id == -1: return
@@ -287,46 +303,39 @@ class MujocoRosBridge(Node):
             vel = self.data.qvel[qvel_adr : qvel_adr + 3]
             ang_vel = self.data.qvel[qvel_adr + 3 : qvel_adr + 6]
 
-            quat_world_inv = np.zeros(4)
-            mujoco.mju_negQuat(quat_world_inv, quat_world)
-
-            vel_base = np.zeros(3)
-            mujoco.mju_rotVecQuat(vel_base, vel, quat_world_inv)
-
-            ang_vel_base = np.zeros(3)
-            mujoco.mju_rotVecQuat(ang_vel_base, ang_vel, quat_world_inv)
+            # 재사용 버퍼 활용 (매 50Hz new-alloc 방지)
+            mujoco.mju_negQuat(self._buf_quat_inv, quat_world)
+            mujoco.mju_rotVecQuat(self._buf_vel_base, vel, self._buf_quat_inv)
+            mujoco.mju_rotVecQuat(self._buf_ang_vel_base, ang_vel, self._buf_quat_inv)
 
             diff = pos_world - self.origin_pos
-            pos_odom = np.zeros(3)
-            mujoco.mju_rotVecQuat(pos_odom, diff, self.origin_quat_inv)
-
-            quat_odom = np.zeros(4)
-            mujoco.mju_mulQuat(quat_odom, self.origin_quat_inv, quat_world)
+            mujoco.mju_rotVecQuat(self._buf_pos_odom, diff, self.origin_quat_inv)
+            mujoco.mju_mulQuat(self._buf_quat_odom, self.origin_quat_inv, quat_world)
 
             msg = Odometry()
             msg.header.stamp = stamp
             msg.header.frame_id = 'odom'
             msg.child_frame_id = 'base_footprint'
 
-            msg.pose.pose.position.x = float(pos_odom[0])
-            msg.pose.pose.position.y = float(pos_odom[1])
-            msg.pose.pose.position.z = float(pos_odom[2])
+            msg.pose.pose.position.x = float(self._buf_pos_odom[0])
+            msg.pose.pose.position.y = float(self._buf_pos_odom[1])
+            msg.pose.pose.position.z = float(self._buf_pos_odom[2])
 
-            msg.pose.pose.orientation.w = float(quat_odom[0])
-            msg.pose.pose.orientation.x = float(quat_odom[1])
-            msg.pose.pose.orientation.y = float(quat_odom[2])
-            msg.pose.pose.orientation.z = float(quat_odom[3])
+            msg.pose.pose.orientation.w = float(self._buf_quat_odom[0])
+            msg.pose.pose.orientation.x = float(self._buf_quat_odom[1])
+            msg.pose.pose.orientation.y = float(self._buf_quat_odom[2])
+            msg.pose.pose.orientation.z = float(self._buf_quat_odom[3])
 
-            msg.twist.twist.linear.x = float(vel_base[0])
-            msg.twist.twist.linear.y = float(vel_base[1])
-            msg.twist.twist.linear.z = float(vel_base[2])
+            msg.twist.twist.linear.x = float(self._buf_vel_base[0])
+            msg.twist.twist.linear.y = float(self._buf_vel_base[1])
+            msg.twist.twist.linear.z = float(self._buf_vel_base[2])
 
-            msg.twist.twist.angular.x = float(ang_vel_base[0])
-            msg.twist.twist.angular.y = float(ang_vel_base[1])
-            msg.twist.twist.angular.z = float(ang_vel_base[2])
+            msg.twist.twist.angular.x = float(self._buf_ang_vel_base[0])
+            msg.twist.twist.angular.y = float(self._buf_ang_vel_base[1])
+            msg.twist.twist.angular.z = float(self._buf_ang_vel_base[2])
 
             self.odom_pub.publish(msg)
-            self._publish_tf(stamp, pos_odom, quat_odom)
+            self._publish_tf(stamp, self._buf_pos_odom, self._buf_quat_odom)
         except Exception as e:
             self.get_logger().error(f"Odom publish error: {e}", once=True)
 
@@ -371,21 +380,18 @@ class MujocoRosBridge(Node):
             msg.range_min = 0.12
             msg.range_max = 3.5
 
-            clean_ranges = []
-            for r in sensor_data:
-                val = float(r)
-                if val >= msg.range_max - 0.05 or val < msg.range_min:
-                    clean_ranges.append(float("inf"))
-                else:
-                    clean_ranges.append(val)
-
-            msg.ranges = clean_ranges
+            # numpy 벡터 연산으로 Python 루프 제거 (360 iter → 1 array op)
+            arr = np.array(sensor_data, dtype=np.float32)
+            invalid = (arr >= msg.range_max - 0.05) | (arr < msg.range_min)
+            arr[invalid] = np.inf
+            msg.ranges = arr.tolist()
             self.scan_pub.publish(msg)
 
         except Exception as e:
             self.get_logger().error(f"Scan publish error: {e}", once=True)
 
-    def _get_camera_info(self, stamp) -> CameraInfo:
+    def _init_camera_params(self):
+        """카메라 내부 파라미터를 한 번만 계산해 캐싱 (10Hz 반복 연산 방지)"""
         cam_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, "patrol_camera")
         fovy = self.model.cam_fovy[cam_id] if cam_id != -1 else 45.0
 
@@ -395,6 +401,12 @@ class MujocoRosBridge(Node):
         cx = self.img_width / 2.0
         cy = self.img_height / 2.0
 
+        self._cam_K = [fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]
+        self._cam_R = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        self._cam_P = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
+
+    def _get_camera_info(self, stamp) -> CameraInfo:
+        """캐싱된 파라미터로 CameraInfo 조립 (stamp만 매 프레임 갱신)"""
         info = CameraInfo()
         info.header.stamp = stamp
         info.header.frame_id = "camera_link"
@@ -402,28 +414,19 @@ class MujocoRosBridge(Node):
         info.width = self.img_width
         info.distortion_model = "plumb_bob"
         info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
-        
-        info.k = [fx, 0.0, cx,
-                  0.0, fy, cy,
-                  0.0, 0.0, 1.0]
-                  
-        info.r = [1.0, 0.0, 0.0,
-                  0.0, 1.0, 0.0,
-                  0.0, 0.0, 1.0]
-                  
-        info.p = [fx, 0.0, cx, 0.0,
-                  0.0, fy, cy, 0.0,
-                  0.0, 0.0, 1.0, 0.0]
-
+        info.k = self._cam_K
+        info.r = self._cam_R
+        info.p = self._cam_P
         return info
 
     def publish_camera(self, stamp):
         with self.camera_lock:
             if self.camera_image is None or self.depth_image is None:
                 return
-
-            rgb_pixels = self.camera_image.copy()
-            depth_pixels = self.depth_image.copy()
+            # 메인 루프는 배열을 in-place 수정하지 않고 새 참조로 교체하므로
+            # Lock 해제 후에도 기존 참조는 안전 → copy() 불필요
+            rgb_pixels = self.camera_image
+            depth_pixels = self.depth_image
 
         rgb_msg = self.cv_bridge.cv2_to_imgmsg(rgb_pixels, encoding="rgb8")
         rgb_msg.header.stamp = stamp
@@ -446,9 +449,6 @@ class MujocoRosBridge(Node):
         )
         return stamp
 
-
-def ros_spin_thread(node):
-    rclpy.spin(node)
 
 def main():
     rclpy.init()
@@ -476,11 +476,8 @@ def main():
         node.render_option.flags[mujoco.mjtVisFlag.mjVIS_RANGEFINDER] = 0
         node.render_option.sitegroup[5] = 0
 
-        spin_thread = threading.Thread(
-            target=ros_spin_thread,
-            args=(node,),
-            daemon=True
-        )
+        # 불필요한 래퍼 함수 제거: rclpy.spin 직접 전달
+        spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
         spin_thread.start()
 
         viewer.cam.lookat[:] = [0, 0, 0]
@@ -488,7 +485,7 @@ def main():
         viewer.cam.azimuth = 90
         viewer.cam.elevation = -90
 
-        sync_interval = 1.0 / 60.0
+        sync_interval = 1.0 / MujocoRosBridge.VIEWER_HZ
         last_sync_time = time.time()
 
         while viewer.is_running() and rclpy.ok():
@@ -506,7 +503,7 @@ def main():
             stamp = node.get_sim_stamp()
 
             # 1. Odom (50Hz / 0.02초 간격)
-            if data.time >= node.last_odom_time + 0.02:
+            if data.time >= node.last_odom_time + MujocoRosBridge.ODOM_INTERVAL:
                 node.publish_odom(stamp)
                 node.publish_forklift_pose(stamp, node.fl1_joint_id, node.fl1_pose_pub, 'forklift_1')
                 node.publish_forklift_pose(stamp, node.fl2_joint_id, node.fl2_pose_pub, 'forklift_2')
@@ -517,12 +514,12 @@ def main():
                 node.clock_pub.publish(clock_msg)
 
             # 2. Scan (10Hz / 0.1초 간격)
-            if data.time >= node.last_scan_time + 0.1:
+            if data.time >= node.last_scan_time + MujocoRosBridge.SCAN_INTERVAL:
                 node.publish_scan(stamp)
                 node.last_scan_time = node.sim_time
 
             # 3. Camera RGB + Depth + CameraInfo (10Hz / 0.1초 간격)
-            if data.time >= last_camera_time + 0.1:
+            if data.time >= last_camera_time + MujocoRosBridge.CAMERA_INTERVAL:
                 if node.renderer is not None:
                     node.renderer.update_scene(data, camera="patrol_camera", scene_option=node.render_option)
                     
@@ -540,11 +537,11 @@ def main():
 
                 last_camera_time = data.time
 
-            elapsed = time.time() - step_start
-            sleep_time = model.opt.timestep - elapsed
-
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+            # deadline 기반 sleep: 중간 연산 시간 누적 방지
+            deadline = step_start + model.opt.timestep
+            remaining = deadline - time.time()
+            if remaining > 0:
+                time.sleep(remaining)
 
         print("시뮬레이션 종료 중...")
         node.destroy_node()
