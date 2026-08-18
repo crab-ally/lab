@@ -1051,3 +1051,33 @@ ENV PATH="/opt/venv/bin:$PATH"
 ```
 
 설정을 통해 /opt/venv/bin/colcon이 우선 사용되도록 구성.
+
+---
+
+# 25. teleop 토픽 발행
+
+## 파일
+
+`scripts/twist_mux_node.py`
+
+## 문제
+
+teleop로 속도 명령을 내려도 로봇이 바로 정지함
+
+## 원인
+
+```py
+if (now - self.last_teleop_time <= self.cmd_timeout):
+```
+
+teleop는 키보드 입력을 할 때만 발행하기에 추가 명령이 없으면 토픽 발행이 없어 timeout이 됨
+
+## 해결
+
+```py
+# 신규 변수
+self.teleop_received = False
+
+# 조건 변경
+if self.teleop_received:
+```
