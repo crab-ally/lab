@@ -24,12 +24,13 @@ slam_params_file:=/workspace/config/slam_toolbox_factory.yaml
 
 # ==================== Detection ====================
 
-# 화재감지
-6. docker compose exec robot_sim bash
-6-1. python3 scripts/fire_detection_node.py
+# 화재감지 (fire_detection_node + fire_fusion_node)
+6. cd ros2_ws && colcon build --packages-select fire_detection_pkg
+6-1. docker compose --profile fire up fire_detection
 
 # yolo + ppe + sensor fusion + ttc
-7. docker compose --profile vision up perception_safety
+7. cd ros2_ws && colcon build --packages-select perception_safety_pkg
+7-1. docker compose --profile vision up perception_safety
 
 # 사람의 쓰러짐 감지(Yolo Pose 기반)
 8. docker compose exec robot_sim bash
