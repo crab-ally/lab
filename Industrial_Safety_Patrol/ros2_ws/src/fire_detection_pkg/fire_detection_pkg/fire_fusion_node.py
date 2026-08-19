@@ -13,6 +13,7 @@ PUB:
     /fire_tracks_3d
     /fire_alarm
     /fire_fusion/debug_markers
+    /camera/fire_fusion/debug_image
 """
 
 import json,math,cv2
@@ -34,22 +35,28 @@ class FireFusionNode(Node):
     def __init__(self):
         super().__init__('fire_fusion_node')
         self.bridge=CvBridge()
-        self.window_open=False
 
         self.declare_parameter('target_frame','base_link')
         self.target_frame=self.get_parameter('target_frame').value
+
         self.declare_parameter('map_frame','map')
         self.map_frame=self.get_parameter('map_frame').value
+
         self.declare_parameter('lidar_depth_tolerance',0.5)
         self.lidar_depth_tolerance=float(self.get_parameter('lidar_depth_tolerance').value)
+
         self.declare_parameter('min_depth',0.2)
         self.min_depth=float(self.get_parameter('min_depth').value)
+
         self.declare_parameter('max_depth',8.0)
         self.max_depth=float(self.get_parameter('max_depth').value)
+
         self.declare_parameter('sync_slop',0.1)
         self.sync_slop=float(self.get_parameter('sync_slop').value)
+
         self.declare_parameter('candidate_sync_tolerance',0.1)
         self.candidate_sync_tolerance=float(self.get_parameter('candidate_sync_tolerance').value)
+
         self.declare_parameter('lidar_sync_tolerance',0.15)
         self.lidar_sync_tolerance=float(self.get_parameter('lidar_sync_tolerance').value)
 
@@ -85,6 +92,7 @@ class FireFusionNode(Node):
         self.pub_fire_tracks=self.create_publisher(String,'/fire_tracks_3d',10)
         self.pub_alarm=self.create_publisher(Bool,'/fire_alarm',10)
         self.pub_markers=self.create_publisher(MarkerArray,'/fire_fusion/debug_markers',10)
+        self.pub_debug_image=self.create_publisher(Image,'/camera/fire_fusion/debug_image',10)
 
         self.get_logger().info(f'Fire Fusion Node started')
 
@@ -280,11 +288,20 @@ class FireFusionNode(Node):
         self._publish_markers(fire_tracks)
 
         if fire_tracks:
-            self._show_final_fire(rgb_image,fire_tracks)
+            self._publish_debug_image(
+                rgb_image,
+                fire_tracks,
+                synced_frame['rgb_header']
+            )
+
             for fire in fire_tracks:
-                self.get_logger().warn(f'FIRE DETECTED id={fire["fire_id"]} base={fire["position"]} map={fire["position_map"]} depth={fire["depth"]:.2f}m lidar={fire["lidar_distance"]}')
-        else:
-            self._close_debug_window()
+                self.get_logger().warn(
+                    f'FIRE DETECTED id={fire["fire_id"]} '
+                    f'base={fire["position"]} '
+                    f'map={fire["position_map"]} '
+                    f'depth={fire["depth"]:.2f}m '
+                    f'lidar={fire["lidar_distance"]}'
+                )
 
     def _calculate_3d_from_depth(self,bbox:List[float])->Optional[Tuple[float,float,float]]:
         if self.latest_depth_img is None:return None
@@ -413,8 +430,9 @@ class FireFusionNode(Node):
 
         return not plane_like
 
-    def _show_final_fire(self,image,fires):
-        if image is None:return
+    def _publish_debug_image(self,image,fires,header):
+        if image is None or not fires:
+            return
 
         display=image.copy()
 
@@ -425,22 +443,28 @@ class FireFusionNode(Node):
 
             label=f'FINAL FIRE ID:{fire["fire_id"]} D:{fire["depth"]:.2f}m'
 
-            cv2.putText(display,label,(x1,max(y1-10,25)),cv2.FONT_HERSHEY_SIMPLEX,0.6,(0,0,255),2)
-
-        cv2.imshow('Final Fire Detection',display)
-        cv2.waitKey(1)
-        self.window_open=True
-
-    def _close_debug_window(self):
-        if not self.window_open:return
+            cv2.putText(
+                display,
+                label,
+                (x1,max(y1-10,25)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0,0,255),
+                2
+            )
 
         try:
-            cv2.destroyWindow('Final Fire Detection')
-            cv2.waitKey(1)
-        except Exception:
-            pass
+            debug_msg=self.bridge.cv2_to_imgmsg(
+                display,
+                encoding='bgr8'
+            )
+            debug_msg.header=header
+            self.pub_debug_image.publish(debug_msg)
 
-        self.window_open=False
+        except Exception as e:
+            self.get_logger().error(
+                f'Failed to publish debug image: {e}'
+            )
 
     def _publish_tracks(self,stamp,fires):
         output={
@@ -505,11 +529,6 @@ def main(args=None):
     except KeyboardInterrupt:
         node.get_logger().info('Fire Fusion Node stopped.')
     finally:
-        try:
-            cv2.destroyAllWindows()
-            cv2.waitKey(1)
-        except Exception:
-            pass
         node.destroy_node()
         rclpy.shutdown()
 
