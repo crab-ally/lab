@@ -27,7 +27,7 @@ class FireDetectionNode(Node):
         self.bridge=CvBridge()
         self.window_open=False
 
-        self.declare_parameter('confirm_frames',5)
+        self.declare_parameter('confirm_frames',10)
         self.declare_parameter('max_missed_frames',1)
         self.declare_parameter('bbox_iou_threshold',0.25)
         self.declare_parameter('center_distance_threshold',80.0)
