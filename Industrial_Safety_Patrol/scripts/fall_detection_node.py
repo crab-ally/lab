@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""
+입력:
+    /camera/image_raw
+
+출력:
+    /camera/fall_detection/image
+    /fall_alarm
+"""
 
 import rclpy
 from rclpy.node import Node
@@ -11,29 +19,13 @@ from ultralytics import YOLO
 
 class FallDetectionNode(Node):
     """
-    YOLO Pose 기반 쓰러짐 감지(Fall Detection) ROS2 Node
+    YOLO Pose 기반 쓰러짐 감지 ROS2 Node
 
-    작업자의 자세 클래스:
+    Pose class:
         0: fallen
         1: standing
         2: bending
         3: sitting
-
-    동작:
-        1. 새로운 사람이 Tracking 시작
-        2. 일정 프레임 동안 상태 관찰
-        3. Warm-up 종료 후 초기 상태 확정
-           - fallen이 대부분 → UNSAFE
-           - 정상 자세가 대부분 → SAFE
-        4. 이후 정상 상태에서 실제로 넘어지는 경우
-           Fall History를 이용하여 UNSAFE 판정
-
-    입력:
-        /camera/image_raw
-
-    출력:
-        /camera/fall_detection/image
-        /fall_alarm
     """
 
     def __init__(self):
@@ -45,17 +37,12 @@ class FallDetectionNode(Node):
         # YOLO Pose Model
         # ========================================================
 
-        self.get_logger().info(
-            'Loading YOLOv8-pose model...'
-        )
+        self.get_logger().info('Loading YOLOv8-pose model...')
+        self.model = YOLO('/workspace/models/fall_yolov8n_pose/best.pt')
+        self.get_logger().info('YOLOv8-pose model loaded successfully.')
 
-        self.model = YOLO(
-            '/workspace/models/fall_yolov8n_pose/best.pt'
-        )
-
-        self.get_logger().info(
-            'YOLOv8-pose model loaded successfully.'
-        )
+        # Detection Confidence
+        self.CONF_THRESHOLD = 0.5
 
         # ========================================================
         # ROS Subscribers / Publishers
@@ -84,45 +71,34 @@ class FallDetectionNode(Node):
         # Tracking
         # ========================================================
 
-        # {track_id: tracking_frames}
         self.tracking_history = {}
 
-        # Tracking 시작 후 상태를 관찰하는 프레임 수
         self.TRACKING_WARMUP_FRAMES = 10
 
         # ========================================================
         # Initial State Voting
         # ========================================================
 
-        # {track_id: fallen_count}
-        #
-        # Warm-up 10프레임 동안 fallen이 몇 번 검출됐는지 저장
         self.initial_fall_votes = {}
 
-        # Warm-up 프레임 중 이 비율 이상 fallen이면
-        # 처음부터 쓰러져 있었다고 판단
         self.INITIAL_FALL_RATIO = 0.5
 
         # ========================================================
         # Fall Detection
         # ========================================================
 
-        # {track_id: fall_frames}
         self.fall_history = {}
 
-        # 정상 상태 → 낙상 상태로 전환할 때 필요한 누적 프레임
         self.FALL_THRESHOLD_FRAMES = 20
 
         # ========================================================
-        # 현재 사람의 상태
+        # Track State
         # ========================================================
 
-        # {track_id: "tracking" / "safe" / "unsafe"}
         self.track_states = {}
 
-        self.get_logger().info(
-            'Fall Detection Node has been started.'
-        )
+        self.get_logger().info(f'Confidence threshold: {self.CONF_THRESHOLD}')
+        self.get_logger().info('Fall Detection Node has been started.')
 
     def image_callback(self, msg):
 
@@ -131,33 +107,30 @@ class FallDetectionNode(Node):
         # ========================================================
 
         try:
-
             cv_image = self.bridge.imgmsg_to_cv2(
                 msg,
                 desired_encoding='bgr8'
             )
-
         except Exception as e:
-
             self.get_logger().error(
                 f"Failed to convert image: {e}"
             )
-
             return
 
         # ========================================================
         # 2. YOLO Tracking
         # ========================================================
 
+        # 낮은 confidence detection 제거
         results = self.model.track(
             cv_image,
             persist=True,
+            conf=self.CONF_THRESHOLD,
             verbose=False
         )
 
         current_track_ids = set()
 
-        # 이번 프레임 전체 Fall Alarm
         fall_detected_global = False
 
         if results and len(results) > 0:
@@ -169,36 +142,31 @@ class FallDetectionNode(Node):
 
             if boxes is not None and keypoints is not None:
 
-                # ------------------------------------------------
                 # Track ID
-                # ------------------------------------------------
-
                 track_ids = (
                     boxes.id.int().cpu().tolist()
                     if boxes.id is not None
                     else []
                 )
 
-                # ------------------------------------------------
                 # Class ID
-                # ------------------------------------------------
-
                 classes = (
                     boxes.cls.int().cpu().tolist()
                     if boxes.cls is not None
                     else []
                 )
 
-                # ------------------------------------------------
                 # Bounding Box
-                # ------------------------------------------------
-
                 xyxy = boxes.xyxy.cpu().numpy()
 
-                # ------------------------------------------------
-                # Keypoints
-                # ------------------------------------------------
+                # Detection Confidence
+                confidences = (
+                    boxes.conf.cpu().numpy()
+                    if boxes.conf is not None
+                    else []
+                )
 
+                # Keypoints
                 kpts = keypoints.data.cpu().numpy()
 
                 # ====================================================
@@ -221,6 +189,16 @@ class FallDetectionNode(Node):
                     if track_id == -1:
                         continue
 
+                    # 이중 안전장치
+                    confidence = (
+                        float(confidences[i])
+                        if i < len(confidences)
+                        else 0.0
+                    )
+
+                    if confidence < self.CONF_THRESHOLD:
+                        continue
+
                     current_track_ids.add(track_id)
 
                     kpt = kpts[i]
@@ -235,8 +213,6 @@ class FallDetectionNode(Node):
                     # 4. 현재 클래스
                     # ====================================================
 
-                    # Custom Pose Model
-                    #
                     # 0: fallen
                     # 1: standing
                     # 2: bending
@@ -261,15 +237,12 @@ class FallDetectionNode(Node):
                     # ====================================================
 
                     if track_id not in self.initial_fall_votes:
-
                         self.initial_fall_votes[track_id] = 0
 
                     if track_id not in self.fall_history:
-
                         self.fall_history[track_id] = 0
 
                     if track_id not in self.track_states:
-
                         self.track_states[track_id] = "tracking"
 
                     # ====================================================
@@ -278,17 +251,8 @@ class FallDetectionNode(Node):
 
                     if tracking_frames <= self.TRACKING_WARMUP_FRAMES:
 
-                        # --------------------------------------------
-                        # fallen 검출 횟수 기록
-                        # --------------------------------------------
-
                         if is_falling:
-
                             self.initial_fall_votes[track_id] += 1
-
-                        # --------------------------------------------
-                        # 아직 최종 판단하지 않음
-                        # --------------------------------------------
 
                         color = (255, 255, 0)
 
@@ -296,63 +260,46 @@ class FallDetectionNode(Node):
                             f"ID:{track_id} "
                             f"TRACKING "
                             f"({tracking_frames}/"
-                            f"{self.TRACKING_WARMUP_FRAMES})"
+                            f"{self.TRACKING_WARMUP_FRAMES}) "
+                            f"Conf:{confidence:.2f}"
                         )
 
                     # ====================================================
                     # 8. Warm-up 종료 → 초기 상태 확정
                     # ====================================================
 
-                    elif (
-                        self.track_states[track_id]
-                        == "tracking"
-                    ):
+                    elif self.track_states[track_id] == "tracking":
 
                         fall_votes = (
                             self.initial_fall_votes[track_id]
                         )
 
                         fall_ratio = (
-                            fall_votes
-                            / float(self.TRACKING_WARMUP_FRAMES)
+                            fall_votes /
+                            float(self.TRACKING_WARMUP_FRAMES)
                         )
-
-                        # --------------------------------------------
-                        # 처음부터 쓰러져 있었음
-                        # --------------------------------------------
 
                         if fall_ratio >= self.INITIAL_FALL_RATIO:
 
                             self.track_states[track_id] = "unsafe"
-
-                            self.fall_history[track_id] = (
-                                self.FALL_THRESHOLD_FRAMES
-                            )
-
+                            self.fall_history[track_id] = self.FALL_THRESHOLD_FRAMES
                             fall_detected_global = True
-
                             color = (0, 0, 255)
-
                             label = (
                                 f"ID:{track_id} "
-                                f"UNSAFE (Fall)"
+                                f"UNSAFE (Fall) "
+                                f"Conf:{confidence:.2f}"
                             )
-
-                        # --------------------------------------------
-                        # 정상 상태로 시작
-                        # --------------------------------------------
 
                         else:
 
                             self.track_states[track_id] = "safe"
-
                             self.fall_history[track_id] = 0
-
                             color = (0, 255, 0)
-
                             label = (
                                 f"ID:{track_id} "
-                                f"SAFE (Normal)"
+                                f"SAFE (Normal) "
+                                f"Conf:{confidence:.2f}"
                             )
 
                     # ====================================================
@@ -360,10 +307,7 @@ class FallDetectionNode(Node):
                     # ====================================================
 
                     else:
-
-                        current_state = (
-                            self.track_states[track_id]
-                        )
+                        current_state = self.track_states[track_id]
 
                         # ==================================================
                         # 현재 UNSAFE 상태
@@ -371,13 +315,8 @@ class FallDetectionNode(Node):
 
                         if current_state == "unsafe":
 
-                            # --------------------------------------------
-                            # 이미 낙상으로 판정된 사람
-                            # --------------------------------------------
-
                             if is_falling:
 
-                                # 계속 fallen이면 UNSAFE 유지
                                 self.fall_history[track_id] = min(
                                     self.FALL_THRESHOLD_FRAMES,
                                     self.fall_history[track_id] + 1
@@ -385,16 +324,12 @@ class FallDetectionNode(Node):
 
                             else:
 
-                                # 정상 자세가 나오면 서서히 감소
                                 self.fall_history[track_id] = max(
                                     0,
                                     self.fall_history[track_id] - 2
                                 )
 
-                            # 충분히 회복되면 SAFE
-                            if (
-                                self.fall_history[track_id] == 0
-                            ):
+                            if self.fall_history[track_id] == 0:
 
                                 self.track_states[track_id] = "safe"
 
@@ -402,7 +337,8 @@ class FallDetectionNode(Node):
 
                                 label = (
                                     f"ID:{track_id} "
-                                    f"SAFE (Normal)"
+                                    f"SAFE (Normal) "
+                                    f"Conf:{confidence:.2f}"
                                 )
 
                             else:
@@ -413,7 +349,8 @@ class FallDetectionNode(Node):
 
                                 label = (
                                     f"ID:{track_id} "
-                                    f"UNSAFE (Fall)"
+                                    f"UNSAFE (Fall) "
+                                    f"Conf:{confidence:.2f}"
                                 )
 
                         # ==================================================
@@ -424,25 +361,16 @@ class FallDetectionNode(Node):
 
                             if is_falling:
 
-                                # ----------------------------------------
-                                # 정상 → fallen 전환 감시
-                                # ----------------------------------------
-
                                 self.fall_history[track_id] = (
                                     self.fall_history.get(track_id, 0) + 1
                                 )
 
                             else:
 
-                                # 정상 자세
                                 self.fall_history[track_id] = max(
                                     0,
                                     self.fall_history.get(track_id, 0) - 2
                                 )
-
-                            # --------------------------------------------
-                            # Fall 확정
-                            # --------------------------------------------
 
                             if (
                                 self.fall_history[track_id]
@@ -457,7 +385,8 @@ class FallDetectionNode(Node):
 
                                 label = (
                                     f"ID:{track_id} "
-                                    f"UNSAFE (Fall)"
+                                    f"UNSAFE (Fall) "
+                                    f"Conf:{confidence:.2f}"
                                 )
 
                             else:
@@ -466,7 +395,8 @@ class FallDetectionNode(Node):
 
                                 label = (
                                     f"ID:{track_id} "
-                                    f"SAFE (Normal)"
+                                    f"SAFE (Normal) "
+                                    f"Conf:{confidence:.2f}"
                                 )
 
                     # ====================================================
@@ -500,25 +430,15 @@ class FallDetectionNode(Node):
                     if num_kpts == 12:
 
                         skeleton_edges = [
-
-                            # Left arm
                             (1, 3),
                             (3, 5),
-
-                            # Right arm
                             (2, 4),
                             (4, 6),
-
-                            # Torso
                             (1, 2),
                             (1, 7),
                             (2, 7),
-
-                            # Left leg
                             (7, 8),
                             (8, 10),
-
-                            # Right leg
                             (7, 9),
                             (9, 11)
                         ]
@@ -526,26 +446,16 @@ class FallDetectionNode(Node):
                     else:
 
                         skeleton_edges = [
-
-                            # Left arm
                             (5, 7),
                             (7, 9),
-
-                            # Right arm
                             (6, 8),
                             (8, 10),
-
-                            # Torso
                             (5, 6),
                             (5, 11),
                             (6, 12),
                             (11, 12),
-
-                            # Left leg
                             (11, 13),
                             (13, 15),
-
-                            # Right leg
                             (12, 14),
                             (14, 16)
                         ]
@@ -576,18 +486,12 @@ class FallDetectionNode(Node):
 
                         p1, p2 = edge
 
-                        if (
-                            p1 < num_kpts
-                            and p2 < num_kpts
-                        ):
+                        if p1 < num_kpts and p2 < num_kpts:
 
                             x1_k, y1_k, conf1 = kpt[p1]
                             x2_k, y2_k, conf2 = kpt[p2]
 
-                            if (
-                                conf1 > 0.5
-                                and conf2 > 0.5
-                            ):
+                            if conf1 > 0.5 and conf2 > 0.5:
 
                                 cv2.line(
                                     cv_image,
@@ -608,25 +512,10 @@ class FallDetectionNode(Node):
 
         for track_id in finished_track_ids:
 
-            self.tracking_history.pop(
-                track_id,
-                None
-            )
-
-            self.initial_fall_votes.pop(
-                track_id,
-                None
-            )
-
-            self.fall_history.pop(
-                track_id,
-                None
-            )
-
-            self.track_states.pop(
-                track_id,
-                None
-            )
+            self.tracking_history.pop(track_id, None)
+            self.initial_fall_votes.pop(track_id, None)
+            self.fall_history.pop(track_id, None)
+            self.track_states.pop(track_id, None)
 
         # ========================================================
         # 15. 화면 출력
@@ -649,30 +538,21 @@ class FallDetectionNode(Node):
                 cv_image,
                 encoding='bgr8'
             )
-
             processed_msg.header = msg.header
 
-            self.image_pub.publish(
-                processed_msg
-            )
+            self.image_pub.publish(processed_msg)
 
         except Exception as e:
-
-            self.get_logger().error(
-                f"Failed to publish image: {e}"
-            )
+            self.get_logger().error(f"Failed to publish image: {e}")
 
         # ========================================================
         # 17. Fall Alarm Publish
         # ========================================================
 
         alert_msg = Bool()
-
         alert_msg.data = fall_detected_global
 
-        self.alert_pub.publish(
-            alert_msg
-        )
+        self.alert_pub.publish(alert_msg)
 
 
 def main(args=None):
@@ -682,27 +562,14 @@ def main(args=None):
     node = FallDetectionNode()
 
     try:
-
         rclpy.spin(node)
-
     except KeyboardInterrupt:
-
-        node.get_logger().info(
-            'Fall Detection Node stopped cleanly'
-        )
-
+        node.get_logger().info('Fall Detection Node stopped cleanly')
     except Exception as e:
-
-        node.get_logger().error(
-            f'Exception in Fall Detection Node: {e}'
-        )
-
+        node.get_logger().error(f'Exception in Fall Detection Node: {e}')
     finally:
-
         cv2.destroyAllWindows()
-
         node.destroy_node()
-
         rclpy.shutdown()
 
 
