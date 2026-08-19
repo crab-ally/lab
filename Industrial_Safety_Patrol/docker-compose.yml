@@ -1,440 +1,80 @@
 version: "3.8"
-  # ===========================================================================
-  # docker-compose up [profile이 없는 서비스]
-  # │
-  # ├── robot_sim
-  # ├── robot_state_publisher
-  # ├── db
-  # └── dashboard
-
-  # --profile teleop
-  #  │
-  #  └── teleop
-
-  # --profile slam
-  #  │
-  #  ├── slam
-  #  ├── auto_explore
-  #  ├── map_saver
-  #  └── rviz_slam
-
-  # --profile nav2
-  #  │
-  #  ├── nav2
-  #  └── rviz
-
-  # --profile vision / fire
-  #  │
-  #  ├── perception_safety
-  #  └── fire_detection
-  # ===========================================================================
 
 services:
 
-  robot_sim:
+  # ===========================================================================
+  # ROBOT CORE
+  #   - robot_sim
+  #   - robot_state_publisher
+  #   - twist_mux
+  # 실행
+  #   - docker compose up robot
+  # ===========================================================================
 
-    # Dockerfile을 이용하여 이미지 생성
+  robot:
     build:
       context: .
       target: robot
-
-    # 컨테이너 이름
     container_name: safety_patrol_robot
-
-    # 터미널 입력 허용
     stdin_open: true
-
-    # TTY 활성화
     tty: true
-
-    # OpenGL / MuJoCo 공유 메모리
     ipc: host
 
-    # 프로젝트 폴더 공유
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      source /workspace/ros2_ws/install/setup.bash &&
+      ros2 launch /workspace/launch/robot_state_publisher.launch.py &
+      python3 /workspace/scripts/twist_mux_node.py &
+      python3 /workspace/scripts/mujoco_ros_bridge.py &
+      wait"
+
     volumes:
-      - ./models:/workspace/models    # 로봇 모델
-      - ./worlds:/workspace/worlds    # World 파일
-      - ./scenes:/workspace/scenes    # MuJoCo Scene(XML)
-      - ./scripts:/workspace/scripts  # Python Script
-      - ./config:/workspace/config    # SLAM 설정
-      - ./maps:/workspace/maps        # SLAM 지도
-      - ./data:/workspace/data        # 원본 데이터
-      - ./results:/workspace/results  # 결과 저장
+      - ./models:/workspace/models
+      - ./worlds:/workspace/worlds
+      - ./scenes:/workspace/scenes
+      - ./scripts:/workspace/scripts
+      - ./config:/workspace/config
+      - ./maps:/workspace/maps
+      - ./data:/workspace/data
+      - ./results:/workspace/results
       - ./datasets:/workspace/datasets
       - ./ros2_ws:/workspace/ros2_ws
+      - ./urdf:/workspace/urdf
+      - ./launch:/workspace/launch
 
     environment:
-
-      # =======================================================
-      # MuJoCo Rendering
-      # =======================================================
-
-      # Windows(VcXsrv) - host.docker.internal:0.0
-      # Linux - export DISPLAY=:0
       - DISPLAY=host.docker.internal:0.0
-
-      # GPU가 없으면 0 유지
       - LIBGL_ALWAYS_SOFTWARE=0
-
-      # Qt 공유 메모리 문제 방지
       - QT_X11_NO_MITSHM=1
-
-      # OpenGL Backend - glfw / egl / osmesa
       - MUJOCO_GL=${MUJOCO_GL:-glfw}
-
-      # OpenGL Version
       - MESA_GL_VERSION_OVERRIDE=4.6
-
-      # =======================================================
-      # ROS2 DDS
-      # =======================================================
-
-      # 같은 Domain ID끼리만 통신
       - ROS_DOMAIN_ID=50
-
-      # DDS Middleware
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-
       - USE_SIM_TIME=true
-
-      # =======================================================
-      # Database
-      # =======================================================
-
       - DB_HOST=db
       - DB_PORT=5432
       - DB_NAME=patrol_db
       - DB_USER=admin
       - DB_PASS=password123
 
-    # Docker Network
     networks:
       - patrol_network
 
-  # ===========================================================================
-  # Robot State Publisher
-  #
-  # URDF를 읽어서 /robot_description 파라미터로 제공하고
-  # /tf_static (정적 변환)을 발행합니다.
-  # ===========================================================================
-
-  robot_state_publisher:
-
-    build:
-      context: .
-      target: robot
-
-    container_name: safety_patrol_state_publisher
-
-    command: >
-      bash -c "
-      source /opt/ros/humble/setup.bash &&
-      ros2 launch /workspace/launch/robot_state_publisher.launch.py"
-
-    volumes:
-      - ./urdf:/workspace/urdf
-      - ./launch:/workspace/launch
-
-    environment:
-      - ROS_DOMAIN_ID=50
-      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-
-    networks:
-      - patrol_network
 
   # ===========================================================================
-  # Teleoperation
-  #
-  # Keyboard → teleop_twist_keyboard → /cmd_vel → robot_sim
-  # ===========================================================================
-
-  teleop:
-
-    build:
-      context: .
-      target: robot
-
-    container_name: safety_patrol_teleop
-
-    profiles:
-      - teleop
-
-    stdin_open: true
-    tty: true
-
-    privileged: true
-
-    command: >
-      bash -c "
-      source /opt/ros/humble/setup.bash &&
-      ros2 run teleop_twist_keyboard teleop_twist_keyboard \
-      --ros-args
-      -r cmd_vel:=/cmd_vel_teleop"
-
-    environment:
-      - ROS_DOMAIN_ID=50
-      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-
-    depends_on:
-      - robot_sim
-
-    networks:
-      - patrol_network
-
-  # ===========================================================================
-  # SLAM Mapping
-  #
-  # LiDAR (/scan) + TF + Odometry (/odom)
-  #       ↓
-  # SLAM Toolbox
-  #       ↓
-  # Occupancy Grid Map (/map)
-  # ===========================================================================
-
-  slam:
-
-    build:
-      context: .
-      target: robot
-
-    container_name: safety_patrol_slam
-
-    profiles:
-      - slam
-
-    command: >
-      bash -c "
-      source /opt/ros/humble/setup.bash &&
-      ros2 launch slam_toolbox online_async_launch.py \
-      slam_params_file:=/workspace/config/slam_toolbox_factory.yaml"
-
-    volumes:
-      - ./config:/workspace/config
-      - ./maps:/workspace/maps
-
-    environment:
-      - ROS_DOMAIN_ID=50
-      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-
-    depends_on:
-      - robot_sim
-
-    networks:
-      - patrol_network
-
-  # ===========================================================================
-  # Auto Explore (SLAM 매핑용 자동 주행)
-  # ===========================================================================
-
-  auto_explore:
-
-    build:
-      context: .
-      target: robot
-
-    container_name: safety_patrol_auto_explore
-
-    profiles:
-      - slam
-
-    command: >
-      bash -c "
-      source /opt/ros/humble/setup.bash &&
-      python /workspace/scripts/auto_explore_for_mapping.py
-      --ros-args
-      -p use_sim_time:=true"
-
-    volumes:
-      - ./scripts:/workspace/scripts
-
-    environment:
-      - ROS_DOMAIN_ID=50
-      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-
-    depends_on:
-      - robot_sim
-      - slam
-
-    networks:
-      - patrol_network
-
-  # ===========================================================================
-  # Map Saver
-  #
-  # 결과: maps/factory_map.yaml, maps/factory_map.pgm
-  # ===========================================================================
-
-  map_saver:
-
-    build:
-      context: .
-      target: robot
-
-    container_name: safety_patrol_map_saver
-
-    profiles:
-      - slam
-
-    command: >
-      bash -c "
-      source /opt/ros/humble/setup.bash &&
-      python /workspace/scripts/save_factory_map.py
-      --output /workspace/maps/factory_map"
-
-    volumes:
-      - ./maps:/workspace/maps
-      - ./scripts:/workspace/scripts
-
-    environment:
-      - ROS_DOMAIN_ID=50
-      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-
-    depends_on:
-      - slam
-
-    networks:
-      - patrol_network
-
-  # ===========================================================================
-  # Database
-  #
-  # TimescaleDB
-  #
-  # 저장 예정
-  #
-  #   - 위험 이벤트
-  #   - 순찰 로그
-  #   - AI 추론 결과
-  #   - 센서 데이터
-  # ===========================================================================
-
-  db:
-
-    build:
-      context: .
-      target: db
-
-    container_name: patrol_database
-
-    environment:
-
-      POSTGRES_DB: patrol_db
-
-      POSTGRES_USER: admin
-
-      POSTGRES_PASSWORD: password123
-
-    ports:
-
-      - "5432:5432"
-
-    volumes:
-
-      - postgres_data:/var/lib/postgresql/data
-
-    networks:
-
-      - patrol_network
-
-  # ===========================================================================
-  # Grafana Dashboard
-  #
-  # 역할
-  #
-  #   - 위험 이벤트 시각화
-  #   - 센서 데이터 모니터링
-  #   - AI 통계
-  #   - 순찰 이력
-  #
-  # 접속
-  #
-  #   http://localhost:3000
-  # ===========================================================================
-
-  dashboard:
-
-    build:
-      context: .
-      target: dashboard
-
-    container_name: safety_dashboard
-
-    ports:
-
-      - "3000:3000"
-
-    environment:
-
-      GF_SECURITY_ADMIN_USER: admin
-
-      GF_SECURITY_ADMIN_PASSWORD: admin
-
-    depends_on:
-
-      - db
-
-    volumes:
-
-      - grafana_data:/var/lib/grafana
-
-    networks:
-
-      - patrol_network
-
-  # ===========================================================================
-  # Nav2 Autonomous Navigation
-  # ===========================================================================
-
-  nav2:
-
-    build:
-      context: .
-      target: robot
-
-    container_name: safety_patrol_nav2
-
-    profiles:
-      - nav2
-
-    command: >
-      bash -c "
-      source /opt/ros/humble/setup.bash &&
-      ros2 launch nav2_bringup bringup_launch.py \
-      use_sim_time:=true \
-      autostart:=true \
-      map:=/workspace/maps/factory_map.yaml \
-      params_file:=/workspace/config/nav2_params.yaml \
-      --ros-args \
-      -r cmd_vel:=/cmd_vel_nav"
-
-    volumes:
-      - ./config:/workspace/config
-      - ./maps:/workspace/maps
-
-    environment:
-      - ROS_DOMAIN_ID=50
-      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-
-    depends_on:
-      - robot_state_publisher
-
-    networks:
-      - patrol_network
-
-  # ===========================================================================
-  # RViz2 Visualization
+  # RVIZ 실행
+  #   - docker compose up rviz
   # ===========================================================================
 
   rviz:
-
     build:
       context: .
       target: robot
-
     container_name: safety_patrol_rviz
 
     profiles:
-      - nav2
+      - rviz
 
     stdin_open: true
     tty: true
@@ -458,26 +98,92 @@ services:
       - ROS_DOMAIN_ID=50
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
-    depends_on:
-      - nav2
+    networks:
+      - patrol_network
+
+
+  # ===========================================================================
+  # SLAM 실행
+  #   - docker compose up slam
+  # ===========================================================================
+
+  slam:
+    build:
+      context: .
+      target: robot
+    container_name: safety_patrol_slam
+
+    profiles:
+      - slam
+
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      ros2 launch slam_toolbox online_async_launch.py
+      slam_params_file:=/workspace/config/slam_toolbox_factory.yaml"
+
+    volumes:
+      - ./config:/workspace/config
+      - ./maps:/workspace/maps
+
+    environment:
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
     networks:
       - patrol_network
 
+
   # ===========================================================================
-  # RViz2 Visualization for SLAM
+  # NAV2 실행
+  #   - docker compose up nav2
   # ===========================================================================
 
-  rviz_slam:
-
+  nav2:
     build:
       context: .
       target: robot
-
-    container_name: safety_patrol_rviz_slam
+    container_name: safety_patrol_nav2
 
     profiles:
-      - slam
+      - nav2
+
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      ros2 launch nav2_bringup bringup_launch.py
+      use_sim_time:=true
+      autostart:=true
+      map:=/workspace/maps/factory_map.yaml
+      params_file:=/workspace/config/nav2_params.yaml
+      --ros-args
+      -r cmd_vel:=/cmd_vel_nav"
+
+    volumes:
+      - ./config:/workspace/config
+      - ./maps:/workspace/maps
+
+    environment:
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+    networks:
+      - patrol_network
+
+
+  # ===========================================================================
+  # TELEOP 실행
+  #   - docker compose run --rm teleop
+  # ===========================================================================
+
+  teleop:
+    build:
+      context: .
+      target: robot
+    container_name: safety_patrol_teleop
+
+    profiles:
+      - teleop
 
     stdin_open: true
     tty: true
@@ -485,33 +191,91 @@ services:
     command: >
       bash -c "
       source /opt/ros/humble/setup.bash &&
-      ros2 run rviz2 rviz2
+      ros2 run teleop_twist_keyboard teleop_twist_keyboard
       --ros-args
-      -p use_sim_time:=true"
-
-    volumes:
-      - ./config:/workspace/config
-      - /tmp/.X11-unix:/tmp/.X11-unix
+      -r cmd_vel:=/cmd_vel_teleop"
 
     environment:
-      - DISPLAY=host.docker.internal:0.0
-      - LIBGL_ALWAYS_SOFTWARE=1
-      - QT_X11_NO_MITSHM=1
       - ROS_DOMAIN_ID=50
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-
-    depends_on:
-      - slam
 
     networks:
       - patrol_network
 
-  perception_safety:
 
+  # ===========================================================================
+  # AUTO EXPLORE 실행
+  #   - docker compose run --rm auto_explore
+  # ===========================================================================
+
+  auto_explore:
     build:
       context: .
       target: robot
+    container_name: safety_patrol_auto_explore
 
+    profiles:
+      - slam
+
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      python3 /workspace/scripts/auto_explore_for_mapping.py
+      --ros-args
+      -p use_sim_time:=true"
+
+    volumes:
+      - ./scripts:/workspace/scripts
+
+    environment:
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+    networks:
+      - patrol_network
+
+
+  # ===========================================================================
+  # MAP SAVER 실행
+  #   - docker compose run --rm map_saver
+  # ===========================================================================
+
+  map_saver:
+    build:
+      context: .
+      target: robot
+    container_name: safety_patrol_map_saver
+
+    profiles:
+      - slam
+
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      python3 /workspace/scripts/save_factory_map.py
+      --output /workspace/maps/factory_map"
+
+    volumes:
+      - ./maps:/workspace/maps
+      - ./scripts:/workspace/scripts
+
+    environment:
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+    networks:
+      - patrol_network
+
+
+  # ===========================================================================
+  # PERCEPTION SAFETY 실행
+  #   - docker compose up perception_safety
+  # ===========================================================================
+
+  perception_safety:
+    build:
+      context: .
+      target: robot
     container_name: safety_patrol_perception
 
     profiles:
@@ -532,28 +296,19 @@ services:
       - ROS_DOMAIN_ID=50
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
-    depends_on:
-      - robot_sim
-
     networks:
       - patrol_network
 
+
   # ===========================================================================
-  # Fire Detection & 3D Sensor Fusion
-  #
-  # RGB + Depth + LiDAR + TF
-  #       ↓
-  # Fire Detection & Fire Fusion Node
-  #       ↓
-  # /fire_tracks_3d, /fire_alarm, /camera/fire_detection/image
+  # FIRE DETECTION 실행
+  #   - docker compose up fire_detection
   # ===========================================================================
 
   fire_detection:
-
     build:
       context: .
       target: robot
-
     container_name: safety_patrol_fire_detection
 
     profiles:
@@ -572,7 +327,7 @@ services:
     volumes:
       - ./ros2_ws:/workspace/ros2_ws
       - ./config:/workspace/config
-      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ./models:/workspace/models
 
     environment:
       - DISPLAY=host.docker.internal:0.0
@@ -581,39 +336,75 @@ services:
       - ROS_DOMAIN_ID=50
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
-    depends_on:
-      - robot_sim
+    networks:
+      - patrol_network
+
+
+  # ===========================================================================
+  # DATABASE
+  # ===========================================================================
+
+  db:
+    build:
+      context: .
+      target: db
+    container_name: patrol_database
+
+    environment:
+      POSTGRES_DB: patrol_db
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password123
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
     networks:
       - patrol_network
 
+
+  # ===========================================================================
+  # DASHBOARD
+  # ===========================================================================
+
+  dashboard:
+    build:
+      context: .
+      target: dashboard
+    container_name: safety_dashboard
+
+    ports:
+      - "3000:3000"
+
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+
+    depends_on:
+      - db
+
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+    networks:
+      - patrol_network
+
+
 # =============================================================================
-# Docker Network
-#
-# 모든 컨테이너가 같은 가상 네트워크에서 통신
-#
-# robot_sim
-# teleop
-# db
-# dashboard
+# NETWORK
 # =============================================================================
 
 networks:
-
   patrol_network:
-
     driver: bridge
 
+
 # =============================================================================
-# Docker Persistent Volume
-#
-# 컨테이너를 삭제해도 데이터 유지
+# VOLUMES
 # =============================================================================
 
 volumes:
-
-  # PostgreSQL 데이터
   postgres_data:
-
-  # Grafana 설정 및 Dashboard
   grafana_data:
