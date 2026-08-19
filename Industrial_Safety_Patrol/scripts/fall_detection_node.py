@@ -260,6 +260,7 @@ class FallDetectionNode(Node):
         )
 
         current_track_ids = set()
+        person_detected_global = False
         fall_detected_global = False
 
         if results and len(results) > 0:
@@ -296,6 +297,7 @@ class FallDetectionNode(Node):
 
                     # 현재 프레임에서 검출됨
                     current_track_ids.add(track_id)
+                    person_detected_global = True
 
                     # Detection loss 카운터 초기화
                     self.missed_frames[track_id] = 0
@@ -694,18 +696,19 @@ class FallDetectionNode(Node):
         # 18. 결과 이미지 Publish
         # ========================================================
 
-        try:
+        if person_detected_global:
+            try:
 
-            processed_msg = self.bridge.cv2_to_imgmsg(cv_image, encoding='bgr8')
-            processed_msg.header = msg.header
-            self.image_pub.publish(processed_msg)
+                processed_msg = self.bridge.cv2_to_imgmsg(cv_image, encoding='bgr8')
+                processed_msg.header = msg.header
+                self.image_pub.publish(processed_msg)
 
-        except Exception as e:
+            except Exception as e:
 
-            self.get_logger().error(f"Failed to publish image: {e}")
+                self.get_logger().error(f"Failed to publish image: {e}")
 
         # ========================================================
-        # 20. Fall Alarm
+        # 19. Fall Alarm
         # ========================================================
 
         alert_msg = Bool()
