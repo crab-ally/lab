@@ -4,11 +4,10 @@ services:
 
   # ===========================================================================
   # ROBOT CORE
-  #   - robot_sim
-  #   - robot_state_publisher
-  #   - twist_mux
+  #   - robot
   # 실행
   #   - docker compose up robot
+  #   - docker compose exec robot bash
   # ===========================================================================
 
   robot:
@@ -63,18 +62,18 @@ services:
 
 
   # ===========================================================================
-  # RVIZ 실행
-  #   - docker compose up rviz
+  # RVIZ + SLAM
+  #   - docker compose up rviz_slam
   # ===========================================================================
 
-  rviz:
+  rviz_slam:
     build:
       context: .
       target: robot
-    container_name: safety_patrol_rviz
+    container_name: safety_patrol_rviz_slam
 
     profiles:
-      - rviz
+      - slam
 
     stdin_open: true
     tty: true
@@ -82,6 +81,8 @@ services:
     command: >
       bash -c "
       source /opt/ros/humble/setup.bash &&
+      ros2 launch slam_toolbox online_async_launch.py
+      slam_params_file:=/workspace/config/slam_toolbox_factory.yaml &
       ros2 run rviz2 rviz2
       -d /workspace/config/nav2_default_view.rviz
       --ros-args
@@ -89,6 +90,7 @@ services:
 
     volumes:
       - ./config:/workspace/config
+      - ./maps:/workspace/maps
       - /tmp/.X11-unix:/tmp/.X11-unix
 
     environment:
@@ -103,50 +105,21 @@ services:
 
 
   # ===========================================================================
-  # SLAM 실행
-  #   - docker compose up slam
+  # RVIZ + NAV2
+  #   - docker compose up rviz_nav2
   # ===========================================================================
 
-  slam:
+  rviz_nav2:
     build:
       context: .
       target: robot
-    container_name: safety_patrol_slam
-
-    profiles:
-      - slam
-
-    command: >
-      bash -c "
-      source /opt/ros/humble/setup.bash &&
-      ros2 launch slam_toolbox online_async_launch.py
-      slam_params_file:=/workspace/config/slam_toolbox_factory.yaml"
-
-    volumes:
-      - ./config:/workspace/config
-      - ./maps:/workspace/maps
-
-    environment:
-      - ROS_DOMAIN_ID=50
-      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-
-    networks:
-      - patrol_network
-
-
-  # ===========================================================================
-  # NAV2 실행
-  #   - docker compose up nav2
-  # ===========================================================================
-
-  nav2:
-    build:
-      context: .
-      target: robot
-    container_name: safety_patrol_nav2
+    container_name: safety_patrol_rviz_nav2
 
     profiles:
       - nav2
+
+    stdin_open: true
+    tty: true
 
     command: >
       bash -c "
@@ -157,13 +130,21 @@ services:
       map:=/workspace/maps/factory_map.yaml
       params_file:=/workspace/config/nav2_params.yaml
       --ros-args
-      -r cmd_vel:=/cmd_vel_nav"
+      -r cmd_vel:=/cmd_vel_nav &
+      ros2 run rviz2 rviz2
+      -d /workspace/config/nav2_default_view.rviz
+      --ros-args
+      -p use_sim_time:=true"
 
     volumes:
       - ./config:/workspace/config
       - ./maps:/workspace/maps
+      - /tmp/.X11-unix:/tmp/.X11-unix
 
     environment:
+      - DISPLAY=host.docker.internal:0.0
+      - LIBGL_ALWAYS_SOFTWARE=1
+      - QT_X11_NO_MITSHM=1
       - ROS_DOMAIN_ID=50
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
@@ -172,7 +153,7 @@ services:
 
 
   # ===========================================================================
-  # TELEOP 실행
+  # TELEOP
   #   - docker compose run --rm teleop
   # ===========================================================================
 
@@ -204,7 +185,7 @@ services:
 
 
   # ===========================================================================
-  # AUTO EXPLORE 실행
+  # AUTO EXPLORE
   #   - docker compose run --rm auto_explore
   # ===========================================================================
 
@@ -236,7 +217,7 @@ services:
 
 
   # ===========================================================================
-  # MAP SAVER 실행
+  # MAP SAVER
   #   - docker compose run --rm map_saver
   # ===========================================================================
 
@@ -268,7 +249,7 @@ services:
 
 
   # ===========================================================================
-  # PERCEPTION SAFETY 실행
+  # PERCEPTION SAFETY
   #   - docker compose up perception_safety
   # ===========================================================================
 
@@ -301,7 +282,45 @@ services:
 
 
   # ===========================================================================
-  # FIRE DETECTION 실행
+  # FALL DETECTION
+  #   - docker compose up fall_detection
+  # ===========================================================================
+
+  fall_detection:
+    build:
+      context: .
+      target: robot
+    container_name: safety_patrol_fall_detection
+
+    profiles:
+      - vision
+      - fall
+
+    stdin_open: true
+    tty: true
+
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      source /workspace/ros2_ws/install/setup.bash &&
+      python3 /workspace/scripts/fall_detection_node.py"
+
+    volumes:
+      - ./scripts:/workspace/scripts
+      - ./ros2_ws:/workspace/ros2_ws
+      - ./config:/workspace/config
+      - ./models:/workspace/models
+
+    environment:
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+    networks:
+      - patrol_network
+
+
+  # ===========================================================================
+  # FIRE DETECTION
   #   - docker compose up fire_detection
   # ===========================================================================
 
