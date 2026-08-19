@@ -395,85 +395,147 @@ class FallDetectionNode(Node):
                             )
 
                     # ====================================================
-                    # 10. Fall Detection
+                    # 10. Fall State Machine
                     # ====================================================
 
-                    else:
+                    current_state = self.track_states[track_id]
 
-                        current_state = self.track_states[track_id]
+                    # ----------------------------------------------------
+                    # SAFE
+                    # ----------------------------------------------------
 
-                        # ----------------------------------------------
-                        # UNSAFE
-                        # ----------------------------------------------
+                    if current_state == "safe":
 
-                        if current_state == "unsafe":
+                        if is_falling:
 
-                            if is_falling:
-                                self.fall_history[track_id] = min(
-                                    self.FALL_THRESHOLD_FRAMES,
-                                    self.fall_history[track_id] + 1
+                            self.track_states[track_id] = "fall_candidate"
+                            self.fall_history[track_id] = 1
+
+                            color = (0, 165, 255)
+
+                            label = (
+                                f"ID:{track_id} "
+                                f"FALL_CANDIDATE "
+                                f"(1/{self.FALL_CANDIDATE_FRAMES}) "
+                                f"Conf:{confidence:.2f}"
+                            )
+
+                        else:
+
+                            self.fall_history[track_id] = 0
+
+                            color = (0, 255, 0)
+
+                            label = (
+                                f"ID:{track_id} "
+                                f"SAFE "
+                                f"Conf:{confidence:.2f}"
+                            )
+
+                    # ----------------------------------------------------
+                    # FALL CANDIDATE
+                    # ----------------------------------------------------
+
+                    elif current_state == "fall_candidate":
+
+                        if is_falling:
+
+                            self.fall_history[track_id] += 1
+
+                            if (
+                                self.fall_history[track_id]
+                                >= self.FALL_CANDIDATE_FRAMES
+                            ):
+
+                                self.track_states[track_id] = "unsafe"
+                                self.fall_history[track_id] = self.FALL_CANDIDATE_FRAMES
+
+                                fall_detected_global = True
+
+                                color = (0, 0, 255)
+
+                                label = (
+                                    f"ID:{track_id} "
+                                    f"UNSAFE (Fall) "
+                                    f"Conf:{confidence:.2f}"
                                 )
+
                             else:
-                                self.fall_history[track_id] = max(
-                                    0,
-                                    self.fall_history[track_id] - 2
+
+                                color = (0, 165, 255)
+
+                                label = (
+                                    f"ID:{track_id} "
+                                    f"FALL_CANDIDATE "
+                                    f"({self.fall_history[track_id]}/"
+                                    f"{self.FALL_CANDIDATE_FRAMES}) "
+                                    f"Conf:{confidence:.2f}"
                                 )
+
+                        else:
+
+                            self.fall_history[track_id] = 0
+                            self.track_states[track_id] = "safe"
+
+                            color = (0, 255, 0)
+
+                            label = (
+                                f"ID:{track_id} "
+                                f"SAFE "
+                                f"Conf:{confidence:.2f}"
+                            )
+
+                    # ----------------------------------------------------
+                    # UNSAFE
+                    # ----------------------------------------------------
+
+                    elif current_state == "unsafe":
+
+                        if is_falling:
+
+                            self.fall_history[track_id] = min(
+                                self.FALL_CANDIDATE_FRAMES,
+                                self.fall_history[track_id] + 1
+                            )
+
+                            fall_detected_global = True
+
+                            color = (0, 0, 255)
+
+                            label = (
+                                f"ID:{track_id} "
+                                f"UNSAFE (Fall) "
+                                f"Conf:{confidence:.2f}"
+                            )
+
+                        else:
+
+                            self.fall_history[track_id] = max(
+                                0,
+                                self.fall_history[track_id] - 2
+                            )
 
                             if self.fall_history[track_id] == 0:
 
                                 self.track_states[track_id] = "safe"
+
                                 color = (0, 255, 0)
 
                                 label = (
                                     f"ID:{track_id} "
-                                    f"SAFE (Normal) "
+                                    f"SAFE "
                                     f"Conf:{confidence:.2f}"
                                 )
 
                             else:
 
                                 fall_detected_global = True
+
                                 color = (0, 0, 255)
 
                                 label = (
                                     f"ID:{track_id} "
                                     f"UNSAFE (Fall) "
-                                    f"Conf:{confidence:.2f}"
-                                )
-
-                        # ----------------------------------------------
-                        # SAFE
-                        # ----------------------------------------------
-
-                        else:
-
-                            if is_falling:
-                                self.fall_history[track_id] += 1
-                            else:
-                                self.fall_history[track_id] = max(
-                                    0,
-                                    self.fall_history[track_id] - 2
-                                )
-
-                            if self.fall_history[track_id] >= self.FALL_THRESHOLD_FRAMES:
-
-                                self.track_states[track_id] = "unsafe"
-                                fall_detected_global = True
-                                color = (0, 0, 255)
-
-                                label = (
-                                    f"ID:{track_id} "
-                                    f"UNSAFE (Fall) "
-                                    f"Conf:{confidence:.2f}"
-                                )
-
-                            else:
-
-                                color = (0, 255, 0)
-
-                                label = (
-                                    f"ID:{track_id} "
-                                    f"SAFE (Normal) "
                                     f"Conf:{confidence:.2f}"
                                 )
 
