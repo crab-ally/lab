@@ -1081,3 +1081,111 @@ self.teleop_received = False
 # 조건 변경
 if self.teleop_received:
 ```
+
+---
+
+# 26. MuJoCo Viewer GLFW X11 초기화 오류
+
+## 파일
+
+`mujoco_ros2_bridge.py`
+
+## 에러코드
+
+Docker에서 robot 컨테이너 실행 시 MuJoCo Viewer가 정상적으로 실행되지 않고 다음 오류 발생.
+
+```
+python3: /builds/florianrhiem/pyGLFW/glfw-3.4/src/x11_init.c:1099: _glfwGrabErrorHandlerX11: Assertion `_glfw.x11.errorHandler == NULL' failed.
+```
+
+Docker 컨테이너 내부에서 GLFW와 MuJoCo Viewer를 단독으로 실행하면 정상적으로 동작함.
+
+```
+python3 -c "import glfw;print(glfw.init())"
+python3 -c "import mujoco;print(mujoco.__version__)"
+python3 -c "import mujoco;print('mujoco OK')"
+python3 -c "import mujoco.viewer;print('viewer OK')"
+python3 -c "import mujoco;import mujoco.viewer;print('both OK')"
+python3 -c "import mujoco;m=mujoco.MjModel.from_xml_path('/workspace/worlds/patrol_20x20_factory.xml');d=mujoco.MjData(m);import mujoco.viewer;v=mujoco.viewer.launch_passive(m,d);v.sync();import time;time.sleep(30)"
+```
+
+따라서 Docker의 DISPLAY 설정이나 X11 서버 자체의 문제는 아님.
+
+## 원인
+
+mujoco_ros2_bridge.py에서 MuJoCo Viewer와 카메라용 Offscreen Renderer를 동시에 사용하고 있었음.
+
+기존 실행 순서는 다음과 같음.
+
+```
+camera_render_worker 시작
+        ↓
+mujoco.Renderer() 생성
+        ↓
+MuJoCo Viewer 생성
+        ↓
+mujoco.viewer.launch_passive()
+        ↓
+GLFW / X11 초기화
+```
+
+camera_render_worker()는 별도 스레드에서 mujoco.Renderer()를 생성하고 RGB/Depth 이미지를 렌더링함.
+
+`renderer=mujoco.Renderer(...)`
+
+동시에 메인 스레드에서는 MuJoCo Viewer를 생성함.
+
+`with mujoco.viewer.launch_passive(model,data) as viewer:`
+
+하나의 Python 프로세스 내부에서 Offscreen Rendering과 GLFW 기반 Interactive Viewer가 서로 다른 스레드에서 초기화되면서 GLFW/X11 초기화 순서에 따라 X11 error handler가 충돌하는 문제가 발생함.
+
+오류의 핵심인
+
+`_glfw.x11.errorHandler == NULL`
+
+은 X11 연결 자체가 실패했다는 의미가 아니라, GLFW가 이미 설정된 X11 error handler와 충돌하는 상황에서 assertion이 발생한 것으로 판단됨.
+
+실제로 컨테이너 내부의 환경은 정상적으로 구성되어 있었음.
+
+```yml
+DISPLAY=host.docker.internal:0.0
+glfw.init() → 1
+MuJoCo Viewer 단독 실행 → 정상
+```
+
+## 해결
+
+MuJoCo Viewer를 먼저 초기화한 후 카메라용 Offscreen Renderer thread를 시작하도록 초기화 순서를 변경.
+
+기존:
+
+```py
+render_thread=threading.Thread(target=camera_render_worker,args=(node,is_running_flag),daemon=True)
+render_thread.start()
+
+with mujoco.viewer.launch_passive(model,data) as viewer:
+```
+
+수정:
+
+```py
+with mujoco.viewer.launch_passive(model,data) as viewer:
+    ...
+
+    render_thread=threading.Thread(target=camera_render_worker,args=(node,is_running_flag),daemon=True)
+    render_thread.start()
+```
+
+즉 초기화 순서를 다음과 같이 변경함.
+
+```
+MuJoCo Viewer
+    ↓
+GLFW / X11 초기화
+    ↓
+Camera Offscreen Renderer
+    ↓
+RGB / Depth Rendering
+```
+
+이를 통해 MuJoCo Viewer의 GLFW/X11 초기화를 먼저 완료한 뒤 별도의 Camera Renderer를 실행하도록 변경하여 GLFW X11 assertion 오류를 해결함.
