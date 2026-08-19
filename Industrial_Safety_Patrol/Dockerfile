@@ -3,13 +3,11 @@
 # ROS2 Humble + MuJoCo 3.6.0 + AI Vision Environment
 # ================================================================
 
-
 # ================================================================
 # 1. Robot Image
 # ================================================================
 
 FROM osrf/ros:humble-desktop-full AS robot
-
 
 # ================================================================
 # 2. System Package Installation
@@ -67,34 +65,30 @@ RUN apt-get update && apt-get install -y \
     \
     && rm -rf /var/lib/apt/lists/*
 
-
 # ================================================================
 # 3. Workspace
 # ================================================================
 
 WORKDIR /workspace
 
-
 # ================================================================
 # 4. Python Virtual Environment
 #
 # --system-site-packages
-#   → ROS2의 Python 패키지(rclpy, cv_bridge 등)를 사용하기 위함
+#   → ROS2 Python 패키지(rclpy, cv_bridge 등)를 사용
 #
-# venv 자체의 site-packages
-#   → Ultralytics, DeepSORT, MuJoCo 등을 설치
+# venv site-packages
+#   → Ultralytics, DeepSORT, MuJoCo 등
 # ================================================================
 
 RUN python3 -m venv --system-site-packages /opt/venv
 
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Python 실행 파일 확인
 RUN which python3 && \
     python3 --version && \
     which pip && \
     pip --version
-
 
 # ================================================================
 # 5. Python Package Manager
@@ -114,8 +108,8 @@ RUN pip install --upgrade \
 RUN pip install \
     mujoco==3.6.0 \
     numpy==1.26.4 \
-    scipy \
-    opencv-python==4.10.0.84 \
+    scipy==1.13.1 \
+    opencv-python-headless==4.10.0.84 \
     ultralytics \
     pandas \
     matplotlib \
@@ -124,26 +118,23 @@ RUN pip install \
     pytest \
     deep-sort-realtime
 
-
 # ================================================================
 # 7. Verify Python Environment
 # ================================================================
 
 RUN python3 -c "import numpy; print('NumPy:', numpy.__version__)" && \
+    python3 -c "import scipy; print('SciPy:', scipy.__version__)" && \
     python3 -c "import mujoco; print('MuJoCo:', mujoco.__version__)" && \
     python3 -c "import cv2; print('OpenCV:', cv2.__version__)" && \
     python3 -c "import ultralytics; print('Ultralytics:', ultralytics.__version__)" && \
     python3 -c "import deep_sort_realtime; print('DeepSORT: OK')"
-
 
 # ================================================================
 # 8. MuJoCo Rendering
 # ================================================================
 
 ENV MUJOCO_GL=glfw
-
 ENV PYTHONUNBUFFERED=1
-
 
 # ================================================================
 # 9. ROS2 Environment
@@ -152,13 +143,11 @@ ENV PYTHONUNBUFFERED=1
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc && \
     echo 'export PATH="/opt/venv/bin:$PATH"' >> /root/.bashrc
 
-
 # ================================================================
 # 10. Project
 # ================================================================
 
 COPY . /workspace
-
 
 # ================================================================
 # 11. Default Command
@@ -166,13 +155,11 @@ COPY . /workspace
 
 CMD ["bash"]
 
-
 # ================================================================
 # 12. Database Image
 # ================================================================
 
 FROM timescale/timescaledb:latest-pg15 AS db
-
 
 # ================================================================
 # 13. Dashboard Image
