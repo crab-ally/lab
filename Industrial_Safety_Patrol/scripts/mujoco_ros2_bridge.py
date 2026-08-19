@@ -398,8 +398,6 @@ def main():
 
     # 카메라 렌더링 전용 스레드
     is_running_flag = [True]
-    render_thread = threading.Thread(target=camera_render_worker, args=(node, is_running_flag), daemon=True)
-    render_thread.start()
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
         viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_RANGEFINDER] = 0
@@ -408,6 +406,9 @@ def main():
         viewer.cam.distance = 28
         viewer.cam.azimuth = 90
         viewer.cam.elevation = -90
+
+        render_thread = threading.Thread(target=camera_render_worker, args=(node, is_running_flag), daemon=True)
+        render_thread.start()
 
         sync_interval = 1.0 / MujocoRosBridge.VIEWER_HZ
         last_sync_time = time.time()
