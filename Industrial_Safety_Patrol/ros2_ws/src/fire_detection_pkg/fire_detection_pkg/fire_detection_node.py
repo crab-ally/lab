@@ -9,6 +9,9 @@ SUB:
 PUB:
     /fire_candidates
     /camera/fire_detection/image
+
+한계
+    - confidence 사용 x (mujoco 환경 상 제약 조건 많음)
 """
 
 import json,math
@@ -146,7 +149,6 @@ class FireDetectionNode(Node):
                 track=self.temporal_tracks[track_id]
 
                 track['bbox']=candidate['bbox']
-                track['confidence']=candidate['confidence']
                 track['area']=candidate['area']
                 track['aspect_ratio']=candidate['aspect_ratio']
 
@@ -170,7 +172,6 @@ class FireDetectionNode(Node):
 
                 self.temporal_tracks[track_id]={
                     'bbox':candidate['bbox'],
-                    'confidence':candidate['confidence'],
                     'area':candidate['area'],
                     'aspect_ratio':candidate['aspect_ratio'],
                     'hit_count':1,
@@ -302,10 +303,6 @@ class FireDetectionNode(Node):
                     int(x+w),
                     int(y+h)
                 ],
-                'confidence':round(
-                    float(confidence),
-                    3
-                ),
                 'area':round(
                     float(area),
                     1
@@ -350,7 +347,6 @@ class FireDetectionNode(Node):
             )
 
             track_id=candidate['candidate_id']
-            confidence=candidate['confidence']
             hits=candidate['temporal_hits']
 
             cv2.rectangle(
@@ -364,7 +360,6 @@ class FireDetectionNode(Node):
             cv2.putText(
                 cv_image,
                 f'FIRE CANDIDATE ID:{track_id} '
-                f'{confidence:.2f} '
                 f'{hits}F',
                 (x1,max(y1-10,25)),
                 cv2.FONT_HERSHEY_SIMPLEX,
