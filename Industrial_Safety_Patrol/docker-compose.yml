@@ -26,7 +26,7 @@ services:
       source /workspace/ros2_ws/install/setup.bash &&
       ros2 launch /workspace/launch/robot_state_publisher.launch.py &
       python3 /workspace/scripts/twist_mux_node.py &
-      python3 /workspace/scripts/mujoco_ros_bridge.py &
+      python3 /workspace/scripts/mujoco_ros2_bridge.py &
       wait"
 
     volumes:
