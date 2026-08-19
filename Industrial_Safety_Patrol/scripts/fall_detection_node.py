@@ -44,6 +44,9 @@ class FallDetectionNode(Node):
         # Detection Confidence
         self.CONF_THRESHOLD = 0.5
 
+        # BBox 낙상 검증
+        self.FALL_ASPECT_RATIO = 1.3
+
         # ========================================================
         # ROS Subscribers / Publishers
         # ========================================================
@@ -72,7 +75,6 @@ class FallDetectionNode(Node):
         # ========================================================
 
         self.tracking_history = {}
-
         self.TRACKING_WARMUP_FRAMES = 10
 
         # ========================================================
@@ -80,7 +82,6 @@ class FallDetectionNode(Node):
         # ========================================================
 
         self.initial_fall_votes = {}
-
         self.INITIAL_FALL_RATIO = 0.5
 
         # ========================================================
@@ -88,7 +89,6 @@ class FallDetectionNode(Node):
         # ========================================================
 
         self.fall_history = {}
-
         self.FALL_THRESHOLD_FRAMES = 20
 
         # ========================================================
@@ -97,8 +97,15 @@ class FallDetectionNode(Node):
 
         self.track_states = {}
 
-        self.get_logger().info(f'Confidence threshold: {self.CONF_THRESHOLD}')
-        self.get_logger().info('Fall Detection Node has been started.')
+        self.get_logger().info(
+            f'Confidence threshold: {self.CONF_THRESHOLD}'
+        )
+        self.get_logger().info(
+            f'Fall BBox aspect ratio threshold: {self.FALL_ASPECT_RATIO}'
+        )
+        self.get_logger().info(
+            'Fall Detection Node has been started.'
+        )
 
     def image_callback(self, msg):
 
@@ -121,7 +128,6 @@ class FallDetectionNode(Node):
         # 2. YOLO Tracking
         # ========================================================
 
-        # 낮은 confidence detection 제거
         results = self.model.track(
             cv_image,
             persist=True,
@@ -130,7 +136,6 @@ class FallDetectionNode(Node):
         )
 
         current_track_ids = set()
-
         fall_detected_global = False
 
         if results and len(results) > 0:
@@ -189,7 +194,10 @@ class FallDetectionNode(Node):
                     if track_id == -1:
                         continue
 
-                    # 이중 안전장치
+                    # ====================================================
+                    # Confidence
+                    # ====================================================
+
                     confidence = (
                         float(confidences[i])
                         if i < len(confidences)
@@ -210,15 +218,27 @@ class FallDetectionNode(Node):
                     )
 
                     # ====================================================
-                    # 4. 현재 클래스
+                    # 4. BBox Aspect Ratio
                     # ====================================================
 
-                    # 0: fallen
-                    # 1: standing
-                    # 2: bending
-                    # 3: sitting
+                    bbox_width = max(1, x2 - x1)
+                    bbox_height = max(1, y2 - y1)
 
-                    is_falling = (cls_id == 0)
+                    aspect_ratio = (
+                        bbox_width / float(bbox_height)
+                    )
+
+                    # YOLO가 fallen으로 판단하면서 BBox도 가로로 긴 경우만 낙상 후보
+                    is_falling_class = (cls_id == 0)
+
+                    is_fall_bbox = (
+                        aspect_ratio >= self.FALL_ASPECT_RATIO
+                    )
+
+                    is_falling = (
+                        is_falling_class
+                        and is_fall_bbox
+                    )
 
                     # ====================================================
                     # 5. Tracking Frame Count
@@ -261,7 +281,8 @@ class FallDetectionNode(Node):
                             f"TRACKING "
                             f"({tracking_frames}/"
                             f"{self.TRACKING_WARMUP_FRAMES}) "
-                            f"Conf:{confidence:.2f}"
+                            f"Conf:{confidence:.2f} "
+                            f"AR:{aspect_ratio:.2f}"
                         )
 
                     # ====================================================
@@ -282,24 +303,34 @@ class FallDetectionNode(Node):
                         if fall_ratio >= self.INITIAL_FALL_RATIO:
 
                             self.track_states[track_id] = "unsafe"
-                            self.fall_history[track_id] = self.FALL_THRESHOLD_FRAMES
+
+                            self.fall_history[track_id] = (
+                                self.FALL_THRESHOLD_FRAMES
+                            )
+
                             fall_detected_global = True
+
                             color = (0, 0, 255)
+
                             label = (
                                 f"ID:{track_id} "
                                 f"UNSAFE (Fall) "
-                                f"Conf:{confidence:.2f}"
+                                f"Conf:{confidence:.2f} "
+                                f"AR:{aspect_ratio:.2f}"
                             )
 
                         else:
 
                             self.track_states[track_id] = "safe"
                             self.fall_history[track_id] = 0
+
                             color = (0, 255, 0)
+
                             label = (
                                 f"ID:{track_id} "
                                 f"SAFE (Normal) "
-                                f"Conf:{confidence:.2f}"
+                                f"Conf:{confidence:.2f} "
+                                f"AR:{aspect_ratio:.2f}"
                             )
 
                     # ====================================================
@@ -307,6 +338,7 @@ class FallDetectionNode(Node):
                     # ====================================================
 
                     else:
+
                         current_state = self.track_states[track_id]
 
                         # ==================================================
@@ -338,7 +370,8 @@ class FallDetectionNode(Node):
                                 label = (
                                     f"ID:{track_id} "
                                     f"SAFE (Normal) "
-                                    f"Conf:{confidence:.2f}"
+                                    f"Conf:{confidence:.2f} "
+                                    f"AR:{aspect_ratio:.2f}"
                                 )
 
                             else:
@@ -350,7 +383,8 @@ class FallDetectionNode(Node):
                                 label = (
                                     f"ID:{track_id} "
                                     f"UNSAFE (Fall) "
-                                    f"Conf:{confidence:.2f}"
+                                    f"Conf:{confidence:.2f} "
+                                    f"AR:{aspect_ratio:.2f}"
                                 )
 
                         # ==================================================
@@ -372,6 +406,7 @@ class FallDetectionNode(Node):
                                     self.fall_history.get(track_id, 0) - 2
                                 )
 
+                            # 낙상 확정
                             if (
                                 self.fall_history[track_id]
                                 >= self.FALL_THRESHOLD_FRAMES
@@ -386,7 +421,8 @@ class FallDetectionNode(Node):
                                 label = (
                                     f"ID:{track_id} "
                                     f"UNSAFE (Fall) "
-                                    f"Conf:{confidence:.2f}"
+                                    f"Conf:{confidence:.2f} "
+                                    f"AR:{aspect_ratio:.2f}"
                                 )
 
                             else:
@@ -396,7 +432,8 @@ class FallDetectionNode(Node):
                                 label = (
                                     f"ID:{track_id} "
                                     f"SAFE (Normal) "
-                                    f"Conf:{confidence:.2f}"
+                                    f"Conf:{confidence:.2f} "
+                                    f"AR:{aspect_ratio:.2f}"
                                 )
 
                     # ====================================================
@@ -416,7 +453,7 @@ class FallDetectionNode(Node):
                         label,
                         (x1, max(20, y1 - 10)),
                         cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6,
+                        0.55,
                         color,
                         2
                     )
@@ -538,12 +575,18 @@ class FallDetectionNode(Node):
                 cv_image,
                 encoding='bgr8'
             )
+
             processed_msg.header = msg.header
 
-            self.image_pub.publish(processed_msg)
+            self.image_pub.publish(
+                processed_msg
+            )
 
         except Exception as e:
-            self.get_logger().error(f"Failed to publish image: {e}")
+
+            self.get_logger().error(
+                f"Failed to publish image: {e}"
+            )
 
         # ========================================================
         # 17. Fall Alarm Publish
@@ -563,10 +606,17 @@ def main(args=None):
 
     try:
         rclpy.spin(node)
+
     except KeyboardInterrupt:
-        node.get_logger().info('Fall Detection Node stopped cleanly')
+        node.get_logger().info(
+            'Fall Detection Node stopped cleanly'
+        )
+
     except Exception as e:
-        node.get_logger().error(f'Exception in Fall Detection Node: {e}')
+        node.get_logger().error(
+            f'Exception in Fall Detection Node: {e}'
+        )
+
     finally:
         cv2.destroyAllWindows()
         node.destroy_node()
