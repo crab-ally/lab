@@ -72,7 +72,7 @@ class FallDetectionNode(Node):
         # ========================================================
 
         self.fall_history = {}
-        self.FALL_THRESHOLD_FRAMES = 20
+        self.FALL_CANDIDATE_FRAMES = 20
 
         # ========================================================
         # Track State
@@ -372,7 +372,7 @@ class FallDetectionNode(Node):
                         if fall_ratio >= self.INITIAL_FALL_RATIO:
 
                             self.track_states[track_id] = "unsafe"
-                            self.fall_history[track_id] = self.FALL_THRESHOLD_FRAMES
+                            self.fall_history[track_id] = self.FALL_CANDIDATE_FRAMES
                             fall_detected_global = True
                             color = (0, 0, 255)
 
