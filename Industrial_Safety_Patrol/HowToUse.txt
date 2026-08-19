@@ -1,53 +1,41 @@
-# ==================== MuJoCo 시뮬레이터 실행 ====================
-1. docker compose up -d
-1-1. docker compose exec robot_sim bash
-1-2. python3 scripts/mujoco_ros2_bridge.py
-
-# /cmd_vel 발행 노드
-2. docker compose exec robot_sim bash
-2-1. python3 scripts/twist_mux_node.py
+# ========== MuJoCo 시뮬레이터 + robot_state_publisher + twist_mux ==========
+1. docker compose up robot
+1-1. docker compose exec robot bash
 
 
-# ==================== SLAM Toolbox ====================
-3. \docker compose --profile slam up -d slam
-3-1. docker exec -it safety_patrol_slam bash
-3-2. ros2 launch slam_toolbox online_async_launch.py \
-slam_params_file:=/workspace/config/slam_toolbox_factory.yaml
+# ==================== RViz ====================
 
-# 완성된 지도 저장
-4. docker compose run --rm map_saver
+# RViz + SLAM
+2. docker compose up rviz_slam
 
-
-# ==================== RViz (저장된 지도) + Nav2 ====================
-5. docker compose --profile nav2 up nav2 rviz
+# RViz (저장된 지도) + Nav2
+3. docker compose up rviz_nav2
 
 
 # ==================== Detection ====================
 
 # 화재감지 (fire_detection_node + fire_fusion_node)
-6. cd ros2_ws && colcon build --packages-select fire_detection_pkg
-6-1. docker compose --profile fire up fire_detection
+4. cd ros2_ws && colcon build --packages-select fire_detection_pkg
+4-1. docker compose up fire_detection
 
 # yolo + ppe + sensor fusion + ttc
-7. cd ros2_ws && colcon build --packages-select perception_safety_pkg
-7-1. docker compose --profile vision up perception_safety
+5. cd ros2_ws && colcon build --packages-select perception_safety_pkg
+5-1. docker compose up perception_safety
 
 # 사람의 쓰러짐 감지(Yolo Pose 기반)
-8. docker compose exec robot_sim bash
-8-1. python3 scripts/fall_detection_node.py
-
+6. docker compose up fall_detection
 
 # ==================== 보조기능 ====================
 
 # 로봇 수동 조종 (Teleop)
-9.  docker compose run --rm teleop
-9-1. 전진(i), 우회전(l), 좌회전(j), 정지(k)
+7. docker compose run --rm teleop
+7-1. 전진(i), 우회전(l), 좌회전(j), 정지(k)
 
 # 봇 자동 탐색 주행 실행
-10. docker compose run --rm auto_explore
+8. docker compose run --rm auto_explore
 
-# RViz (지도 x)
-11. docker compose --profile slam up rviz_slam
+# 지도 저장
+9. docker compose run --rm map_saver
 
 
 # ==================== yolo train ====================
