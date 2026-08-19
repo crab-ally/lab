@@ -186,7 +186,6 @@ class FireFusionNode(Node):
             self._publish_alarm(False)
             self._publish_tracks(stamp_value,[])
             self._publish_markers([])
-            self._close_debug_window()
             return
 
         synced_frame=self._get_synced_frame(stamp_value)
