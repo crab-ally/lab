@@ -168,6 +168,7 @@ class AutoExploreNode(Node):
             self.exploration_done = True
             self.get_logger().info("Exploration complete. Stop and save the map.")
             self.publish_cmd(0.0, 0.0)
+            self.create_timer(0.5,self._shutdown_after_exploration)
             return
 
         target_x, target_y, hold_sec = self.waypoints[self.waypoint_idx]
@@ -214,6 +215,11 @@ class AutoExploreNode(Node):
         for _ in range(5):
             self.cmd_pub.publish(msg)
             time.sleep(0.05)
+    
+    def _shutdown_after_exploration(self):
+        self.publish_cmd(0.0,0.0)
+        if rclpy.ok():
+            rclpy.shutdown()
 
 def main():
     rclpy.init()
