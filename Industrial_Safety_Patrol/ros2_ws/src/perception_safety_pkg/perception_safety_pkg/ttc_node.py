@@ -76,7 +76,41 @@ class TTCNode(Node):
             10
         )
 
+        # ── Heartbeat Timer (10 Hz) ────────────────────────────────────
+        # 인지 파이프라인의 프레임레이트 지연과 무관하게 스트림 유지
+        self.latest_alert_payload = {
+            'risk_level': 'NORMAL',
+            'min_ttc': -1.0,
+            'target_track_id': -1
+        }
+        self.last_track_update_time = 0.0
+
+        self.timer = self.create_timer(
+            0.1,  # 10Hz
+            self._timer_callback
+        )
+
         self.get_logger().info('Node 3: TTC Node (Risk Assessment & Alert) is ready.')
+
+    def _timer_callback(self) -> None:
+        """10Hz 주기로 최신 TTC Alert 스트림을 안정적으로 발행 (Heartbeat)"""
+        now = self.get_clock().now().nanoseconds * 1e-9
+
+        # 마지막 트랙 업데이트 후 1.0초 이상 미수신 시 안전하게 NORMAL로 복구
+        if self.last_track_update_time == 0.0 or (now - self.last_track_update_time) > 1.0:
+            payload = {
+                'header': {'stamp': now},
+                'risk_level': 'NORMAL',
+                'min_ttc': -1.0,
+                'target_track_id': -1
+            }
+        else:
+            payload = dict(self.latest_alert_payload)
+            payload['header'] = {'stamp': now}
+
+        json_msg = String()
+        json_msg.data = json.dumps(payload, ensure_ascii=False)
+        self.pub_ttc_alerts.publish(json_msg)
 
     def _odom_callback(self, msg: Odometry) -> None:
         """로봇의 현재 선속도 저장"""
@@ -352,6 +386,9 @@ class TTCNode(Node):
             ),
             'target_track_id': most_dangerous_track_id
         }
+
+        self.latest_alert_payload = alert_payload
+        self.last_track_update_time = self.get_clock().now().nanoseconds * 1e-9
 
         json_msg = String()
         json_msg.data = json.dumps(
