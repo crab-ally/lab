@@ -202,18 +202,19 @@ class AutoExploreNode(Node):
         self.waypoints = []
         self.waypoint_idx = 0
         self.arrival_threshold = 0.35
-        self.linear_speed = 0.15
-        self.angular_speed = 0.35
+        self.linear_speed = 0.18
+        self.angular_speed = 0.40
         self.hold_until = None
         self.exploration_done = False
 
-        # MuJoCo 월드에서 로봇의 초기 물리 위치 및 회전각 (XML 기준)
-        self.world_start_x = -4.0
-        self.world_start_y = -4.0
-        self.world_start_yaw = math.pi / 2.0  # quat="0.707 0 0 0.707" -> +90도(1.57rad)
+        # 로봇의 초기 위치 및 회전각
+        self.world_start_x = -9.5
+        self.world_start_y = -9.5
+        self.world_start_yaw = math.pi / 2.0  # quat="0.707107 0 0 0.707107" -> +90도(1.570796rad)
 
+        self.last_reported_wp = -1
         self.timer = self.create_timer(0.1, self.control_loop)
-        self.get_logger().info("Auto explore node initialized. Waiting for first /odom...")
+        self.get_logger().info("Auto explore node initialized for 20x20 Factory. Waiting for first /odom...")
 
     def odom_callback(self, msg: Odometry):
         self.x = msg.pose.pose.position.x
@@ -248,9 +249,12 @@ class AutoExploreNode(Node):
             odom_x = dx * cos_yaw - dy * sin_yaw
             odom_y = dx * sin_yaw + dy * cos_yaw
 
-            self.waypoints.append((odom_x, odom_y, hold))
+            self.waypoints.append((odom_x, odom_y, hold, wx, wy))
 
-        self.get_logger().info(f"Successfully converted {len(self.waypoints)} waypoints to /odom frame!")
+        self.get_logger().info(
+            f"Successfully converted {len(self.waypoints)} waypoints to /odom frame! "
+            f"(World Start: [{self.world_start_x}, {self.world_start_y}], Yaw: {self.world_start_yaw:.2f} rad)"
+        )
 
     def control_loop(self):
         if not self.odom_received or not self.waypoints_converted:
@@ -260,8 +264,10 @@ class AutoExploreNode(Node):
             self.publish_cmd(0.0, 0.0)
             return
 
+        current_time = self.get_clock().now()
+
         if self.hold_until is not None:
-            if time.time() < self.hold_until:
+            if current_time < self.hold_until:
                 self.publish_cmd(0.0, 0.0)
                 return
             self.hold_until = None
@@ -269,28 +275,44 @@ class AutoExploreNode(Node):
 
         if self.waypoint_idx >= len(self.waypoints):
             self.exploration_done = True
-            self.get_logger().info("Exploration complete. Stop and save the map.")
+            self.get_logger().info("All waypoints explored successfully! Stopping robot.")
             self.publish_cmd(0.0, 0.0)
-            self.shutdown_timer = self.create_timer(0.5,self._shutdown_after_exploration)
+            self.shutdown_timer = self.create_timer(1.0, self._shutdown_after_exploration)
             return
 
-        target_x, target_y, hold_sec = self.waypoints[self.waypoint_idx]
-        dx = target_x - self.x
-        dy = target_y - self.y
+        odom_x, odom_y, hold_sec, world_x, world_y = self.waypoints[self.waypoint_idx]
+
+        if self.last_reported_wp != self.waypoint_idx:
+            self.last_reported_wp = self.waypoint_idx
+            self.get_logger().info(
+                f"[{self.waypoint_idx + 1}/{len(self.waypoints)}] Navigating -> World: ({world_x:.1f}, {world_y:.1f}) | Odom: ({odom_x:.2f}, {odom_y:.2f}) (Hold: {hold_sec}s)"
+            )
+
+        dx = odom_x - self.x
+        dy = odom_y - self.y
         distance = math.hypot(dx, dy)
 
         if distance < self.arrival_threshold:
             self.publish_cmd(0.0, 0.0)
-            self.hold_until = time.time() + hold_sec
+            if hold_sec > 0.0:
+                self.get_logger().info(f"Arrived at WP {self.waypoint_idx + 1}. Scanning for {hold_sec}s...")
+                from rclpy.duration import Duration
+                self.hold_until = current_time + Duration(seconds=hold_sec)
+            else:
+                self.waypoint_idx += 1
             return
 
         target_yaw = math.atan2(dy, dx)
         yaw_error = self._normalize_angle(target_yaw - self.yaw)
 
-        if abs(yaw_error) > 0.25:
-            self.publish_cmd(0.0, self.angular_speed * math.copysign(1.0, yaw_error))
+        # 큰 각도 오차 시 제자리 회전, 작은 각도 오차 시 직진 + 조향
+        if abs(yaw_error) > 0.30:
+            ang_cmd = self.angular_speed * math.copysign(1.0, yaw_error)
+            self.publish_cmd(0.0, ang_cmd)
         else:
-            self.publish_cmd(self.linear_speed, 0.4 * yaw_error)
+            lin_cmd = self.linear_speed * max(0.2, math.cos(yaw_error))
+            ang_cmd = 0.5 * yaw_error
+            self.publish_cmd(lin_cmd, ang_cmd)
 
     @staticmethod
     def _normalize_angle(angle):
@@ -320,7 +342,7 @@ class AutoExploreNode(Node):
             time.sleep(0.05)
     
     def _shutdown_after_exploration(self):
-        self.publish_cmd(0.0,0.0)
+        self.publish_cmd(0.0, 0.0)
         if rclpy.ok():
             rclpy.shutdown()
 
