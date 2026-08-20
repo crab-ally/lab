@@ -362,25 +362,17 @@ class FusionNode3D(Node):
 
         # 단위 정규화 (미터 단위)
         if self.latest_depth_encoding == '16UC1':
-            valid_depths = (
-                depth_roi[depth_roi > 0] / 1000.0
-            )
-
+            valid_depths = (depth_roi[depth_roi > 0] / 1000.0)
         else:
-            valid_depths = depth_roi[
-                ~np.isnan(depth_roi) &
-                (depth_roi > 0.1)
-            ]
+            valid_depths = depth_roi[~np.isnan(depth_roi) & (depth_roi > 0.1)]
 
         if len(valid_depths) == 0:
             return None, None, None
 
         # Depth 대표값 (중앙값 사용)
-        z_cam = float(
-            np.median(valid_depths)
-        )
+        z_cam = float(np.median(valid_depths))
 
-        if z_cam < 0.2 or z_cam > 15.0:
+        if z_cam < 0.2 or z_cam > 8.0:
             return None, None, None
 
         # Pin-hole Camera Model 역투영
