@@ -168,20 +168,32 @@ class MujocoRosBridge(Node):
             return self.data.sensordata[adr : adr + dim].tolist()
         return self.data.sensordata[self._lidar_adrs].tolist()
 
-    def _apply_forklift_vel(self, msg: Twist, joint_id):
-        if joint_id == -1: return
-        qvel_adr = self.model.jnt_dofadr[joint_id]
-        qpos_adr = self.model.jnt_qposadr[joint_id]
-        
-        self.data.qvel[qvel_adr] = msg.linear.x
-        self.data.qvel[qvel_adr+1] = msg.linear.y
-        
-        if abs(msg.linear.x) > 0.01 or abs(msg.linear.y) > 0.01:
-            yaw = math.atan2(msg.linear.y, msg.linear.x)
-            self.data.qpos[qpos_adr+3] = math.cos(yaw/2.0)
-            self.data.qpos[qpos_adr+4] = 0.0
-            self.data.qpos[qpos_adr+5] = 0.0
-            self.data.qpos[qpos_adr+6] = math.sin(yaw/2.0)
+    def _apply_forklift_vel(self,msg:Twist,joint_id):
+        if joint_id==-1:return
+
+        qvel_adr=self.model.jnt_dofadr[joint_id]
+        qpos_adr=self.model.jnt_qposadr[joint_id]
+
+        v=np.clip(msg.linear.x,-0.5,0.5)
+        w=np.clip(msg.angular.z,-1.5,1.5)
+
+        quat=self.data.qpos[qpos_adr+3:qpos_adr+7]
+        qw,qx,qy,qz=quat
+
+        siny_cosp=2.0*(qw*qz+qx*qy)
+        cosy_cosp=1.0-2.0*(qy*qy+qz*qz)
+        yaw=math.atan2(siny_cosp,cosy_cosp)
+
+        vx_world=v*math.cos(yaw)
+        vy_world=v*math.sin(yaw)
+
+        self.data.qvel[qvel_adr]=vx_world
+        self.data.qvel[qvel_adr+1]=vy_world
+        self.data.qvel[qvel_adr+2]=0.0
+
+        self.data.qvel[qvel_adr+3]=0.0
+        self.data.qvel[qvel_adr+4]=0.0
+        self.data.qvel[qvel_adr+5]=w
 
     def fl1_cmd_vel_callback(self, msg: Twist):
         with self.physics_lock:
