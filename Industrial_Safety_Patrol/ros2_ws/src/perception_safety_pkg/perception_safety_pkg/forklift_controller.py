@@ -21,8 +21,8 @@ class ForkliftController(Node):
         self.yaw_tolerance=self.get_parameter('yaw_tolerance').value
 
         self.forklift_1_waypoints=[
-            (3.0,8.0),
-            (3.0,3.0),
+            (-3.0,8.0),
+            (-3.0,3.0),
             (-8.0,3.0),
             (-8.0,8.0),
         ]
