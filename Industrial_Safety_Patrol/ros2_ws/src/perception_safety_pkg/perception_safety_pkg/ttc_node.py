@@ -158,7 +158,7 @@ class TTCNode(Node):
         if distance <= 0.0:
             distance = 0.01
 
-        # 상대 접근 속도
+        # 상대 접근 속도 (내적)
         closing_speed = -(
             rel_px * rel_vx +
             rel_py * rel_vy
@@ -211,15 +211,8 @@ class TTCNode(Node):
             # 1. 지게차 - 로봇
             for f in forklifts:
 
-                f_pos = (
-                    f['position'][0],
-                    f['position'][1]
-                )
-
-                f_vel = (
-                    f['velocity'][0],
-                    f['velocity'][1]
-                )
+                f_pos = (f['position'][0], f['position'][1])
+                f_vel = (f['velocity'][0], f['velocity'][1])
 
                 radius_sum = self.robot_radius + self.forklift_radius
 
@@ -241,15 +234,8 @@ class TTCNode(Node):
             # 2. 사람 - 로봇
             for p in persons:
 
-                p_pos = (
-                    p['position'][0],
-                    p['position'][1]
-                )
-
-                p_vel = (
-                    p['velocity'][0],
-                    p['velocity'][1]
-                )
+                p_pos = (p['position'][0], p['position'][1])
+                p_vel = (p['velocity'][0], p['velocity'][1])
 
                 radius_sum = self.robot_radius + self.person_radius
 
@@ -271,27 +257,13 @@ class TTCNode(Node):
             # 3. 지게차 - 사람
             for f in forklifts:
 
-                f_pos = (
-                    f['position'][0],
-                    f['position'][1]
-                )
-
-                f_vel = (
-                    f['velocity'][0],
-                    f['velocity'][1]
-                )
+                f_pos = (f['position'][0], f['position'][1])
+                f_vel = (f['velocity'][0], f['velocity'][1])
 
                 for p in persons:
 
-                    p_pos = (
-                        p['position'][0],
-                        p['position'][1]
-                    )
-
-                    p_vel = (
-                        p['velocity'][0],
-                        p['velocity'][1]
-                    )
+                    p_pos = (p['position'][0], p['position'][1])
+                    p_vel = (p['velocity'][0], p['velocity'][1])
 
                     radius_sum = self.forklift_radius + self.person_radius
 
@@ -324,23 +296,14 @@ class TTCNode(Node):
 
             for trk in target_tracks:
 
-                trk_pos = (
-                    trk['position'][0],
-                    trk['position'][1]
-                )
-
-                trk_vel = (
-                    trk['velocity'][0],
-                    trk['velocity'][1]
-                )
+                trk_pos = (trk['position'][0], trk['position'][1])
+                trk_vel = (trk['velocity'][0], trk['velocity'][1])
 
                 # 객체 종류에 따라 반경 선택
                 if target_class == 'person':
                     target_radius = self.person_radius
-
                 elif target_class == 'forklift':
                     target_radius = self.forklift_radius
-
                 else:
                     target_radius = 0.0
 
@@ -415,12 +378,8 @@ def main(args=None) -> None:
 
     try:
         rclpy.spin(node)
-
     except KeyboardInterrupt:
-        node.get_logger().info(
-            'TTC Node Stopped.'
-        )
-
+        node.get_logger().info('TTC Node Stopped.')
     finally:
         node.destroy_node()
         rclpy.shutdown()
