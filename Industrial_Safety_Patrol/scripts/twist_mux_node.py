@@ -33,7 +33,7 @@ class TwistMuxNode(Node):
         super().__init__('twist_mux_node')
 
         # ── Parameters ────────────────────────────────────────────────
-        self.declare_parameter('cmd_timeout', 0.5)
+        self.declare_parameter('cmd_timeout', 1.0)  # 0.5s -> 1.0s 완화
         self.declare_parameter('slowdown_ratio', 0.5)
 
         self.cmd_timeout = (
