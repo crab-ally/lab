@@ -8,7 +8,6 @@ SUB:
 
 PUB:
     /fire_candidates
-    /camera/fire_detection/image
 
 한계
     - confidence 사용 x (mujoco 환경 상 제약 조건 많음)
@@ -55,10 +54,6 @@ class FireDetectionNode(Node):
 
         self.candidate_pub=self.create_publisher(
             String,'/fire_candidates',10
-        )
-
-        self.image_pub=self.create_publisher(
-            Image,'/camera/fire_detection/image',10
         )
 
         self.get_logger().info(
@@ -366,24 +361,6 @@ class FireDetectionNode(Node):
                 0.6,
                 (0,0,255),
                 2
-            )
-
-        # Debug image publish
-        try:
-            processed_msg=self.bridge.cv2_to_imgmsg(
-                cv_image,
-                encoding='bgr8'
-            )
-
-            processed_msg.header=rgb_msg.header
-
-            self.image_pub.publish(
-                processed_msg
-            )
-
-        except Exception as e:
-            self.get_logger().error(
-                f'Failed to publish image: {e}'
             )
 
 def main(args=None):
