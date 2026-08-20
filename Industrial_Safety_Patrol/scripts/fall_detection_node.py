@@ -8,6 +8,9 @@
     /fall_alarm
 """
 
+import os
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+
 import math
 import rclpy
 from rclpy.node import Node
