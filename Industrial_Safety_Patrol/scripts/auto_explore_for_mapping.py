@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-SLAM 매핑을 위한 자동 탐색 주행 스크립트.
-Bridge의 /odom 오프셋 및 초기 회전(Quaternion)을 동적으로 반영하도록 수정되었습니다.
+SLAM 매핑을 위한 자동 탐색 주행 스크립트
 """
 
 import math
@@ -17,7 +16,7 @@ from nav_msgs.msg import Odometry
 class AutoExploreNode(Node):
     def __init__(self):
         super().__init__("auto_explore_for_mapping")
-        self.cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.cmd_pub = self.create_publisher(Twist, "/cmd_vel_nav", 10)
         self.odom_sub = self.create_subscription(
             Odometry, "/odom", self.odom_callback, 10
         )
