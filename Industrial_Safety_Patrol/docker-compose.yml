@@ -185,15 +185,15 @@ services:
 
 
   # ===========================================================================
-  # AUTO EXPLORE
-  #   - docker compose run --rm auto_explore
+  # AUTO EXPLORE + MAP SAVER
+  #   - docker compose run --rm auto_explore_map
   # ===========================================================================
 
-  auto_explore:
+  auto_explore_map:
     build:
       context: .
       target: robot
-    container_name: safety_patrol_auto_explore
+    container_name: safety_patrol_auto_explore_map
 
     profiles:
       - slam
@@ -203,42 +203,13 @@ services:
       source /opt/ros/humble/setup.bash &&
       python3 /workspace/scripts/auto_explore_for_mapping.py
       --ros-args
-      -p use_sim_time:=true"
-
-    volumes:
-      - ./scripts:/workspace/scripts
-
-    environment:
-      - ROS_DOMAIN_ID=50
-      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-
-    networks:
-      - patrol_network
-
-
-  # ===========================================================================
-  # MAP SAVER
-  #   - docker compose run --rm map_saver
-  # ===========================================================================
-
-  map_saver:
-    build:
-      context: .
-      target: robot
-    container_name: safety_patrol_map_saver
-
-    profiles:
-      - slam
-
-    command: >
-      bash -c "
-      source /opt/ros/humble/setup.bash &&
+      -p use_sim_time:=true &&
       python3 /workspace/scripts/save_factory_map.py
       --output /workspace/maps/factory_map"
 
     volumes:
-      - ./maps:/workspace/maps
       - ./scripts:/workspace/scripts
+      - ./maps:/workspace/maps
 
     environment:
       - ROS_DOMAIN_ID=50
