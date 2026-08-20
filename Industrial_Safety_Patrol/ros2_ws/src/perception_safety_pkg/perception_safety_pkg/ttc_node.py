@@ -8,7 +8,7 @@ Subscribes:
 
 Publishes:
     - /ttc_alerts (std_msgs/msg/String - JSON Format)
-      [Fields: min_ttc, risk_level, target_track_id, timestamp]
+      [Fields: min_ttc, risk_level, target_track_id, target_subject, timestamp]
 """
 
 import json
@@ -81,7 +81,8 @@ class TTCNode(Node):
         self.latest_alert_payload = {
             'risk_level': 'NORMAL',
             'min_ttc': -1.0,
-            'target_track_id': -1
+            'target_track_id': -1,
+            'target_subject': 'NONE'
         }
         self.last_track_update_time = 0.0
 
@@ -102,7 +103,8 @@ class TTCNode(Node):
                 'header': {'stamp': now},
                 'risk_level': 'NORMAL',
                 'min_ttc': -1.0,
-                'target_track_id': -1
+                'target_track_id': -1,
+                'target_subject': 'NONE'
             }
         else:
             payload = dict(self.latest_alert_payload)
@@ -188,6 +190,7 @@ class TTCNode(Node):
 
         min_ttc = float('inf')
         most_dangerous_track_id = -1
+        most_dangerous_subject = "NONE"
 
         # 로봇은 현재 위치를 (0, 0)으로 사용 (base_link 기준)
         robot_pos = (0.0, 0.0)
@@ -230,6 +233,7 @@ class TTCNode(Node):
                         'track_id',
                         -1
                     )
+                    most_dangerous_subject = "로봇-지게차"
 
             # 2. 사람 - 로봇
             for p in persons:
@@ -253,6 +257,7 @@ class TTCNode(Node):
                         'track_id',
                         -1
                     )
+                    most_dangerous_subject = "로봇-사람"
 
             # 3. 지게차 - 사람
             for f in forklifts:
@@ -281,6 +286,7 @@ class TTCNode(Node):
                             'track_id',
                             p.get('track_id', -1)
                         )
+                        most_dangerous_subject = "지게차-사람"
 
         # ================================================================
         # *_ONLY
@@ -299,13 +305,16 @@ class TTCNode(Node):
                 trk_pos = (trk['position'][0], trk['position'][1])
                 trk_vel = (trk['velocity'][0], trk['velocity'][1])
 
-                # 객체 종류에 따라 반경 선택
+                # 객체 종류에 따라 반경 및 주체 선택
                 if target_class == 'person':
                     target_radius = self.person_radius
+                    subject_name = "로봇-사람"
                 elif target_class == 'forklift':
                     target_radius = self.forklift_radius
+                    subject_name = "로봇-지게차"
                 else:
                     target_radius = 0.0
+                    subject_name = "NONE"
 
                 radius_sum = self.robot_radius + target_radius
 
@@ -323,6 +332,7 @@ class TTCNode(Node):
                         'track_id',
                         -1
                     )
+                    most_dangerous_subject = subject_name
 
         # ================================================================
         # Risk Level
@@ -347,7 +357,8 @@ class TTCNode(Node):
                 if min_ttc != float('inf')
                 else -1.0
             ),
-            'target_track_id': most_dangerous_track_id
+            'target_track_id': most_dangerous_track_id,
+            'target_subject': most_dangerous_subject if min_ttc != float('inf') else 'NONE'
         }
 
         self.latest_alert_payload = alert_payload
@@ -364,7 +375,7 @@ class TTCNode(Node):
         # Logging
         if overall_risk_level != "NORMAL":
             self.get_logger().warn(
-                f'[{overall_risk_level}] '
+                f'[{overall_risk_level}] [{most_dangerous_subject}] '
                 f'Min TTC: {min_ttc:.2f}s '
                 f'(Track ID: {most_dangerous_track_id})'
             )
