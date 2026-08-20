@@ -1,41 +1,43 @@
 # ========== MuJoCo 시뮬레이터 + robot_state_publisher + twist_mux ==========
+
+# viewerless
 1. docker compose up robot
 1-1. docker compose exec robot bash
 
+# with viewer
+2. docker compose up robot_viewer
+2-1. docker compose exec robot_viewer bash
 
 # ==================== RViz ====================
 
 # RViz + SLAM
-2. docker compose up rviz_slam
+3. docker compose up rviz_slam
 
 # RViz (저장된 지도) + Nav2
-3. docker compose up rviz_nav2
+4. docker compose up rviz_nav2
 
 
 # ==================== Detection ====================
 
 # 화재감지 (fire_detection_node + fire_fusion_node)
-4. cd ros2_ws && colcon build --packages-select fire_detection_pkg
-4-1. docker compose up fire_detection
+5. cd ros2_ws && colcon build --packages-select fire_detection_pkg
+5-1. docker compose up fire_detection
 
-# yolo + ppe + sensor fusion + ttc
-5. cd ros2_ws && colcon build --packages-select perception_safety_pkg
-5-1. docker compose up perception_safety
+# yolo + ppe + sensor fusion + fl controller + ttc
+6. cd ros2_ws && colcon build --packages-select perception_safety_pkg
+6-1. docker compose up perception_safety
 
 # 사람의 쓰러짐 감지(Yolo Pose 기반)
-6. docker compose up fall_detection
+7. docker compose up fall_detection
 
 # ==================== 보조기능 ====================
 
 # 로봇 수동 조종 (Teleop)
-7. docker compose run --rm teleop
-7-1. 전진(i), 우회전(l), 좌회전(j), 정지(k)
+8. docker compose run --rm teleop
+8-1. 전진(i), 우회전(l), 좌회전(j), 정지(k)
 
-# 봇 자동 탐색 주행 실행
-8. docker compose run --rm auto_explore
-
-# 지도 저장
-9. docker compose run --rm map_saver
+# 봇 자동 탐색 주행 실행 + 지도 저장
+9. docker compose run --rm auto_explore_map
 
 
 # ==================== yolo train ====================
