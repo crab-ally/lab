@@ -34,6 +34,13 @@ def generate_launch_description():
         output='screen'
     )
 
+    forklift_controller_node=Node(
+        package='perception_safety_pkg',
+        executable='forklift_controller_node',
+        name='forklift_controller_node',
+        output='screen'
+    )
+
     # 4. Node 3: TTC Node (Risk Assessment)
     ttc_node = Node(
         package='perception_safety_pkg',
@@ -47,5 +54,6 @@ def generate_launch_description():
         tf_node,
         perception_node,
         fusion_node,
+        forklift_controller_node,
         ttc_node
     ])

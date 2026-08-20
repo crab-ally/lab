@@ -15,6 +15,16 @@ ttc_node:
     robot_radius: 0.5
     slowdown_factor: 0.5
 
+forklift_controller:
+  ros__parameters:
+    forklift_1_linear_x: 0.3
+    forklift_1_linear_y: 0.0
+    forklift_1_angular_z: 0.0
+    forklift_2_linear_x: 0.2
+    forklift_2_linear_y: 0.0
+    forklift_2_angular_z: 0.0
+    publish_rate: 10.0
+
 twist_mux_node:
   ros__parameters:
     cmd_timeout: 0.5

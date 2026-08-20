@@ -24,6 +24,7 @@ setup(
         'console_scripts': [
             'perception_node = perception_safety_pkg.perception_node:main',
             'fusion_node_3d = perception_safety_pkg.fusion_node_3d:main',
+            'forklift_controller_node = perception_safety_pkg.forklift_controller:main',
             'ttc_node = perception_safety_pkg.ttc_node:main',
         ],
     },
