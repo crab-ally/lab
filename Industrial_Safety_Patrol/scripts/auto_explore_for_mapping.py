@@ -81,11 +81,11 @@ class AutoExploreNode(Node):
             (-3.0, 9.5, 1.0),
             (-5.0, 9.5, 1.0),
             (-7.0, 9.5, 1.0),
-            (-9.0, 9.5, 1.0),        # [FIRE 2] 관측 (Z축 상승)
-            (-9.0, 7.0, 1.0),        # Z축 복귀
-            (-9.0, 4.0, 1.0),
-            (-9.0, 1.0, 1.0),
-            (-9.0, -1.0, 1.0),
+            (-9.5, 9.5, 1.0),        # [FIRE 2] 관측 (Z축 상승)
+            (-9.5, 7.0, 1.0),        # Z축 복귀
+            (-9.5, 4.0, 1.0),
+            (-9.5, 1.0, 1.0),
+            (-9.5, -1.0, 1.0),
 
             # =========================================================================
             # 6. 십자 복도
@@ -254,8 +254,9 @@ class AutoExploreNode(Node):
     
     def _shutdown_after_exploration(self):
         self.publish_cmd(0.0, 0.0)
-        if rclpy.ok():
-            rclpy.shutdown()
+        self.get_logger().info("Exploration finished. Shutting down node...")
+        self.destroy_node()
+        rclpy.shutdown()
 
 def main():
     rclpy.init()
@@ -264,8 +265,9 @@ def main():
     def shutdown_handler(sig, frame):
         node.get_logger().info("Shutdown signal received")
         node.stop_robot()
-        node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            node.destroy_node()
+            rclpy.shutdown()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, shutdown_handler)
