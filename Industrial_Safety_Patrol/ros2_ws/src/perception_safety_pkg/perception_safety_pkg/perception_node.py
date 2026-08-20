@@ -11,6 +11,9 @@ Publishes:
     - /perception/debug_image (sensor_msgs/msg/Image)
 """
 
+import os
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+
 import json
 import time
 import cv2
