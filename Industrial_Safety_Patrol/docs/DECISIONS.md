@@ -1,4 +1,4 @@
-# 1. Lidar 개수
+# Lidar 개수
 
 **결정:** 실제 LDS-01 LiDAR(360°, 1° 해상도)를 단순화하여 MuJoCo에서는 36개 Ray(10° 해상도)로 구현
 
@@ -11,7 +11,7 @@
 
 ---
 
-# 2. Robot State Publisher 실행 방식
+# Robot State Publisher 실행 방식
 
 **결정:** robot_state_publisher를 직접 실행하는 방식 대신 별도의 ROS2 Launch 파일을 생성하여 URDF를 전달하는 구조로 변경
 
@@ -23,7 +23,7 @@ ROS2 표준 방식에 맞춰 유지보수성과 확장성을 높이기 위해 La
 
 ---
 
-# 3. 화재 감지 기능
+# 화재 감지 기능
 
 **결정:** RGB-Depth 카메라
 
@@ -31,3 +31,13 @@ ROS2 표준 방식에 맞춰 유지보수성과 확장성을 높이기 위해 La
 - RGB 카메라 만으로는 소화전 같은 색상이 일치하는 다른 물체들도 감지되는 현상 발생
 - mujoco viewer 상 동적인 불꽃 표현 어려움
 - Depth 카메라의 거리값의 분산치로 구조물 구분
+
+---
+
+# SLAM Mapping 기능 개선
+
+**결정:** Karto 기반 SLAM Toolbox 수정
+
+**이유**
+- 기존 Karto는 Inf 라이다 측정값을 유효하지 않은 데이터로 처리하여 해당 방향을 Free 공간으로 반영하지 않음
+- Inf 측정값을 LiDAR 최대 거리까지의 Free 공간으로 처리하도록 Karto의 AddScan() 로직 수정
