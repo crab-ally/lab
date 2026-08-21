@@ -99,7 +99,7 @@ class FusionNode3D(Node):
         self.latest_depth_encoding: str = "16UC1"
         self.latest_scan: Optional[LaserScan] = None
         # CameraInfo header.frame_id 기준으로 설정 (depth frame_id와 다를 수 있으므로 여기서 고정)
-        self.camera_frame_id: str = "camera_color_optical_frame"
+        self.camera_frame_id: str = "camera_link"
 
         # EKF Trackers
         self.track_ekf_map: Dict[int, EKF3D] = {}

@@ -68,7 +68,7 @@ class FireFusionNode(Node):
         self.cx=320.0
         self.cy=240.0
         self.camera_info_received=False
-        self.camera_frame_id='camera_color_optical_frame'
+        self.camera_frame_id='camera_link'
 
         self.sync_frames=deque(maxlen=20)
         self.scan_cache=deque(maxlen=30)
