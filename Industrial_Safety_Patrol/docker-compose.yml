@@ -138,6 +138,7 @@ services:
     command: >
       bash -c "
       source /opt/ros/humble/setup.bash &&
+      source /workspace/ros2_ws/install/setup.bash &&
       ros2 launch slam_toolbox online_async_launch.py
       slam_params_file:=/workspace/config/slam_toolbox_factory.yaml &
       ros2 run rviz2 rviz2
@@ -148,6 +149,7 @@ services:
     volumes:
       - ./config:/workspace/config
       - ./maps:/workspace/maps
+      - ./ros2_ws:/workspace/ros2_ws
       - /tmp/.X11-unix:/tmp/.X11-unix
 
     environment:
