@@ -128,6 +128,9 @@ class FusionNode3D(Node):
         # EKF Trackers
         self.track_ekf_map: Dict[int, EKF3D] = {}
 
+        # ── Previous Active Marker IDs for Cleanup ───────────────────
+        self.prev_active_marker_ids: set = set()
+
         # ── QoS Profile ───────────────────────────────────────────────
         sensor_qos = QoSProfile(
             depth=1,
@@ -500,29 +503,31 @@ class FusionNode3D(Node):
 
             return cam_z
 
-    def _publish_markers(
-        self,
-        tracks: List[dict]
-    ) -> None:
+    def _publish_markers(self, tracks: List[dict]) -> None:
         """RViz2 시각화 마커 발행"""
 
         marker_array = MarkerArray()
+        current_active_marker_ids = set()
 
+        # ── 1. 현재 프레임 활성 트랙 마커 생성 (CUBE & TEXT) ──
         for trk in tracks:
+            track_id = trk['track_id']
+            cube_id = track_id
+            text_id = track_id + 10000
+
+            current_active_marker_ids.add(cube_id)
+            current_active_marker_ids.add(text_id)
+
+            # CUBE Marker
             marker = Marker()
-
             marker.header.frame_id = self.target_frame
-            marker.header.stamp = (
-                self.get_clock().now().to_msg()
-            )
-
+            marker.header.stamp = self.get_clock().now().to_msg()
             marker.ns = "tracks_3d"
-            marker.id = trk['track_id']
+            marker.id = cube_id
             marker.type = Marker.CUBE
             marker.action = Marker.ADD
 
             pos = trk['position']
-
             marker.pose.position.x = float(pos[0])
             marker.pose.position.y = float(pos[1])
             marker.pose.position.z = float(pos[2])
@@ -532,21 +537,16 @@ class FusionNode3D(Node):
                 marker.scale.x = 0.6
                 marker.scale.y = 0.6
                 marker.scale.z = 1.7
-
             else:
                 marker.scale.x = 2.0
                 marker.scale.y = 1.2
                 marker.scale.z = 1.8
 
-            if (
-                trk['class_name'] == 'person' and
-                not trk['ppe_ok']
-            ):
+            if trk['class_name'] == 'person' and not trk['ppe_ok']:
                 marker.color.r = 1.0
                 marker.color.g = 0.0
                 marker.color.b = 0.0
                 marker.color.a = 0.8
-
             else:
                 marker.color.r = 0.0
                 marker.color.g = 0.8
@@ -555,34 +555,25 @@ class FusionNode3D(Node):
 
             marker_array.markers.append(marker)
 
-            # Text Marker
+            # TEXT Marker
             text_marker = Marker()
-
             text_marker.header = marker.header
             text_marker.ns = "tracks_3d_text"
-            text_marker.id = (
-                trk['track_id'] + 10000
-            )
-
+            text_marker.id = text_id
             text_marker.type = Marker.TEXT_VIEW_FACING
             text_marker.action = Marker.ADD
 
             text_marker.pose.position.x = float(pos[0])
             text_marker.pose.position.y = float(pos[1])
-            text_marker.pose.position.z = (
-                float(pos[2]) + 1.2
-            )
+            text_marker.pose.position.z = float(pos[2]) + 1.2
 
             vx, vy = trk['velocity']
-
             text_marker.text = (
-                f"ID:{trk['track_id']} "
-                f"({trk['class_name']})\n"
+                f"ID:{trk['track_id']} ({trk['class_name']})\n"
                 f"V:{math.hypot(vx, vy):.1f}m/s"
             )
 
             text_marker.scale.z = 0.4
-
             text_marker.color.r = 1.0
             text_marker.color.g = 1.0
             text_marker.color.b = 1.0
@@ -590,6 +581,28 @@ class FusionNode3D(Node):
 
             marker_array.markers.append(text_marker)
 
+        # ── 2. 사라진 ID들에 대한 DELETE 마커 생성 ──
+        removed_ids = self.prev_active_marker_ids - current_active_marker_ids
+
+        for m_id in removed_ids:
+            del_marker = Marker()
+            del_marker.header.frame_id = self.target_frame
+            del_marker.header.stamp = self.get_clock().now().to_msg()
+            
+            # ID 범주에 맞춰 namespace 지정
+            if m_id >= 10000:
+                del_marker.ns = "tracks_3d_text"
+            else:
+                del_marker.ns = "tracks_3d"
+
+            del_marker.id = m_id
+            del_marker.action = Marker.DELETE
+            marker_array.markers.append(del_marker)
+
+        # 다음 프레임을 위한 활성 ID 갱신
+        self.prev_active_marker_ids = current_active_marker_ids
+
+        # 마커 토픽 발행
         self.pub_markers.publish(marker_array)
 
 
