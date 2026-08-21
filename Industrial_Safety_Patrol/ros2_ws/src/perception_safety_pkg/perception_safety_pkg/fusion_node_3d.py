@@ -96,8 +96,12 @@ class FusionNode3D(Node):
 
         # ── Latest Data Storage ────────────────────────────────────────
         self.latest_depth_img: Optional[np.ndarray] = None
+        self.latest_depth_stamp: Optional[float] = None
         self.latest_depth_encoding: str = "16UC1"
+
         self.latest_scan: Optional[LaserScan] = None
+        self.latest_scan_stamp: Optional[float] = None
+
         # CameraInfo header.frame_id 기준으로 설정 (depth frame_id와 다를 수 있으므로 여기서 고정)
         self.camera_frame_id: str = "camera_link"
         self.scan_frame_id = "laser_frame"
@@ -181,11 +185,13 @@ class FusionNode3D(Node):
             elif msg.encoding in ['32FC1']:
                 self.latest_depth_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='32FC1')
                 self.latest_depth_encoding = '32FC1'
+            self.latest_depth_stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         except Exception as e:
             self.get_logger().error(f'Depth Image Exception: {e}')
 
     def _scan_callback(self, msg: LaserScan) -> None:
         self.latest_scan = msg
+        self.latest_scan_stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         # LiDAR의 frame_id 저장 (기본값 fallback용)
         if hasattr(msg, 'header') and msg.header.frame_id:
             self.scan_frame_id = msg.header.frame_id
@@ -204,6 +210,15 @@ class FusionNode3D(Node):
 
         stamp = payload['header']['stamp']
         detections = payload.get('detections', [])
+
+        # ── Depth Image Stale Data 검사 (임계치: 0.15초) ──
+        if abs(stamp - self.latest_depth_stamp) > 0.15:
+            self.get_logger().warn_throttle(
+                2.0,
+                f'Depth image is too old or out of sync! '
+                f'(Diff: {abs(stamp - self.latest_depth_stamp):.3f}s)'
+            )
+            return
 
         # ── 1. 타임스탬프 기반 TF 변환 검색 (Camera Frame -> Target Frame) ──
         # stamp (float 초 단위)를 rclpy.time.Time 객체로 변환
@@ -405,6 +420,11 @@ class FusionNode3D(Node):
             """2D LiDAR /scan 데이터로 Depth 센서 측정거리 보정 (TF 기반 Extrinsics 반영)"""
 
             if self.latest_scan is None:
+                return cam_z
+            
+            # ── LiDAR Scan Stale Data 검사 (임계치: 0.2초) ──
+            if abs(detection_stamp - self.latest_scan_stamp) > 0.2:
+                # Scan 데이터가 오래되었으면 LiDAR 보정 생략 후 cam_z 반환
                 return cam_z
 
             scan = self.latest_scan
