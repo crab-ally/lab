@@ -199,12 +199,20 @@ class FusionNode3D(Node):
         stamp = payload['header']['stamp']
         detections = payload.get('detections', [])
 
+        # ── 1. 타임스탬프 기반 TF 변환 검색 (Camera Frame -> Target Frame) ──
+        # stamp (float 초 단위)를 rclpy.time.Time 객체로 변환
+        sec = int(stamp)
+        nanosec = int((stamp - sec) * 1e9)
+        lookup_time = rclpy.time.Time(seconds=sec, nanoseconds=nanosec)
+
         # TF 변환 검색 (Camera Frame -> Base Link)
         try:
+            # 인식 결과가 생성된 '당시'의 TF를 조회 (최대 0.05초 대기)
             tf_transform = self.tf_buffer.lookup_transform(
                 self.target_frame,
                 self.camera_frame_id,
-                rclpy.time.Time()
+                lookup_time,
+                timeout=rclpy.duration.Duration(seconds=0.05)
             )
 
         except (
@@ -212,12 +220,18 @@ class FusionNode3D(Node):
             tf2_ros.ConnectivityException,
             tf2_ros.ExtrapolationException
         ) as e:
-
-            self.get_logger().warn(
-                f'TF Lookup Failed '
-                f'({self.camera_frame_id} -> {self.target_frame}): {e}'
-            )
-            return
+            # 타임스탬프 시점의 TF 조회가 실패한 경우(Extrapolation 등), 최신 TF로 Fallback
+            try:
+                tf_transform = self.tf_buffer.lookup_transform(
+                    self.target_frame,
+                    self.camera_frame_id,
+                    rclpy.time.Time()
+                )
+            except Exception as fallback_e:
+                self.get_logger().warn(
+                    f'TF Lookup Failed ({self.camera_frame_id} -> {self.target_frame}): {fallback_e}'
+                )
+                return
 
         tracks_3d_payload = []
         active_track_ids = set()
