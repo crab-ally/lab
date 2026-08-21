@@ -100,6 +100,7 @@ class FusionNode3D(Node):
         self.latest_scan: Optional[LaserScan] = None
         # CameraInfo header.frame_id 기준으로 설정 (depth frame_id와 다를 수 있으므로 여기서 고정)
         self.camera_frame_id: str = "camera_link"
+        self.scan_frame_id = "laser_frame"
 
         # EKF Trackers
         self.track_ekf_map: Dict[int, EKF3D] = {}
@@ -185,6 +186,11 @@ class FusionNode3D(Node):
 
     def _scan_callback(self, msg: LaserScan) -> None:
         self.latest_scan = msg
+        # LiDAR의 frame_id 저장 (기본값 fallback용)
+        if hasattr(msg, 'header') and msg.header.frame_id:
+            self.scan_frame_id = msg.header.frame_id
+        else:
+            self.scan_frame_id = "laser_frame"
 
     def _detections_callback(self, msg: String) -> None:
         if self.latest_depth_img is None:
@@ -255,7 +261,7 @@ class FusionNode3D(Node):
                 continue
 
             # 2. 2D LiDAR /scan 데이터로 Distance 교차 검증 (보정)
-            cam_z = self._refine_with_scan(cam_x, cam_z)
+            cam_z = self._refine_with_scan(cam_x, cam_y, cam_z)
 
             # 3. TF2로 Camera Frame -> base_link 좌표 변환
             p_cam = PointStamped()
@@ -395,49 +401,65 @@ class FusionNode3D(Node):
 
         return x_cam, y_cam, z_cam
 
-    def _refine_with_scan(
-        self,
-        cam_x: float,
-        cam_z: float
-    ) -> float:
-        """2D LiDAR /scan 데이터로 Depth 센서 측정거리 보정"""
+    def _refine_with_scan(self, cam_x: float, cam_y: float, cam_z: float) -> float:
+            """2D LiDAR /scan 데이터로 Depth 센서 측정거리 보정 (TF 기반 Extrinsics 반영)"""
 
-        if self.latest_scan is None:
+            if self.latest_scan is None:
+                return cam_z
+
+            scan = self.latest_scan
+            scan_frame = getattr(scan.header, 'frame_id', self.scan_frame_id)
+
+            # ── 1. Camera Frame -> LiDAR Frame 변환 ──
+            p_cam = PointStamped()
+            p_cam.header.frame_id = self.camera_frame_id
+            p_cam.point.x = float(cam_x)
+            p_cam.point.y = float(cam_y)
+            p_cam.point.z = float(cam_z)
+
+            try:
+                # 센서 간 최신 Extrinsics 변환 조회
+                tf_cam_to_scan = self.tf_buffer.lookup_transform(
+                    scan_frame,
+                    self.camera_frame_id,
+                    rclpy.time.Time()
+                )
+                p_scan_frame = do_transform_point(p_cam, tf_cam_to_scan)
+                
+                lx = p_scan_frame.point.x
+                ly = p_scan_frame.point.y
+                lz = p_scan_frame.point.z
+
+            except (
+                tf2_ros.LookupException,
+                tf2_ros.ConnectivityException,
+                tf2_ros.ExtrapolationException
+            ) as e:
+                # TF 변환 실패 시 기본 cam_z 반환
+                return cam_z
+
+            # ── 2. LiDAR 좌표계(2D: X-전방, Y-좌측) 기준 각도 및 거리를 계산 ──
+            # ROS 좌표계 표준: X=Forward, Y=Left -> math.atan2(Y, X)
+            angle_rad = math.atan2(ly, lx)
+            dist_from_lidar = math.hypot(lx, ly)
+
+            # ── 3. /scan 각도 범위 검사 ──
+            if angle_rad < scan.angle_min or angle_rad > scan.angle_max:
+                return cam_z
+
+            idx = int((angle_rad - scan.angle_min) / scan.angle_increment)
+
+            if 0 <= idx < len(scan.ranges):
+                scan_dist = scan.ranges[idx]
+
+                # 유효한 측정값 및 오차범위(0.5m) 이내일 경우 보정
+                if scan.range_min <= scan_dist <= scan.range_max:
+                    if abs(scan_dist - dist_from_lidar) < 0.5:
+                        # LiDAR 거리를 기반으로 카메라 depth 보정 비율 계산
+                        scale = (0.7 * dist_from_lidar + 0.3 * scan_dist) / dist_from_lidar
+                        return cam_z * scale
+
             return cam_z
-
-        # 카메라의 Horizontal Angle (azimuth) 계산
-        # 카메라 Optical 프레임은 오른쪽이 +X축이므로, 
-        # ROS 표준 LiDAR(CCW: 왼쪽이 +각도, 오른쪽이 -각도)와 맞추기 위해 부호 반전(-) 적용
-        angle_rad = -math.atan2(
-            cam_x,
-            cam_z
-        )
-
-        # /scan 해상도 내 해당 각도 index 계산
-        scan = self.latest_scan
-
-        if (
-            angle_rad < scan.angle_min or
-            angle_rad > scan.angle_max
-        ):
-            return cam_z
-
-        idx = int(
-            (angle_rad - scan.angle_min) /
-            scan.angle_increment
-        )
-
-        if 0 <= idx < len(scan.ranges):
-            scan_dist = scan.ranges[idx]
-            if scan.range_min <= scan_dist <= scan.range_max:
-                # Depth와 Scan 오차가 0.5m 이내일 경우 보정 융합 (가중 평균)
-                if abs(scan_dist - cam_z) < 0.5:
-                    return (
-                        0.7 * cam_z +
-                        0.3 * scan_dist
-                    )
-
-        return cam_z
 
     def _publish_markers(
         self,
