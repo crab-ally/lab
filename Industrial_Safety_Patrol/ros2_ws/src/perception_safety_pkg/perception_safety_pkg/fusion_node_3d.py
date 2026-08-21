@@ -39,11 +39,15 @@ from visualization_msgs.msg import Marker, MarkerArray
 class EKF3D:
     """DeepSORT track_id별 3D 위치 및 속도 추정 칼만 필터"""
     def __init__(self, initial_x: float, initial_y: float, stamp: float) -> None:
-        self.state = np.array([initial_x, initial_y, 0.0, 0.0], dtype=np.float64) # [x, y, vx, vy]
+        self.state = np.array([initial_x, initial_y, 0.0, 0.0], dtype=np.float64)  # [x, y, vx, vy]
         self.P = np.diag([0.5, 0.5, 2.0, 2.0])
-        self.q_var_pos = 0.1
-        self.q_var_vel = 0.5
-        self.R = np.diag([0.15, 0.15]) # 측정 노이즈
+        
+        # ── 가속도 노이즈 표준편차 (m/s^2) ──
+        # 물체(사람/지게차)의 예상 최대 가속도 성분
+        self.sigma_a = 1.2
+        
+        # 측정 노이즈 (R)
+        self.R = np.diag([0.15, 0.15])
         self.H = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype=np.float64)
         self.last_stamp = stamp
         self.miss_count = 0
@@ -52,13 +56,29 @@ class EKF3D:
         dt = current_stamp - self.last_stamp
         if dt <= 0:
             return
+
+        # ── 1. State Transition Matrix (F) ──
         F = np.array([
             [1, 0, dt,  0],
             [0, 1,  0, dt],
             [0, 0,  1,  0],
             [0, 0,  0,  1]
         ], dtype=np.float64)
-        Q = np.diag([self.q_var_pos * dt, self.q_var_pos * dt, self.q_var_vel * dt, self.q_var_vel * dt])
+
+        # ── 2. Process Noise Covariance (Q) - Discrete White Noise Acceleration Model ──
+        dt2 = (dt ** 2) / 2.0
+        dt3 = (dt ** 3) / 3.0
+        q_var = self.sigma_a ** 2
+
+        # X, Y 축 통합 4x4 Q 행렬
+        Q = np.array([
+            [dt3 * q_var, 0.0,         dt2 * q_var, 0.0],
+            [0.0,         dt3 * q_var, 0.0,         dt2 * q_var],
+            [dt2 * q_var, 0.0,         dt * q_var,  0.0],
+            [0.0,         dt2 * q_var, 0.0,         dt * q_var]
+        ], dtype=np.float64)
+
+        # ── 3. State & Covariance Update ──
         self.state = F @ self.state
         self.P = F @ self.P @ F.T + Q
         self.last_stamp = current_stamp
@@ -71,7 +91,6 @@ class EKF3D:
         self.state = self.state + K @ y
         self.P = (np.eye(4) - K @ self.H) @ self.P
         self.miss_count = 0
-
 
 class FusionNode3D(Node):
     def __init__(self) -> None:
