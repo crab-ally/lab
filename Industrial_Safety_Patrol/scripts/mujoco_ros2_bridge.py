@@ -392,7 +392,7 @@ class MujocoRosBridge(Node):
             arr = np.array(sensor_data, dtype=np.float32)
 
             invalid = (
-                (arr >= msg.range_max - 0.05) |
+                (arr > msg.range_max) |
                 (arr < msg.range_min)
             )
 
@@ -578,14 +578,14 @@ def main():
                     stamp,
                     node.fl1_joint_id,
                     node.fl1_pose_pub,
-                    'forklift_1'
+                    'odom'
                 )
 
                 node.publish_forklift_pose(
                     stamp,
                     node.fl2_joint_id,
                     node.fl2_pose_pub,
-                    'forklift_2'
+                    'odom'
                 )
 
                 node.last_odom_time = node.sim_time
