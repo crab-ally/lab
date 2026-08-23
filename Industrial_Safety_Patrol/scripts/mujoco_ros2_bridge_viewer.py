@@ -311,7 +311,7 @@ class MujocoRosBridge(Node):
             msg.range_max = 3.5
 
             arr = np.array(sensor_data, dtype=np.float32)
-            invalid = (arr >= msg.range_max - 0.05) | (arr < msg.range_min)
+            invalid = (arr > msg.range_max) | (arr < msg.range_min)
             arr[invalid] = np.inf
             msg.ranges = arr.tolist()
             self.scan_pub.publish(msg)
@@ -443,8 +443,8 @@ def main():
             if node.sim_time >= node.last_odom_time + MujocoRosBridge.ODOM_INTERVAL:
                 with node.physics_lock:
                     node.publish_odom(stamp)
-                    node.publish_forklift_pose(stamp, node.fl1_joint_id, node.fl1_pose_pub, 'forklift_1')
-                    node.publish_forklift_pose(stamp, node.fl2_joint_id, node.fl2_pose_pub, 'forklift_2')
+                    node.publish_forklift_pose(stamp, node.fl1_joint_id, node.fl1_pose_pub, 'odom')
+                    node.publish_forklift_pose(stamp, node.fl2_joint_id, node.fl2_pose_pub, 'odom')
                     node.last_odom_time = node.sim_time
 
                 clock_msg = Clock()
