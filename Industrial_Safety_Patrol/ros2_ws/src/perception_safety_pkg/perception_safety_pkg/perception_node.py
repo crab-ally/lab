@@ -35,10 +35,12 @@ class PerceptionNode(Node):
         # ── Parameter Settings ─────────────────────────────────────────
         self.declare_parameter('model_path', 'yolov8n.pt')
         self.declare_parameter('conf_threshold', 0.5)
+        self.declare_parameter('person_conf_threshold', 0.35)  # 쓰러진/굽힌 작업자 감지용
         self.declare_parameter('target_classes', [0, 1, 2, 3]) # 0: person, 1: helmet, 2: vest, 3: forklift
 
         self.model_path = self.get_parameter('model_path').get_parameter_value().string_value
         self.conf_thresh = self.get_parameter('conf_threshold').get_parameter_value().double_value
+        self.person_conf_thresh = self.get_parameter('person_conf_threshold').get_parameter_value().double_value
         self.target_classes = self.get_parameter('target_classes').get_parameter_value().integer_array_value
 
         self.bridge = CvBridge()
@@ -103,10 +105,10 @@ class PerceptionNode(Node):
         stamp_sec = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         detections_payload = []
 
-        # 1. YOLOv8 감지 수행
+        # 1. YOLOv8 감지 수행 (쓰러진/굽힌 작업자 수용을 위해 person_conf_thresh 사용)
         results = self.model.predict(
             source=cv_img,
-            conf=self.conf_thresh,
+            conf=self.person_conf_thresh,
             classes=list(self.target_classes),
             verbose=False
         )
@@ -122,6 +124,10 @@ class PerceptionNode(Node):
                     conf = float(box.conf[0].cpu().numpy())
                     cls_id = int(box.cls[0].cpu().numpy())
                     class_name = self.model.names[cls_id]
+
+                    # 일반 객체(지게차/PPE)는 기준 conf_thresh(0.5) 미만 시 스킵
+                    if cls_id != 0 and conf < self.conf_thresh:
+                        continue
 
                     # 헬멧(1) 또는 조끼(2)인 경우 PPE 박스로만 저장 (DeepSORT 추적 대상에서 제외)
                     if cls_id in [1, 2]:
@@ -154,7 +160,14 @@ class PerceptionNode(Node):
 
             # PPE(안전모/조끼) 착용 여부 검사 (Person 대상)
             if class_name == 'person':
-                ppe_ok = self._check_ppe(bbox, ppe_bboxes)
+                # [개선점 1] 카메라 낮음(0.35m) 및 FOV(58°) 특성: 근거리 작업자의 머리가 상단(ymin < 15px)으로 잘린 경우
+                # 안전모 미감지로 인한 오탐을 방지하기 위해 예외 처리
+                is_top_cropped = (ymin < 15.0)
+                if is_top_cropped:
+                    ppe_ok = True
+                else:
+                    ppe_ok = self._check_ppe(bbox, ppe_bboxes)
+
                 if not ppe_ok:
                     last_warn = self.last_warning_time.get(track_id, 0.0)
                     if stamp_sec - last_warn >= 1.0:
