@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Safety Patrol — Monitoring Dashboard</title>
+  <meta name="description" content="AI 위험예측 안전 순찰 로봇 실시간 모니터링 대시보드" />
+
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- React 18 CDN (UMD) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel standalone (JSX → JS in browser) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    /* ── Reset & Tokens ──────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-base:      #070d1a;
+      --bg-surface:   #0d1528;
+      --bg-card:      #111d35;
+      --bg-card-alt:  #0e1930;
+      --border:       rgba(0, 229, 255, 0.12);
+      --border-glow:  rgba(0, 229, 255, 0.35);
+
+      --cyan:    #00e5ff;
+      --cyan-dk: #00b8d4;
+      --red:     #ff4444;
+      --red-dk:  #c62828;
+      --orange:  #ff9800;
+      --green:   #00e676;
+      --purple:  #b388ff;
+      --gray:    #7b8db0;
+
+      --text-primary:   #e8edf8;
+      --text-secondary: #8a9abf;
+      --text-muted:     #4a5780;
+
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 18px;
+
+      --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255,255,255,0.05);
+      --shadow-glow-cyan: 0 0 24px rgba(0,229,255,0.2);
+      --shadow-glow-red:  0 0 24px rgba(255,68,68,0.3);
+
+      --transition: 0.2s ease;
+    }
+
+    html, body, #root {
+      height: 100%;
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      overflow: hidden;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────────── */
+    .layout {
+      display: grid;
+      grid-template-rows: 56px 1fr;
+      grid-template-columns: 1fr;
+      height: 100vh;
+      gap: 0;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      background: linear-gradient(90deg, #0a1020 0%, #0d1830 100%);
+      border-bottom: 1px solid var(--border);
+      z-index: 10;
+    }
+    .header-left { display: flex; align-items: center; gap: 14px; }
+    .header-logo {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, var(--cyan), var(--purple));
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+    .header-title {
+      font-size: 15px; font-weight: 600; letter-spacing: 0.02em;
+      background: linear-gradient(90deg, var(--cyan), var(--text-primary));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .header-subtitle { font-size: 11px; color: var(--text-muted); font-weight: 400; }
+    .header-right { display: flex; align-items: center; gap: 20px; }
+    .status-badge {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; font-weight: 500;
+    }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: pulse 2s infinite;
+    }
+    .status-dot.disconnected { background: var(--red); box-shadow: 0 0 8px var(--red); animation: none; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.6; transform: scale(0.85); }
+    }
+    .clock { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--cyan); }
+
+    /* Main grid */
+    .main {
+      display: grid;
+      grid-template-columns: 400px 1fr 280px;
+      grid-template-rows: 1fr 200px;
+      gap: 12px;
+      padding: 12px;
+      overflow: hidden;
+    }
+
+    /* ── Card ────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-card);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .card-title {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--text-secondary);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .card-body { flex: 1; overflow: hidden; padding: 12px; }
+
+    /* ── Factory Map ─────────────────────────────────────────────────── */
+    .map-card { grid-row: 1; grid-column: 1; }
+    .map-svg-wrap {
+      width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .map-svg { width: 100%; height: 100%; }
+
+    /* Robot dot */
+    .robot-dot {
+      filter: drop-shadow(0 0 6px var(--cyan));
+      transition: cx 0.5s ease, cy 0.5s ease;
+    }
+
+    /* Heatmap canvas overlay */
+    .heatmap-container { position: relative; width: 100%; height: 100%; }
+    .heatmap-canvas {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%; pointer-events: none;
+      border-radius: var(--radius-sm);
+    }
+
+    /* ── Event Feed ──────────────────────────────────────────────────── */
+    .feed-card { grid-row: 1; grid-column: 2; }
+    .feed-body { flex: 1; overflow-y: auto; padding: 8px 12px; }
+    .feed-body::-webkit-scrollbar { width: 4px; }
+    .feed-body::-webkit-scrollbar-track { background: transparent; }
+    .feed-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .event-item {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 10px 12px; margin-bottom: 6px;
+      background: var(--bg-card-alt);
+      border-radius: var(--radius-sm);
+      border-left: 3px solid transparent;
+      animation: slideIn 0.3s ease;
+      transition: background var(--transition);
+    }
+    .event-item:hover { background: rgba(0,229,255,0.05); }
+    .event-item.EMERGENCY { border-left-color: var(--red); }
+    .event-item.WARNING   { border-left-color: var(--orange); }
+    .event-item.INFO      { border-left-color: var(--cyan); }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-12px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    .event-icon {
+      width: 30px; height: 30px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; flex-shrink: 0;
+    }
+    .event-icon.EMERGENCY { background: rgba(255,68,68,0.15); }
+    .event-icon.WARNING   { background: rgba(255,152,0,0.15); }
+    .event-icon.INFO      { background: rgba(0,229,255,0.1); }
+
+    .event-content { flex: 1; min-width: 0; }
+    .event-type {
+      font-size: 12px; font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .event-type.EMERGENCY { color: var(--red); }
+    .event-type.WARNING   { color: var(--orange); }
+    .event-type.INFO      { color: var(--cyan); }
+    .event-meta { font-size: 11px; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; }
+    .event-time { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-muted); }
+
+    .feed-empty {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      height: 100%; gap: 10px;
+      color: var(--text-muted); font-size: 13px;
+    }
+    .feed-empty-icon { font-size: 40px; opacity: 0.3; }
+
+    /* ── Stats ───────────────────────────────────────────────────────── */
+    .stats-card { grid-row: 1; grid-column: 3; }
+    .stats-body { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+    .stat-metric {
+      background: var(--bg-card-alt);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .stat-label { font-size: 11px; color: var(--text-secondary); font-weight: 500; }
+    .stat-value { font-size: 24px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+    .stat-value.total     { color: var(--cyan); }
+    .stat-value.warnings  { color: var(--orange); }
+    .stat-value.emergency { color: var(--red); }
+
+    /* Severity bar */
+    .severity-bar-wrap { margin-top: 6px; }
+    .severity-bar-label { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 4px; }
+    .severity-bar-track { height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
+    .severity-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+
+    /* ── Robot Position ──────────────────────────────────────────────── */
+    .pos-card { grid-row: 2; grid-column: 1; }
+    .pos-body { display: flex; align-items: center; gap: 20px; padding: 12px 16px; }
+    .pos-coord { display: flex; flex-direction: column; gap: 2px; }
+    .pos-coord-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .pos-coord-val { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 600; color: var(--cyan); }
+    .pos-divider { width: 1px; height: 36px; background: var(--border); }
+    .pos-speed { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+    /* ── TTC Panel ───────────────────────────────────────────────────── */
+    .ttc-card { grid-row: 2; grid-column: 2; }
+    .ttc-body { display: flex; align-items: center; gap: 16px; padding: 12px 16px; overflow-x: auto; }
+    .ttc-item {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      background: var(--bg-card-alt); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 10px 16px; flex-shrink: 0;
+      min-width: 100px;
+      transition: border-color var(--transition);
+    }
+    .ttc-item.EMERGENCY { border-color: var(--red); box-shadow: 0 0 12px rgba(255,68,68,0.2); }
+    .ttc-item.WARNING   { border-color: var(--orange); }
+    .ttc-label { font-size: 10px; color: var(--text-muted); }
+    .ttc-value { font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 700; }
+    .ttc-value.EMERGENCY { color: var(--red); }
+    .ttc-value.WARNING   { color: var(--orange); }
+    .ttc-value.SAFE      { color: var(--green); }
+    .ttc-subject { font-size: 10px; color: var(--text-secondary); }
+
+    .ttc-empty { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 13px; }
+
+    /* ── Connection Info ─────────────────────────────────────────────── */
+    .conn-card { grid-row: 2; grid-column: 3; }
+    .conn-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+    .conn-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+    .conn-key { color: var(--text-muted); }
+    .conn-val { font-family: 'JetBrains Mono', monospace; color: var(--text-secondary); font-size: 11px; }
+    .reconnect-btn {
+      margin-top: 8px;
+      width: 100%; padding: 8px;
+      background: rgba(0,229,255,0.1); border: 1px solid var(--border-glow);
+      border-radius: var(--radius-sm); color: var(--cyan);
+      font-size: 12px; font-weight: 500; cursor: pointer;
+      transition: background var(--transition);
+    }
+    .reconnect-btn:hover { background: rgba(0,229,255,0.2); }
+
+    /* Badge */
+    .badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 20px; height: 18px; padding: 0 6px;
+      border-radius: 9px; font-size: 10px; font-weight: 700;
+    }
+    .badge.cyan { background: rgba(0,229,255,0.15); color: var(--cyan); }
+    .badge.red  { background: rgba(255,68,68,0.2); color: var(--red); }
+
+    /* Scrollbar global */
+    * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // ── Constants ─────────────────────────────────────────────────────────
+    const WS_URL   = `ws://${location.hostname}:8765`;
+    const MAX_FEED  = 80;   // 피드 최대 항목 수
+    const MAP_W     = 20;   // 공장 맵 논리 폭 (m)
+    const MAP_H     = 15;   // 공장 맵 논리 높이 (m)
+    const HEAT_DECAY = 0.997; // 히트맵 감쇠 계수 (per-frame)
+
+    // ── Helpers ───────────────────────────────────────────────────────────
+    function fmtTime(epochMs) {
+      const d = new Date(epochMs);
+      return d.toLocaleTimeString('ko-KR', { hour12: false });
+    }
+    function fmtTtc(val) {
+      if (val === null || val === undefined) return '--';
+      return `${parseFloat(val).toFixed(2)}s`;
+    }
+    function riskColor(level) {
+      if (level === 'EMERGENCY') return 'var(--red)';
+      if (level === 'WARNING')   return 'var(--orange)';
+      return 'var(--green)';
+    }
+    function eventIcon(type) {
+      const icons = {
+        TTC_ALERT:     '⚠️',
+        PPE_VIOLATION: '🦺',
+        FIRE:          '🔥',
+        FALL:          '🧍',
+        SYSTEM:        '🔌',
+        DEFAULT:       '📡',
+      };
+      return icons[type] || icons.DEFAULT;
+    }
+
+    // ── FactoryMap ────────────────────────────────────────────────────────
+    function FactoryMap({ robotX, robotY, heatPoints }) {
+      const canvasRef = useRef(null);
+      const heatDataRef = useRef(null);  // Float32Array of intensity values
+
+      const SVG_W = 370;
+      const SVG_H = 270;
+      const PAD   = 10;
+      const scaleX = (x) => PAD + ((x + MAP_W / 2) / MAP_W) * (SVG_W - PAD * 2);
+      const scaleY = (y) => PAD + ((MAP_H / 2 - y) / MAP_H) * (SVG_H - PAD * 2);
+
+      // 히트맵 업데이트
+      useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width;
+        const H = canvas.height;
+
+        if (!heatDataRef.current) {
+          heatDataRef.current = new Float32Array(W * H);
+        }
+        const data = heatDataRef.current;
+
+        // 감쇠
+        for (let i = 0; i < data.length; i++) data[i] *= HEAT_DECAY;
+
+        // 새 포인트 추가
+        for (const pt of heatPoints) {
+          const cx = Math.round(PAD + ((pt.x + MAP_W / 2) / MAP_W) * (W - PAD * 2));
+          const cy = Math.round(PAD + ((MAP_H / 2 - pt.y) / MAP_H) * (H - PAD * 2));
+          const r  = Math.round((pt.severity === 'EMERGENCY' ? 22 : 14));
+          const intensity = pt.severity === 'EMERGENCY' ? 0.9 : 0.55;
+          for (let dy = -r; dy <= r; dy++) {
+            for (let dx = -r; dx <= r; dx++) {
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              if (dist > r) continue;
+              const nx = cx + dx; const ny = cy + dy;
+              if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+              const idx = ny * W + nx;
+              data[idx] = Math.min(1, data[idx] + intensity * (1 - dist / r));
+            }
+          }
+        }
+
+        // 렌더링
+        ctx.clearRect(0, 0, W, H);
+        const imgData = ctx.createImageData(W, H);
+        for (let i = 0; i < data.length; i++) {
+          const v = data[i];
+          if (v < 0.02) continue;
+          const idx4 = i * 4;
+          // 빨강-주황 그라디언트
+          imgData.data[idx4 + 0] = Math.min(255, 255);
+          imgData.data[idx4 + 1] = Math.round((1 - v) * 120);
+          imgData.data[idx4 + 2] = 0;
+          imgData.data[idx4 + 3] = Math.round(v * 180);
+        }
+        ctx.putImageData(imgData, 0, 0);
+      }, [heatPoints]);
+
+      const rx = scaleX(robotX);
+      const ry = scaleY(robotY);
+
+      return (
+        <div className="heatmap-container">
+          <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="map-svg">
+            {/* 공장 배경 */}
+            <rect x={PAD} y={PAD} width={SVG_W - PAD*2} height={SVG_H - PAD*2}
+              fill="rgba(13,21,40,0.9)" stroke="rgba(0,229,255,0.15)" strokeWidth="1" rx="4" />
+
+            {/* 격자 */}
+            {Array.from({ length: 5 }, (_, i) => (
+              <line key={`v${i}`}
+                x1={PAD + (i+1) * (SVG_W - PAD*2) / 6} y1={PAD}
+                x2={PAD + (i+1) * (SVG_W - PAD*2) / 6} y2={SVG_H - PAD}
+                stroke="rgba(0,229,255,0.06)" strokeWidth="1" />
+            ))}
+            {Array.from({ length: 4 }, (_, i) => (
+              <line key={`h${i}`}
+                x1={PAD} y1={PAD + (i+1) * (SVG_H - PAD*2) / 5}
+                x2={SVG_W - PAD} y2={PAD + (i+1) * (SVG_H - PAD*2) / 5}
+                stroke="rgba(0,229,255,0.06)" strokeWidth="1" />
+            ))}
+
+            {/* 구역 레이블 */}
+            {[
+              { x: -8, y:  5, label: 'Zone A', color: 'rgba(0,229,255,0.3)' },
+              { x:  4, y:  5, label: 'Zone B', color: 'rgba(0,229,255,0.3)' },
+              { x: -8, y: -4, label: 'Zone C', color: 'rgba(0,229,255,0.3)' },
+              { x:  4, y: -4, label: 'Zone D', color: 'rgba(0,229,255,0.3)' },
+            ].map(z => (
+              <text key={z.label} x={scaleX(z.x)} y={scaleY(z.y)}
+                fill={z.color} fontSize="9" fontFamily="Inter">
+                {z.label}
+              </text>
+            ))}
+
+            {/* 장애물 (예시) */}
+            {[
+              { x: -6, y: 2, w: 3, h: 2 },
+              { x:  3, y: 1, w: 2, h: 3 },
+              { x: -2, y:-3, w: 4, h: 2 },
+            ].map((obs, i) => (
+              <rect key={i}
+                x={scaleX(obs.x)} y={scaleY(obs.y + obs.h)}
+                width={(obs.w / MAP_W) * (SVG_W - PAD*2)}
+                height={(obs.h / MAP_H) * (SVG_H - PAD*2)}
+                fill="rgba(60,80,120,0.5)" stroke="rgba(0,229,255,0.2)" strokeWidth="0.5" rx="2" />
+            ))}
+
+            {/* 로봇 위치 */}
+            <circle cx={rx} cy={ry} r="10"
+              fill="rgba(0,229,255,0.15)" stroke="var(--cyan)" strokeWidth="1.5"
+              className="robot-dot" />
+            <circle cx={rx} cy={ry} r="5"
+              fill="var(--cyan)" className="robot-dot" />
+            {/* 방향 화살표 */}
+            <line x1={rx} y1={ry} x2={rx} y2={ry - 14}
+              stroke="var(--cyan)" strokeWidth="2" strokeLinecap="round" />
+
+            {/* 좌표 텍스트 */}
+            <text x={PAD + 4} y={SVG_H - PAD - 4}
+              fill="rgba(0,229,255,0.5)" fontSize="8" fontFamily="JetBrains Mono">
+              ({robotX.toFixed(2)}, {robotY.toFixed(2)})
+            </text>
+          </svg>
+          <canvas ref={canvasRef} className="heatmap-canvas"
+            width={SVG_W} height={SVG_H} style={{ opacity: 0.65 }} />
+        </div>
+      );
+    }
+
+    // ── EventFeed ─────────────────────────────────────────────────────────
+    function EventFeed({ events }) {
+      const feedRef = useRef(null);
+      useEffect(() => {
+        if (feedRef.current) feedRef.current.scrollTop = 0;
+      }, [events.length]);
+
+      if (events.length === 0) {
+        return (
+          <div className="feed-empty">
+            <span className="feed-empty-icon">📡</span>
+            <span>이벤트 대기 중...</span>
+            <span style={{ fontSize: 11 }}>ROS2 토픽 연결 후 실시간으로 표시됩니다</span>
+          </div>
+        );
+      }
+
+      return (
+        <div className="feed-body" ref={feedRef}>
+          {events.map((ev) => (
+            <div key={ev.id} className={`event-item ${ev.severity}`}>
+              <div className={`event-icon ${ev.severity}`}>
+                {eventIcon(ev.type)}
+              </div>
+              <div className="event-content">
+                <div className={`event-type ${ev.severity}`}>
+                  {ev.type.replace('_', ' ')}
+                </div>
+                <div className="event-meta">
+                  {ev.trackId >= 0 && <span>ID #{ev.trackId}</span>}
+                  {ev.subject && <span>{ev.subject}</span>}
+                  {ev.ttc !== undefined && <span>TTC: {fmtTtc(ev.ttc)}</span>}
+                  <span>({ev.x?.toFixed(1)}, {ev.y?.toFixed(1)})</span>
+                </div>
+              </div>
+              <div className="event-time">{fmtTime(ev.ts)}</div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ── StatsPanel ────────────────────────────────────────────────────────
+    function StatsPanel({ events }) {
+      const total    = events.length;
+      const warnings = events.filter(e => e.severity === 'WARNING').length;
+      const emrg     = events.filter(e => e.severity === 'EMERGENCY').length;
+      const byType   = events.reduce((acc, e) => { acc[e.type] = (acc[e.type] || 0) + 1; return acc; }, {});
+
+      const bars = [
+        { label: 'EMERGENCY', count: emrg,  total, color: 'var(--red)' },
+        { label: 'WARNING',   count: warnings, total, color: 'var(--orange)' },
+        { label: 'TTC_ALERT', count: byType['TTC_ALERT'] || 0, total, color: 'var(--purple)' },
+        { label: 'PPE_VIOL',  count: byType['PPE_VIOLATION'] || 0, total, color: 'var(--cyan)' },
+      ];
+
+      return (
+        <div className="stats-body">
+          <div className="stat-metric">
+            <div>
+              <div className="stat-label">Total Events</div>
+              <div className="stat-value total">{total}</div>
+            </div>
+            <span style={{ fontSize: 24 }}>📊</span>
+          </div>
+          <div className="stat-metric">
+            <div>
+              <div className="stat-label">Warnings</div>
+              <div className="stat-value warnings">{warnings}</div>
+            </div>
+            <span style={{ fontSize: 24 }}>⚠️</span>
+          </div>
+          <div className="stat-metric">
+            <div>
+              <div className="stat-label">Emergencies</div>
+              <div className="stat-value emergency">{emrg}</div>
+            </div>
+            <span style={{ fontSize: 24 }}>🚨</span>
+          </div>
+          <div style={{ marginTop: 4 }}>
+            {bars.map(b => (
+              <div key={b.label} className="severity-bar-wrap">
+                <div className="severity-bar-label">
+                  <span>{b.label}</span>
+                  <span>{b.count}</span>
+                </div>
+                <div className="severity-bar-track">
+                  <div className="severity-bar-fill"
+                    style={{
+                      width: b.total > 0 ? `${(b.count / b.total) * 100}%` : '0%',
+                      background: b.color,
+                    }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ── TtcPanel ──────────────────────────────────────────────────────────
+    function TtcPanel({ ttcAlerts }) {
+      if (ttcAlerts.length === 0) {
+        return (
+          <div className="ttc-body">
+            <div className="ttc-empty">
+              <span>✅</span>
+              <span>충돌 위험 없음 — 안전 운행 중</span>
+            </div>
+          </div>
+        );
+      }
+      return (
+        <div className="ttc-body">
+          {ttcAlerts.slice(0, 6).map((a, i) => (
+            <div key={i} className={`ttc-item ${a.risk_level}`}>
+              <div className="ttc-label">TTC</div>
+              <div className={`ttc-value ${a.risk_level}`}>{fmtTtc(a.min_ttc)}</div>
+              <div className="ttc-subject">{a.target_subject || 'Unknown'}</div>
+              <div className="ttc-label" style={{ marginTop: 2 }}>#{a.target_track_id}</div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ── Clock ─────────────────────────────────────────────────────────────
+    function Clock() {
+      const [t, setT] = useState(new Date());
+      useEffect(() => {
+        const id = setInterval(() => setT(new Date()), 1000);
+        return () => clearInterval(id);
+      }, []);
+      return (
+        <span className="clock">
+          {t.toLocaleTimeString('ko-KR', { hour12: false })}
+        </span>
+      );
+    }
+
+    // ── App ───────────────────────────────────────────────────────────────
+    function App() {
+      const [connected, setConnected]   = useState(false);
+      const [wsUrl, setWsUrl]           = useState(WS_URL);
+      const [events, setEvents]         = useState([]);
+      const [ttcAlerts, setTtcAlerts]   = useState([]);
+      const [robot, setRobot]           = useState({ x: 0, y: 0, vx: 0, vy: 0 });
+      const [heatPoints, setHeatPoints] = useState([]);
+      const [msgCount, setMsgCount]     = useState(0);
+      const wsRef    = useRef(null);
+      const idRef    = useRef(0);
+
+      const addEvent = useCallback((type, severity, extra = {}) => {
+        const newEv = {
+          id: ++idRef.current,
+          type, severity,
+          ts: Date.now(),
+          x: extra.x ?? 0, y: extra.y ?? 0,
+          trackId: extra.trackId ?? -1,
+          subject: extra.subject ?? '',
+          ttc: extra.ttc,
+        };
+        setEvents(prev => [newEv, ...prev].slice(0, MAX_FEED));
+        if (severity === 'EMERGENCY' || severity === 'WARNING') {
+          setHeatPoints(prev => [
+            { x: newEv.x, y: newEv.y, severity, ts: Date.now() },
+            ...prev.slice(0, 200),
+          ]);
+        }
+      }, []);
+
+      const connect = useCallback(() => {
+        if (wsRef.current) wsRef.current.close();
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          setConnected(true);
+          addEvent('SYSTEM', 'INFO', { subject: 'WebSocket connected' });
+        };
+        ws.onclose = () => {
+          setConnected(false);
+          addEvent('SYSTEM', 'INFO', { subject: 'WebSocket disconnected' });
+        };
+        ws.onerror = () => {
+          setConnected(false);
+        };
+        ws.onmessage = (e) => {
+          setMsgCount(c => c + 1);
+          try {
+            const msg = JSON.parse(e.data);
+            handleMessage(msg);
+          } catch { /* ignore */ }
+        };
+      }, [wsUrl, addEvent]);
+
+      const handleMessage = useCallback((msg) => {
+        const { topic, data } = msg;
+        if (!topic || !data) return;
+
+        if (topic === 'odom') {
+          setRobot({ x: data.x ?? 0, y: data.y ?? 0, vx: data.vx ?? 0, vy: data.vy ?? 0 });
+        }
+        else if (topic === 'ttc_alerts') {
+          const rl = (data.risk_level ?? 'SAFE').toUpperCase();
+          if (rl !== 'SAFE') {
+            setTtcAlerts([data]);
+            addEvent('TTC_ALERT', rl === 'EMERGENCY' ? 'EMERGENCY' : 'WARNING', {
+              ttc: data.min_ttc,
+              trackId: data.target_track_id,
+              subject: data.target_subject,
+            });
+          } else {
+            setTtcAlerts([]);
+          }
+        }
+        else if (topic === 'detections_2d') {
+          const dets = Array.isArray(data) ? data : [];
+          for (const d of dets) {
+            if (d.class_name === 'person' && d.ppe_ok === false) {
+              addEvent('PPE_VIOLATION', 'WARNING', { trackId: d.track_id });
+            }
+          }
+        }
+      }, [addEvent]);
+
+      useEffect(() => { connect(); }, []);
+
+      const speed = Math.sqrt(robot.vx * robot.vx + robot.vy * robot.vy);
+
+      return (
+        <div className="layout">
+          {/* ── Header ── */}
+          <header className="header">
+            <div className="header-left">
+              <div className="header-logo">🤖</div>
+              <div>
+                <div className="header-title">Safety Patrol Dashboard</div>
+                <div className="header-subtitle">AI 위험예측 안전 순찰 로봇 모니터링</div>
+              </div>
+            </div>
+            <div className="header-right">
+              <div className="status-badge">
+                <div className={`status-dot ${connected ? '' : 'disconnected'}`} />
+                <span style={{ color: connected ? 'var(--green)' : 'var(--red)' }}>
+                  {connected ? 'LIVE' : 'OFFLINE'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>MSG</span>
+                <span className="badge cyan">{msgCount}</span>
+              </div>
+              <Clock />
+            </div>
+          </header>
+
+          {/* ── Main Grid ── */}
+          <main className="main">
+
+            {/* Left col, row 1: Factory Map */}
+            <div className="card map-card">
+              <div className="card-header">
+                <span className="card-title">🗺️ Factory Map &amp; Robot Position</span>
+                <span className="badge cyan">LIVE</span>
+              </div>
+              <div className="card-body" style={{ padding: 8 }}>
+                <FactoryMap robotX={robot.x} robotY={robot.y} heatPoints={heatPoints} />
+              </div>
+            </div>
+
+            {/* Center col, row 1: Event Feed */}
+            <div className="card feed-card">
+              <div className="card-header">
+                <span className="card-title">📋 Safety Event Feed</span>
+                <span className="badge red">{events.filter(e => e.severity === 'EMERGENCY').length}</span>
+              </div>
+              <EventFeed events={events} />
+            </div>
+
+            {/* Right col, row 1: Stats */}
+            <div className="card stats-card">
+              <div className="card-header">
+                <span className="card-title">📊 Statistics</span>
+              </div>
+              <StatsPanel events={events} />
+            </div>
+
+            {/* Left col, row 2: Robot Position */}
+            <div className="card pos-card">
+              <div className="card-header">
+                <span className="card-title">📍 Robot Odometry</span>
+              </div>
+              <div className="pos-body">
+                <div className="pos-coord">
+                  <div className="pos-coord-label">X</div>
+                  <div className="pos-coord-val">{robot.x.toFixed(3)}</div>
+                </div>
+                <div className="pos-divider" />
+                <div className="pos-coord">
+                  <div className="pos-coord-label">Y</div>
+                  <div className="pos-coord-val">{robot.y.toFixed(3)}</div>
+                </div>
+                <div className="pos-divider" />
+                <div className="pos-coord">
+                  <div className="pos-coord-label">Speed</div>
+                  <div className="pos-coord-val" style={{ fontSize: 15 }}>{speed.toFixed(2)} m/s</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Center col, row 2: TTC Panel */}
+            <div className="card ttc-card">
+              <div className="card-header">
+                <span className="card-title">⏱️ Time-To-Collision Alerts</span>
+              </div>
+              <TtcPanel ttcAlerts={ttcAlerts} />
+            </div>
+
+            {/* Right col, row 2: Connection Info */}
+            <div className="card conn-card">
+              <div className="card-header">
+                <span className="card-title">🔌 Connection</span>
+              </div>
+              <div className="conn-body">
+                <div className="conn-row">
+                  <span className="conn-key">Server</span>
+                  <span className="conn-val">{wsUrl.replace('ws://', '')}</span>
+                </div>
+                <div className="conn-row">
+                  <span className="conn-key">Status</span>
+                  <span className="conn-val" style={{ color: connected ? 'var(--green)' : 'var(--red)' }}>
+                    {connected ? 'Connected' : 'Disconnected'}
+                  </span>
+                </div>
+                <div className="conn-row">
+                  <span className="conn-key">Messages</span>
+                  <span className="conn-val">{msgCount}</span>
+                </div>
+                <div className="conn-row">
+                  <span className="conn-key">Events</span>
+                  <span className="conn-val">{events.length}</span>
+                </div>
+                <button className="reconnect-btn" onClick={connect}>
+                  🔄 Reconnect
+                </button>
+              </div>
+            </div>
+
+          </main>
+        </div>
+      );
+    }
+
+    // ── Mount ─────────────────────────────────────────────────────────────
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

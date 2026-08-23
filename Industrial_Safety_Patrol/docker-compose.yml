@@ -423,7 +423,91 @@ services:
 
 
   # ===========================================================================
-  # DASHBOARD
+  # EVENT LOGGER
+  #   ROS2 이벤트(TTC, PPE)를 SQLite/PostgreSQL에 저장
+  #   - docker compose up event_logger
+  # ===========================================================================
+
+  event_logger:
+    build:
+      context: .
+      target: robot
+    container_name: safety_event_logger
+
+    profiles:
+      - vision
+      - logger
+
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      source /workspace/ros2_ws/install/setup.bash &&
+      ros2 launch event_logger_pkg event_logger.launch.py"
+
+    volumes:
+      - ./ros2_ws:/workspace/ros2_ws
+      - ./data:/workspace/data
+
+    environment:
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=patrol_db
+      - DB_USER=admin
+      - DB_PASS=password123
+
+    depends_on:
+      - db
+
+    networks:
+      - patrol_network
+
+
+  # ===========================================================================
+  # WEBSOCKET BRIDGE
+  #   ROS2 토픽 → WebSocket 브리지 (포트 8765)
+  #   - docker compose up ws_bridge
+  # ===========================================================================
+
+  ws_bridge:
+    build:
+      context: .
+      target: robot
+    container_name: safety_ws_bridge
+
+    profiles:
+      - vision
+      - dashboard
+
+    command: >
+      bash -c "
+      source /opt/ros/humble/setup.bash &&
+      source /workspace/ros2_ws/install/setup.bash &&
+      python3 /workspace/dashboard/ws_bridge.py"
+
+    volumes:
+      - ./ros2_ws:/workspace/ros2_ws
+      - ./dashboard:/workspace/dashboard
+
+    ports:
+      - "8765:8765"
+
+    environment:
+      - ROS_DOMAIN_ID=50
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - WS_HOST=0.0.0.0
+      - WS_PORT=8765
+
+    networks:
+      - patrol_network
+
+
+  # ===========================================================================
+  # DASHBOARD (nginx static file server)
+  #   React 단일 파일 대시보드 (포트 8080)
+  #   - docker compose up dashboard
+  #   - 브라우저: http://localhost:8080
   # ===========================================================================
 
   dashboard:
@@ -433,17 +517,10 @@ services:
     container_name: safety_dashboard
 
     ports:
-      - "3000:3000"
-
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      - "8080:80"
 
     depends_on:
-      - db
-
-    volumes:
-      - grafana_data:/var/lib/grafana
+      - ws_bridge
 
     networks:
       - patrol_network
@@ -464,4 +541,3 @@ networks:
 
 volumes:
   postgres_data:
-  grafana_data:

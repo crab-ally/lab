@@ -116,7 +116,8 @@ RUN pip install \
     psycopg2-binary \
     filterpy \
     pytest \
-    deep-sort-realtime
+    deep-sort-realtime \
+    websockets
 
 # ================================================================
 # 7. Verify Python Environment
@@ -162,7 +163,13 @@ CMD ["bash"]
 FROM timescale/timescaledb:latest-pg15 AS db
 
 # ================================================================
-# 13. Dashboard Image
+# 13. Dashboard Image (nginx static file server)
 # ================================================================
 
-FROM grafana/grafana:latest AS dashboard
+FROM nginx:alpine AS dashboard
+
+COPY dashboard/index.html /usr/share/nginx/html/index.html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
