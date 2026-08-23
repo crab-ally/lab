@@ -213,6 +213,13 @@ class FusionNode3D(Node):
             self.scan_frame_id = msg.header.frame_id
 
     def _detections_callback(self, msg: String) -> None:
+        if not self.camera_info_received:
+            self.get_logger().warn_throttle(
+                2.0,
+                'Camera info not received yet. Skipping 3D fusion.'
+            )
+            return
+
         if self.latest_depth_img is None or self.latest_depth_stamp is None:
             return
 
@@ -253,7 +260,10 @@ class FusionNode3D(Node):
                     rclpy.time.Time()
                 )
             except Exception as e:
-                self.get_logger().warn(f'TF Lookup Failed ({self.camera_frame_id} -> {self.target_frame}): {e}')
+                self.get_logger().warn_throttle(
+                    2.0,
+                    f'TF Lookup Failed ({self.camera_frame_id} -> {self.target_frame}): {e}'
+                )
                 return
 
         tracks_3d_payload = []
@@ -331,9 +341,10 @@ class FusionNode3D(Node):
         else:
             presence_state = 'NONE'
 
-        # 오랫동안 미감지된 Track 정리 (miss_count 정상 동작)
+        # 오랫동안 미감지된 Track 정리 (미감지 프레임에서도 EKF predict 수행하여 위치 추정 유지)
         for trk_id in list(self.track_ekf_map.keys()):
             if trk_id not in active_track_ids:
+                self.track_ekf_map[trk_id].predict(stamp)
                 self.track_ekf_map[trk_id].miss_count += 1
                 if self.track_ekf_map[trk_id].miss_count > 10:
                     del self.track_ekf_map[trk_id]
@@ -453,12 +464,22 @@ class FusionNode3D(Node):
 
         idx = int((angle_rad - scan.angle_min) / scan.angle_increment)
 
-        if 0 <= idx < len(scan.ranges):
-            scan_dist = scan.ranges[idx]
-            if scan.range_min <= scan_dist <= scan.range_max:
-                if abs(scan_dist - dist_from_lidar) < 0.5:
-                    scale = (0.7 * dist_from_lidar + 0.3 * scan_dist) / dist_from_lidar
-                    return cam_z * scale
+        # 주변 빔(Window Search: idx ± 2) 탐색으로 노이즈 및 결측치 방지
+        valid_ranges = []
+        window_size = 2
+        min_idx = max(0, idx - window_size)
+        max_idx = min(len(scan.ranges) - 1, idx + window_size)
+
+        for i in range(min_idx, max_idx + 1):
+            r = scan.ranges[i]
+            if scan.range_min <= r <= scan.range_max and not math.isnan(r) and not math.isinf(r):
+                valid_ranges.append(r)
+
+        if valid_ranges:
+            scan_dist = float(np.median(valid_ranges))
+            if abs(scan_dist - dist_from_lidar) < 0.5:
+                scale = (0.7 * dist_from_lidar + 0.3 * scan_dist) / dist_from_lidar
+                return cam_z * scale
 
         return cam_z
 
