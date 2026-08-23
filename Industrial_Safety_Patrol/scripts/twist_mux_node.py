@@ -53,8 +53,9 @@ class TwistMuxNode(Node):
         self.latest_teleop_cmd = Twist()
 
         self.last_nav_time = 0.0
-        self.last_teleop_time = 0.0
         self.last_alert_time = 0.0
+
+        self.teleop_received = False
 
         # 현재 TTC 위험 상태
         self.current_risk_level = "NORMAL"
@@ -116,9 +117,7 @@ class TwistMuxNode(Node):
     def _teleop_cmd_callback(self, msg: Twist) -> None:
         """Teleop 명령 수신"""
         self.latest_teleop_cmd = msg
-        self.last_teleop_time = (
-            self.get_clock().now().nanoseconds * 1e-9
-        )
+        self.teleop_received = True
 
     def _ttc_alerts_callback(self, msg: String) -> None:
         """TTC 위험 상태 수신"""
@@ -171,7 +170,9 @@ class TwistMuxNode(Node):
         # --------------------------------------------------------------
         elif self.current_risk_level == "WARNING":
             # Teleop이 최근에 들어왔다면 Teleop 우선
-            if teleop_active:
+            if self.teleop_received:
+
+                # 감속
                 final_cmd.linear.x = (
                     self.latest_teleop_cmd.linear.x * self.slowdown_ratio
                 )
@@ -205,7 +206,7 @@ class TwistMuxNode(Node):
         # --------------------------------------------------------------
         else:
             # Teleop 우선
-            if teleop_active:
+            if self.teleop_received:
                 final_cmd = self.latest_teleop_cmd
 
             # Teleop이 없으면 Nav2
