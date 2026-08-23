@@ -173,6 +173,21 @@ class TTCNode(Node):
         # 서로 멀어지거나 정지 상태
         return float('inf')
 
+    def _get_fork_margin(
+        self,
+        forklift_pos: Tuple[float, float],
+        forklift_vel: Tuple[float, float],
+        target_pos: Tuple[float, float]
+    ) -> float:
+        """
+        [개선점 2] 지게차 전방 포크(1.3m) 충돌 위험 지오메트리 반영.
+        지게차가 상대 객체를 향해 전진하는 방향일 경우 전방 돌출 포크 마진(+0.8m) 가산.
+        """
+        rel_x = target_pos[0] - forklift_pos[0]
+        rel_y = target_pos[1] - forklift_pos[1]
+        dot_prod = rel_x * forklift_vel[0] + rel_y * forklift_vel[1]
+        return 0.8 if dot_prod > 0.0 else 0.0
+
     def _tracks_callback(self, msg: String) -> None:
         """3D Track 수신 → TTC 계산 → 위험 수준 판단"""
 
@@ -217,7 +232,8 @@ class TTCNode(Node):
                 f_pos = (f['position'][0], f['position'][1])
                 f_vel = (f['velocity'][0], f['velocity'][1])
 
-                radius_sum = self.robot_radius + self.forklift_radius
+                fork_margin = self._get_fork_margin(f_pos, f_vel, robot_pos)
+                radius_sum = self.robot_radius + self.forklift_radius + fork_margin
 
                 ttc = self._calculate_ttc(
                     robot_pos,
@@ -270,7 +286,8 @@ class TTCNode(Node):
                     p_pos = (p['position'][0], p['position'][1])
                     p_vel = (p['velocity'][0], p['velocity'][1])
 
-                    radius_sum = self.forklift_radius + self.person_radius
+                    fork_margin = self._get_fork_margin(f_pos, f_vel, p_pos)
+                    radius_sum = self.forklift_radius + self.person_radius + fork_margin
 
                     ttc = self._calculate_ttc(
                         f_pos,
@@ -309,14 +326,17 @@ class TTCNode(Node):
                 if target_class == 'person':
                     target_radius = self.person_radius
                     subject_name = "로봇-사람"
+                    fork_margin = 0.0
                 elif target_class == 'forklift':
                     target_radius = self.forklift_radius
                     subject_name = "로봇-지게차"
+                    fork_margin = self._get_fork_margin(trk_pos, trk_vel, robot_pos)
                 else:
                     target_radius = 0.0
                     subject_name = "NONE"
+                    fork_margin = 0.0
 
-                radius_sum = self.robot_radius + target_radius
+                radius_sum = self.robot_radius + target_radius + fork_margin
 
                 ttc = self._calculate_ttc(
                     robot_pos,
