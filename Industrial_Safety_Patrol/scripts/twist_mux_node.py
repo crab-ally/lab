@@ -91,9 +91,7 @@ class TwistMuxNode(Node):
             self._control_loop
         )
 
-        self.get_logger().info(
-            'Node 4: Twist Mux Node is ready.'
-        )
+        self.get_logger().info('Twist Mux Node is ready.')
 
     # ==================================================================
     # Callbacks
@@ -139,11 +137,11 @@ class TwistMuxNode(Node):
         # --------------------------------------------------------------
         # 1. TTC Alert 타임아웃 검사 (새 메시지 수신 전까지 정지 유지 및 2초 쿨다운 로그)
         # --------------------------------------------------------------
-        now=self.get_clock().now().nanoseconds/1e9
-        if now-self.last_warning_time>=2.0:
-            self.get_logger().warning("No valid command received")
-            self.last_warning_time=now
+        if (self.last_alert_time>0.0) and (now-self.last_alert_time>self.cmd_timeout):
             self.current_risk_level = "EMERGENCY"
+            if now-self.last_warning_time>=2.0:
+                self.get_logger().warning("TTC alert timeout: stopping robot.")
+                self.last_warning_time=now
 
         # --------------------------------------------------------------
         # 2. EMERGENCY
