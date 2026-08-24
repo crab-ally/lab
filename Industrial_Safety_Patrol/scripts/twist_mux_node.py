@@ -36,17 +36,8 @@ class TwistMuxNode(Node):
         self.declare_parameter('cmd_timeout', 1.0)
         self.declare_parameter('slowdown_ratio', 0.5)
 
-        self.cmd_timeout = (
-            self.get_parameter('cmd_timeout')
-            .get_parameter_value()
-            .double_value
-        )
-
-        self.slowdown_ratio = (
-            self.get_parameter('slowdown_ratio')
-            .get_parameter_value()
-            .double_value
-        )
+        self.cmd_timeout = self.get_parameter('cmd_timeout').get_parameter_value().double_value
+        self.slowdown_ratio = self.get_parameter('slowdown_ratio').get_parameter_value().double_value
 
         # ── Latest Commands & Timestamps ──────────────────────────────
         self.latest_nav_cmd = Twist()
@@ -54,6 +45,7 @@ class TwistMuxNode(Node):
 
         self.last_nav_time = 0.0
         self.last_alert_time = 0.0
+        self.last_warning_time=0.0
 
         self.teleop_received = False
 
@@ -147,14 +139,11 @@ class TwistMuxNode(Node):
         # --------------------------------------------------------------
         # 1. TTC Alert 타임아웃 검사 (새 메시지 수신 전까지 정지 유지 및 2초 쿨다운 로그)
         # --------------------------------------------------------------
-        if self.last_alert_time > 0 and (now - self.last_alert_time) > self.cmd_timeout:
-            self.get_logger().warn_throttle(
-                2.0,
-                'TTC Alert stream timeout! Safety stop applied until new alerts arrive.'
-            )
+        now=self.get_clock().now().nanoseconds/1e9
+        if now-self.last_warning_time>=2.0:
+            self.get_logger().warning("No valid command received")
+            self.last_warning_time=now
             self.current_risk_level = "EMERGENCY"
-
-        teleop_active = (self.last_teleop_time > 0) and ((now - self.last_teleop_time) <= self.cmd_timeout)
 
         # --------------------------------------------------------------
         # 2. EMERGENCY
