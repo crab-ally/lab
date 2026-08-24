@@ -516,6 +516,9 @@ services:
       target: dashboard
     container_name: safety_dashboard
 
+    profiles:
+      - dashboard
+
     ports:
       - "8080:80"
 
