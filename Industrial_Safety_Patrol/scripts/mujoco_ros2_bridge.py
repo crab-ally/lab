@@ -391,11 +391,7 @@ class MujocoRosBridge(Node):
 
             arr = np.array(sensor_data, dtype=np.float32)
 
-            invalid = (
-                (arr > msg.range_max) |
-                (arr < msg.range_min)
-            )
-
+            invalid = (arr >= msg.range_max) | (arr < msg.range_min)
             arr[invalid] = np.inf
             msg.ranges = arr.tolist()
 
