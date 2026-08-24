@@ -214,8 +214,7 @@ class FusionNode3D(Node):
 
     def _detections_callback(self, msg: String) -> None:
         if not self.camera_info_received:
-            self.get_logger().warn_throttle(
-                2.0,
+            self.get_logger().warning(
                 'Camera info not received yet. Skipping 3D fusion.'
             )
             return
@@ -234,8 +233,7 @@ class FusionNode3D(Node):
 
         # Stale Depth Data 검사 (0.15초 초과 시 Drop)
         if abs(stamp - self.latest_depth_stamp) > 0.15:
-            self.get_logger().warn_throttle(
-                2.0,
+            self.get_logger().warning(
                 f'Depth image is too old or out of sync! (Diff: {abs(stamp - self.latest_depth_stamp):.3f}s)'
             )
             return
@@ -260,8 +258,7 @@ class FusionNode3D(Node):
                     rclpy.time.Time()
                 )
             except Exception as e:
-                self.get_logger().warn_throttle(
-                    2.0,
+                self.get_logger().warning(
                     f'TF Lookup Failed ({self.camera_frame_id} -> {self.target_frame}): {e}'
                 )
                 return
