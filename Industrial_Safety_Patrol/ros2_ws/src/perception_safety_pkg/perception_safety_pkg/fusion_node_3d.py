@@ -17,6 +17,7 @@ Publishes:
     - /perception/debug_markers (visualization_msgs/msg/MarkerArray)
 """
 
+from collections import deque
 import json
 import math
 import numpy as np
@@ -98,7 +99,12 @@ class FusionNode3D(Node):
 
         # ── Parameters ────────────────────────────────────────────────
         self.declare_parameter('target_frame', 'base_link')
+        self.declare_parameter('depth_buffer_size', 60)
+        self.declare_parameter('max_depth_time_diff', 0.3)
+
         self.target_frame = self.get_parameter('target_frame').get_parameter_value().string_value
+        self.depth_buffer_size = self.get_parameter('depth_buffer_size').get_parameter_value().integer_value
+        self.max_depth_time_diff = self.get_parameter('max_depth_time_diff').get_parameter_value().double_value
 
         # ── TF2 Listener Setup ─────────────────────────────────────────
         self.tf_buffer = tf2_ros.Buffer()
@@ -111,10 +117,9 @@ class FusionNode3D(Node):
         self.cy = 240.0
         self.camera_info_received = False
 
-        # ── Latest Data Storage & Timestamps ──────────────────────────
-        self.latest_depth_img: Optional[np.ndarray] = None
-        self.latest_depth_stamp: Optional[float] = None
-        self.latest_depth_encoding: str = "16UC1"
+        # ── Depth Image Buffer (Timestamp 동기화용) ───────────────────
+        # 원소: (stamp: float, depth_img: np.ndarray, encoding: str)
+        self.depth_buffer: deque = deque(maxlen=self.depth_buffer_size)
 
         self.latest_scan: Optional[LaserScan] = None
         self.latest_scan_stamp: Optional[float] = None
@@ -135,6 +140,12 @@ class FusionNode3D(Node):
             durability=DurabilityPolicy.VOLATILE
         )
 
+        depth_qos = QoSProfile(
+            depth=10,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE
+        )
+
         # ── Subscriptions & Publishers ─────────────────────────────────
         self.sub_detections = self.create_subscription(
             String,
@@ -147,7 +158,7 @@ class FusionNode3D(Node):
             Image,
             '/camera/depth/image_raw',
             self._depth_callback,
-            sensor_qos
+            depth_qos
         )
 
         self.sub_info = self.create_subscription(
@@ -176,7 +187,7 @@ class FusionNode3D(Node):
             10
         )
 
-        self.get_logger().info('Node 2: 3D Fusion Node (Depth + /scan + TF) is ready.')
+        self.get_logger().info('Node 2: 3D Fusion Node (Depth Buffer + /scan + TF) is ready.')
 
     def _camera_info_callback(self, msg: CameraInfo) -> None:
         if not self.camera_info_received:
@@ -195,16 +206,44 @@ class FusionNode3D(Node):
     def _depth_callback(self, msg: Image) -> None:
         try:
             if msg.encoding in ['16UC1', 'mono16']:
-                self.latest_depth_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
-                self.latest_depth_encoding = '16UC1'
+                depth_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+                encoding = '16UC1'
             elif msg.encoding in ['32FC1']:
-                self.latest_depth_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='32FC1')
-                self.latest_depth_encoding = '32FC1'
+                depth_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='32FC1')
+                encoding = '32FC1'
+            else:
+                self.get_logger().warning(f'Unsupported depth encoding: {msg.encoding}')
+                return
 
-            self.latest_depth_stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            self.depth_buffer.append((stamp, depth_img, encoding))
 
         except Exception as e:
             self.get_logger().error(f'Depth Image Exception: {e}')
+
+    def _find_matching_depth(self, target_stamp: float) -> Tuple[Optional[np.ndarray], Optional[str], Optional[float]]:
+        """RGB 이미지 타임스탬프와 가장 일치하는 Depth 이미지를 버퍼에서 검색"""
+        if not self.depth_buffer:
+            return None, None, None
+
+        best_entry = None
+        min_diff = float('inf')
+
+        # 버퍼 내에서 타임스탬프 오차가 가장 작은 프레임 탐색
+        for stamp, depth_img, encoding in self.depth_buffer:
+            diff = abs(stamp - target_stamp)
+            if diff < min_diff:
+                min_diff = diff
+                best_entry = (depth_img, encoding, stamp)
+
+        # 허용 시간 오차 이내인 경우 반환
+        if min_diff <= self.max_depth_time_diff and best_entry is not None:
+            # target_stamp보다 1.0초 이상 지난 너무 오래된 버퍼 데이터 정리
+            while self.depth_buffer and (target_stamp - self.depth_buffer[0][0]) > 1.0:
+                self.depth_buffer.popleft()
+            return best_entry[0], best_entry[1], best_entry[2]
+
+        return None, None, None
 
     def _scan_callback(self, msg: LaserScan) -> None:
         self.latest_scan = msg
@@ -219,9 +258,6 @@ class FusionNode3D(Node):
             )
             return
 
-        if self.latest_depth_img is None or self.latest_depth_stamp is None:
-            return
-
         try:
             payload = json.loads(msg.data)
         except json.JSONDecodeError as e:
@@ -231,10 +267,12 @@ class FusionNode3D(Node):
         stamp = payload['header']['stamp']
         detections = payload.get('detections', [])
 
-        # Stale Depth Data 검사 (0.15초 초과 시 Drop)
-        if abs(stamp - self.latest_depth_stamp) > 0.15:
+        # Depth 버퍼에서 RGB 타임스탬프(stamp)에 매칭되는 Depth 이미지 검색
+        depth_img, depth_encoding, matched_depth_stamp = self._find_matching_depth(stamp)
+        if depth_img is None:
             self.get_logger().warning(
-                f'Depth image is too old or out of sync! (Diff: {abs(stamp - self.latest_depth_stamp):.3f}s)'
+                f'No matching depth image found in buffer for RGB stamp {stamp:.3f} '
+                f'(Buffer count: {len(self.depth_buffer)})'
             )
             return
 
@@ -276,8 +314,8 @@ class FusionNode3D(Node):
             ppe_ok = det['ppe_ok']
             confidence = det['confidence']
 
-            # 1. Depth Image + 2D BBox로 카메라 좌표계 3D 연산
-            cam_x, cam_y, cam_z = self._calculate_3d_from_depth(bbox)
+            # 1. 버퍼에서 매칭된 Depth Image + 2D BBox로 카메라 좌표계 3D 연산
+            cam_x, cam_y, cam_z = self._calculate_3d_from_depth(bbox, depth_img, depth_encoding)
             if cam_z is None:
                 # Depth 연산 실패 시 active_track_ids에 추가하지 않음 -> EKF miss_count 정상 실시간 증가
                 continue
@@ -368,9 +406,11 @@ class FusionNode3D(Node):
 
     def _calculate_3d_from_depth(
         self,
-        bbox: List[float]
+        bbox: List[float],
+        depth_img: np.ndarray,
+        depth_encoding: str
     ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-        h_img, w_img = self.latest_depth_img.shape[:2]
+        h_img, w_img = depth_img.shape[:2]
         xmin, ymin, xmax, ymax = map(int, bbox)
 
         cx_box = (xmin + xmax) / 2.0
@@ -387,9 +427,9 @@ class FusionNode3D(Node):
         if rx2 <= rx1 or ry2 <= ry1:
             return None, None, None
 
-        depth_roi = self.latest_depth_img[ry1:ry2, rx1:rx2]
+        depth_roi = depth_img[ry1:ry2, rx1:rx2]
 
-        if self.latest_depth_encoding == '16UC1':
+        if depth_encoding == '16UC1':
             valid_depths = (depth_roi[depth_roi > 0] / 1000.0)
         else:
             valid_depths = depth_roi[~np.isnan(depth_roi) & (depth_roi > 0.1)]
