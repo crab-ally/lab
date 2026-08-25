@@ -1189,3 +1189,139 @@ RGB / Depth Rendering
 ```
 
 이를 통해 MuJoCo Viewer의 GLFW/X11 초기화를 먼저 완료한 뒤 별도의 Camera Renderer를 실행하도록 변경하여 GLFW X11 assertion 오류를 해결함.
+
+---
+
+# 27. TTC 로봇 속도 처리 방식 수정
+
+## 파일
+
+`ttc_node.py`
+
+## 문제
+
+기존 TTC 계산에서는 `/odom`에서 가져온 로봇 속도를 `robot_vel`로 사용하고 있었음.
+
+```py
+robot_vel = (self.robot_vx, self.robot_vy)
+```
+
+로봇 속도는 `/odom`의 `twist.linear`에서 가져오고 있었음.
+
+```py
+def _odom_callback(self, msg: Odometry) -> None:
+    self.robot_vx = msg.twist.twist.linear.x
+    self.robot_vy = msg.twist.twist.linear.y
+```
+
+이 상태에서 지게차 및 사람의 EKF 속도와 로봇의 속도를 그대로 `closing_speed` 계산에 사용하면서 상대 속도가 잘못 계산될 수 있는 문제가 발생함.
+
+현재 `base_link` 좌표계에서 로봇 자신은 항상 원점 `(0, 0)`에 고정되어 있음.
+
+또한 `fusion_node_3d.py`의 EKF로 추정된 객체의 `velocity`는 로봇 기준의 상대 속도로 사용되고 있음.
+
+따라서 로봇과 객체의 TTC를 계산할 때 `/odom`에서 가져온 로봇 속도를 별도로 적용하면 상대 속도가 중복으로 계산될 수 있음.
+
+## 원인
+
+기존 코드는 로봇과 객체의 상대 속도를 계산할 때 다음과 같이 처리함.
+
+```py
+robot_pos = (0.0, 0.0)
+robot_vel = (self.robot_vx, self.robot_vy)
+```
+
+이후 `_calculate_ttc()`에서 다음과 같이 상대 속도를 계산함.
+
+```py
+rel_vx = vel_b[0] - vel_a[0]
+rel_vy = vel_b[1] - vel_a[1]
+```
+
+따라서 로봇-사람 및 로봇-지게차 TTC 계산에서는 객체의 EKF 속도에서 `/odom`의 로봇 속도를 다시 빼게 됨.
+
+하지만 `base_link` 좌표계에서는 로봇 자체가 항상 `(0, 0)`에 위치하고 있으며, EKF에서 추정된 객체의 속도는 이미 로봇 기준의 상대 속도로 사용되고 있음.
+
+따라서 `/odom`의 로봇 속도를 다시 적용하면 상대 속도를 잘못 계산할 수 있음.
+
+## 해결
+
+로봇과의 TTC 계산에서는 로봇을 `base_link` 좌표계의 원점에 고정된 객체로 취급하도록 변경함.
+
+기존:
+```py
+robot_vel = (self.robot_vx, self.robot_vy)
+```
+
+수정:
+```py
+robot_vel = (0.0, 0.0)
+```
+
+즉 로봇과 객체 사이의 TTC 계산에서는 로봇의 `/odom` 속도를 별도로 사용하지 않고, EKF에서 추정된 객체의 상대 속도를 그대로 사용하도록 변경함.
+
+```py
+robot_pos = (0.0, 0.0)
+robot_vel = (0.0, 0.0)
+```
+
+이 경우 상대 속도 계산은 다음과 같이 동작함.
+
+```py
+rel_vx = vel_b[0] - 0.0
+rel_vy = vel_b[1] - 0.0
+```
+
+따라서 객체의 EKF 속도가 그대로 로봇에 대한 상대 속도로 사용됨.
+
+## 좌표계 기준
+
+현재 TTC 계산의 기준은 `base_link`임.
+
+```
+    base_link 좌표계
+
+            +Y
+             ↑
+             |
+             |
+             ●────────→ +X
+           Robot
+          (0, 0)
+```
+
+로봇은 `base_link` 좌표계에서 항상 원점 `(0, 0)`에 위치함.
+
+```
+로봇 위치 = (0, 0)
+로봇 속도 = (0, 0)
+
+사람/지게차 위치 = EKF 추정 위치
+사람/지게차 속도 = EKF 추정 상대 속도
+```
+
+따라서 로봇과 객체의 TTC 계산은 다음과 같이 동작함.
+
+```
+    로봇
+    (0, 0)
+      │
+      │ 상대 위치
+      ↓
+    객체
+
+    로봇 속도 = 0
+    객체 속도 = EKF 상대 속도
+            ↓
+    closing_speed 계산
+            ↓
+    TTC 계산
+```
+
+## 결과
+
+로봇이 Teleop 또는 Nav2로 주행 중이더라도 `base_link` 기준에서는 로봇이 원점 `(0, 0)`에 고정되어 있음.
+
+따라서 로봇-사람 및 로봇-지게차 TTC 계산에서는 로봇의 `/odom` 속도를 별도로 적용하지 않고 객체의 EKF 상대 속도를 기준으로 접근 속도를 계산하도록 수정함.
+
+이를 통해 로봇 속도와 객체 속도를 중복으로 적용하여 `closing_speed`가 잘못 계산되는 문제를 제거함.
