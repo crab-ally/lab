@@ -125,31 +125,7 @@ class MujocoRosBridge(Node):
         self._buf_quat_odom = np.zeros(4)
         self._buf_pos_odom = np.zeros(3)
 
-        self._publish_static_transforms()
         self._init_camera_params()
-
-    def _publish_static_transforms(self):
-        now = self.get_clock().now().to_msg()
-
-        lidar_tf = TransformStamped()
-        lidar_tf.header.stamp = now
-        lidar_tf.header.frame_id = 'base_footprint'
-        lidar_tf.child_frame_id = 'lidar_link'
-        lidar_tf.transform.translation.z = 0.1675
-        lidar_tf.transform.rotation.w = 1.0
-
-        camera_tf = TransformStamped()
-        camera_tf.header.stamp = now
-        camera_tf.header.frame_id = 'base_footprint'
-        camera_tf.child_frame_id = 'camera_link'
-        camera_tf.transform.translation.x = -0.05
-        camera_tf.transform.translation.z = 0.35
-        camera_tf.transform.rotation.x = -0.5
-        camera_tf.transform.rotation.y = 0.5
-        camera_tf.transform.rotation.z = -0.5
-        camera_tf.transform.rotation.w = 0.5
-
-        self.static_tf_broadcaster.sendTransform([lidar_tf, camera_tf])
 
     def _init_lidar_sensors(self):
         combined_id = mujoco.mj_name2id(
@@ -442,7 +418,7 @@ class MujocoRosBridge(Node):
         info = CameraInfo()
 
         info.header.stamp = stamp
-        info.header.frame_id = "camera_link"
+        info.header.frame_id = "camera_optical_frame"
 
         info.height = self.img_height
         info.width = self.img_width
@@ -505,7 +481,7 @@ def camera_render_worker(node: MujocoRosBridge, is_running_flag: list):
         )
 
         rgb_msg.header.stamp = stamp
-        rgb_msg.header.frame_id = "camera_link"
+        rgb_msg.header.frame_id = "camera_optical_frame"
 
         node.camera_pub.publish(rgb_msg)
 
@@ -515,7 +491,7 @@ def camera_render_worker(node: MujocoRosBridge, is_running_flag: list):
         )
 
         depth_msg.header.stamp = stamp
-        depth_msg.header.frame_id = "camera_link"
+        depth_msg.header.frame_id = "camera_optical_frame"
 
         node.depth_pub.publish(depth_msg)
 
