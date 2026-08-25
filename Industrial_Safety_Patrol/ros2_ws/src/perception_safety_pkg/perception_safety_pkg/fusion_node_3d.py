@@ -10,7 +10,7 @@ Subscribes:
 
 TF Transformations:
     - camera_frame_id -> target_frame (base_link)
-    - camera_frame_id -> scan_frame_id (laser_frame)
+    - camera_frame_id -> scan_frame_id (lidar_link)
 
 Publishes:
     - /tracks_3d (std_msgs/msg/String - JSON Format)
@@ -125,7 +125,7 @@ class FusionNode3D(Node):
         self.latest_scan_stamp: Optional[float] = None
         
         self.camera_frame_id: str = "camera_link"
-        self.scan_frame_id: str = "laser_frame"
+        self.scan_frame_id: str = "lidar_link"
 
         # RViz Marker Cleanup용 이전 ID 저장소
         self.prev_active_marker_ids: set = set()
