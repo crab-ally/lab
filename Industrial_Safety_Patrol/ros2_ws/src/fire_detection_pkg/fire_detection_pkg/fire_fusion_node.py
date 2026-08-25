@@ -80,7 +80,7 @@ class FireFusionNode(Node):
         self.cx: float = 320.0
         self.cy: float = 240.0
         self.camera_info_received: bool = False
-        self.camera_frame_id: str = 'camera_link'
+        self.camera_frame_id: str = 'camera_optical_frame'
 
         # ── Frame Buffers & Storage ───────────────────────────────────
         self.sync_frames: deque = deque(maxlen=20)

@@ -9,8 +9,8 @@ Subscribes:
     - /scan
 
 TF Transformations:
-    - camera_frame_id -> target_frame (base_link)
-    - camera_frame_id -> scan_frame_id (lidar_link)
+    - camera_frame_id (camera_optical_frame) -> target_frame (base_link)
+    - camera_frame_id (camera_optical_frame) -> scan_frame_id (lidar_link)
 
 Publishes:
     - /tracks_3d (std_msgs/msg/String - JSON Format)
@@ -124,7 +124,7 @@ class FusionNode3D(Node):
         self.latest_scan: Optional[LaserScan] = None
         self.latest_scan_stamp: Optional[float] = None
         
-        self.camera_frame_id: str = "camera_link"
+        self.camera_frame_id: str = "camera_optical_frame"
         self.scan_frame_id: str = "lidar_link"
 
         # RViz Marker Cleanup용 이전 ID 저장소
@@ -187,7 +187,7 @@ class FusionNode3D(Node):
             10
         )
 
-        self.get_logger().info('Node 2: 3D Fusion Node (Depth Buffer + /scan + TF) is ready.')
+        self.get_logger().info('Node 2: 3D Fusion Node is ready.')
 
     def _camera_info_callback(self, msg: CameraInfo) -> None:
         if not self.camera_info_received:
@@ -269,12 +269,6 @@ class FusionNode3D(Node):
 
         # Depth 버퍼에서 RGB 타임스탬프(stamp)에 매칭되는 Depth 이미지 검색
         depth_img, depth_encoding, matched_depth_stamp = self._find_matching_depth(stamp)
-        if depth_img is None:
-            self.get_logger().warning(
-                f'No matching depth image found in buffer for RGB stamp {stamp:.3f} '
-                f'(Buffer count: {len(self.depth_buffer)})'
-            )
-            return
 
         # 타임스탬프 동기화 기반 TF 조회
         sec = int(stamp)
