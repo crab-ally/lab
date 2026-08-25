@@ -8,13 +8,8 @@ def generate_launch_description():
     param_file=os.path.join(pkg_share,'config','safety_params.yaml')
     use_sim_time={'use_sim_time':True}
 
-    tf_node=Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='camera_static_tf',
-        arguments=['0.5','0.0','1.0','-1.57','0.0','-1.57','base_link','camera_link'],
-        parameters=[use_sim_time]
-    )
+    # TF (base_link → camera_link) 는 mujoco_ros2_bridge.py / mujoco_ros2_bridge_viewer.py 에서 발행
+    # 중복 발행 방지를 위해 여기서는 static_transform_publisher를 실행하지 않음
 
     perception_node=Node(
         package='perception_safety_pkg',
@@ -49,7 +44,6 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        tf_node,
         perception_node,
         fusion_node,
         forklift_controller_node,
