@@ -187,7 +187,7 @@ class FusionNode3D(Node):
             10
         )
 
-        self.get_logger().info('Node 2: 3D Fusion Node is ready.')
+        self.get_logger().info('Node 2: 3D Fusion Node (Depth Buffer + /scan + TF) is ready.')
 
     def _camera_info_callback(self, msg: CameraInfo) -> None:
         if not self.camera_info_received:
@@ -269,6 +269,8 @@ class FusionNode3D(Node):
 
         # Depth 버퍼에서 RGB 타임스탬프(stamp)에 매칭되는 Depth 이미지 검색
         depth_img, depth_encoding, matched_depth_stamp = self._find_matching_depth(stamp)
+        if depth_img is None:
+            return
 
         # 타임스탬프 동기화 기반 TF 조회
         sec = int(stamp)
