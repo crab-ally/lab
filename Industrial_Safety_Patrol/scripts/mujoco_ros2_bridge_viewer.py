@@ -134,8 +134,8 @@ class MujocoRosBridge(Node):
         camera_tf.child_frame_id = 'camera_link'
         camera_tf.transform.translation.x = -0.05
         camera_tf.transform.translation.z = 0.35
-        camera_tf.transform.rotation.x = 0.5
-        camera_tf.transform.rotation.y = -0.5
+        camera_tf.transform.rotation.x = -0.5
+        camera_tf.transform.rotation.y = 0.5
         camera_tf.transform.rotation.z = -0.5
         camera_tf.transform.rotation.w = 0.5
 
