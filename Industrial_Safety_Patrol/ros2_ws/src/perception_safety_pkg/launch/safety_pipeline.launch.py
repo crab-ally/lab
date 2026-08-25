@@ -12,7 +12,7 @@ def generate_launch_description():
         package='tf2_ros',
         executable='static_transform_publisher',
         name='camera_static_tf',
-        arguments=['0.5','0.0','1.0','-1.57','0.0','-1.57','base_link','camera_color_optical_frame'],
+        arguments=['0.5','0.0','1.0','-1.57','0.0','-1.57','base_link','camera_link'],
         parameters=[use_sim_time]
     )
 
