@@ -20,7 +20,6 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from std_msgs.msg import String
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Twist
 
 
 class TTCNode(Node):
@@ -36,14 +35,27 @@ class TTCNode(Node):
         self.declare_parameter('person_radius', 0.2)
         self.declare_parameter('forklift_radius', 0.9)
 
-        self.warning_ttc = self.get_parameter('warning_ttc').get_parameter_value().double_value
-        self.emergency_ttc = self.get_parameter('emergency_ttc').get_parameter_value().double_value
+        self.warning_ttc = self.get_parameter(
+            'warning_ttc'
+        ).get_parameter_value().double_value
 
-        self.robot_radius = self.get_parameter('robot_radius').get_parameter_value().double_value
-        self.person_radius = self.get_parameter('person_radius').get_parameter_value().double_value
-        self.forklift_radius = self.get_parameter('forklift_radius').get_parameter_value().double_value
+        self.emergency_ttc = self.get_parameter(
+            'emergency_ttc'
+        ).get_parameter_value().double_value
 
-        # ── Robot velocity state (Body 로컬 기준 선속도) ───────────────
+        self.robot_radius = self.get_parameter(
+            'robot_radius'
+        ).get_parameter_value().double_value
+
+        self.person_radius = self.get_parameter(
+            'person_radius'
+        ).get_parameter_value().double_value
+
+        self.forklift_radius = self.get_parameter(
+            'forklift_radius'
+        ).get_parameter_value().double_value
+
+        # ── Robot velocity state ───────────────────────────────────────
         self.robot_vx = 0.0
         self.robot_vy = 0.0
 
@@ -77,28 +89,32 @@ class TTCNode(Node):
         )
 
         # ── Heartbeat Timer (10 Hz) ────────────────────────────────────
-        # 인지 파이프라인의 프레임레이트 지연과 무관하게 스트림 유지
         self.latest_alert_payload = {
             'risk_level': 'NORMAL',
             'min_ttc': -1.0,
             'target_track_id': -1,
             'target_subject': 'NONE'
         }
+
         self.last_track_update_time = 0.0
 
         self.timer = self.create_timer(
-            0.1,  # 10Hz
+            0.1,
             self._timer_callback
         )
 
         self.get_logger().info('Node 3: TTC Node (Risk Assessment & Alert) is ready.')
 
     def _timer_callback(self) -> None:
-        """10Hz 주기로 최신 TTC Alert 스트림을 안정적으로 발행 (Heartbeat)"""
+        """10Hz 주기로 최신 TTC Alert 스트림을 안정적으로 발행"""
+
         now = self.get_clock().now().nanoseconds * 1e-9
 
-        # 마지막 트랙 업데이트 후 1.0초 이상 미수신 시 안전하게 NORMAL로 복구
-        if self.last_track_update_time == 0.0 or (now - self.last_track_update_time) > 1.0:
+        # 마지막 트랙 업데이트 후 1초 이상 미수신 시 NORMAL 복구
+        if (
+            self.last_track_update_time == 0.0
+            or (now - self.last_track_update_time) > 1.0
+        ):
             payload = {
                 'header': {'stamp': now},
                 'risk_level': 'NORMAL',
@@ -111,11 +127,15 @@ class TTCNode(Node):
             payload['header'] = {'stamp': now}
 
         json_msg = String()
-        json_msg.data = json.dumps(payload, ensure_ascii=False)
+        json_msg.data = json.dumps(
+            payload,
+            ensure_ascii=False
+        )
+
         self.pub_ttc_alerts.publish(json_msg)
 
     def _odom_callback(self, msg: Odometry) -> None:
-        """로봇의 현재 선속도 저장 (Body 로컬 기준)"""
+        """로봇의 현재 선속도 저장"""
         self.robot_vx = msg.twist.twist.linear.x
         self.robot_vy = msg.twist.twist.linear.y
 
@@ -132,10 +152,6 @@ class TTCNode(Node):
 
         radius_sum:
             두 객체의 충돌 반경 합.
-            예:
-                로봇-사람     = robot_radius + person_radius
-                로봇-지게차   = robot_radius + forklift_radius
-                지게차-사람   = forklift_radius + person_radius
         """
 
         # 상대 위치
@@ -146,14 +162,14 @@ class TTCNode(Node):
         rel_vx = vel_b[0] - vel_a[0]
         rel_vy = vel_b[1] - vel_a[1]
 
-        # 두 객체 중심 사이 거리
+        # 중심 간 거리
         dist_val = math.hypot(rel_px, rel_py)
 
         # 중심이 거의 같은 위치
         if dist_val < 1e-6:
             return 0.01
 
-        # 객체의 실제 외곽까지 남은 거리
+        # 실제 충돌 외곽까지 남은 거리
         distance = dist_val - radius_sum
 
         # 이미 충돌 영역에 들어온 경우
@@ -162,15 +178,14 @@ class TTCNode(Node):
 
         # 상대 접근 속도 (내적)
         closing_speed = -(
-            rel_px * rel_vx +
-            rel_py * rel_vy
+            rel_px * rel_vx + rel_py * rel_vy
         ) / dist_val
 
-        # 서로 가까워지고 있는 경우에만 TTC 계산
+        # 접근 중인 경우에만 TTC 계산
         if closing_speed > 0.01:
             return distance / closing_speed
 
-        # 서로 멀어지거나 정지 상태
+        # 멀어지거나 정지 상태
         return float('inf')
 
     def _get_fork_margin(
@@ -180,36 +195,77 @@ class TTCNode(Node):
         target_pos: Tuple[float, float]
     ) -> float:
         """
-        [개선점 2] 지게차 전방 포크(1.3m) 충돌 위험 지오메트리 반영.
-        지게차가 상대 객체를 향해 전진하는 방향일 경우 전방 돌출 포크 마진(+0.8m) 가산.
+        지게차 전방 포크 충돌 위험 지오메트리 반영.
+
+        지게차가 상대 객체를 향해 전진하는 경우
+        전방 돌출 포크 마진 0.8m를 추가한다.
         """
+
         rel_x = target_pos[0] - forklift_pos[0]
         rel_y = target_pos[1] - forklift_pos[1]
+
         dot_prod = rel_x * forklift_vel[0] + rel_y * forklift_vel[1]
+
         return 0.8 if dot_prod > 0.0 else 0.0
+
+    def _get_risk_level(self, ttc: float) -> str:
+        """TTC 값으로 위험 수준 결정"""
+
+        if ttc <= self.emergency_ttc:
+            return 'EMERGENCY'
+
+        if ttc <= self.warning_ttc:
+            return 'WARNING'
+
+        return 'NORMAL'
 
     def _tracks_callback(self, msg: String) -> None:
         """3D Track 수신 → TTC 계산 → 위험 수준 판단"""
 
         try:
             payload = json.loads(msg.data)
+
         except json.JSONDecodeError as e:
             self.get_logger().error(f'JSON Decode Error: {e}')
             return
 
-        stamp = payload.get('header', {}).get('stamp')
-        tracks = payload.get('tracks', [])
+        stamp = payload.get(
+            'header',
+            {}
+        ).get(
+            'stamp'
+        )
 
-        class_presence = payload.get('class_presence', {})
-        state = class_presence.get('state', 'NONE')
+        tracks = payload.get(
+            'tracks',
+            []
+        )
 
+        class_presence = payload.get(
+            'class_presence',
+            {}
+        )
+
+        state = class_presence.get(
+            'state',
+            'NONE'
+        )
+
+        # ── 최종 대표 TTC ──────────────────────────────────────────────
         min_ttc = float('inf')
-        most_dangerous_track_id = -1
-        most_dangerous_subject = "NONE"
 
-        # 로봇은 base_link 좌표계의 원점 (0, 0) 기준 고정
-        # tracks_3d의 position/velocity는 이미 base_link 기준 상대 위치 및 상대 속도이므로
-        # 로봇 자체의 base_link 기준 속도는 (0.0, 0.0)을 적용하여 상대 속도 이중 감산/좌표 왜곡 방지
+        most_dangerous_track_id = -1
+        most_dangerous_subject = 'NONE'
+
+        # ── 관계별 TTC ─────────────────────────────────────────────────
+        # BOTH 상태에서 세 관계의 TTC를 각각 저장
+        pair_ttc = {
+            '지게차-로봇': float('inf'),
+            '사람-로봇': float('inf'),
+            '지게차-사람': float('inf')
+        }
+
+        # 로봇은 base_link 좌표계 원점
         robot_pos = (0.0, 0.0)
         robot_vel = (0.0, 0.0)
 
@@ -224,18 +280,26 @@ class TTCNode(Node):
         ]
 
         # ================================================================
-        # BOTH (사람 + 지게차가 모두 존재)
+        # BOTH
+        # 사람 + 지게차가 모두 존재
         # ================================================================
         if state == 'BOTH':
 
+            # ------------------------------------------------------------
             # 1. 지게차 - 로봇
+            # ------------------------------------------------------------
             for f in forklifts:
 
                 f_pos = (f['position'][0], f['position'][1])
                 f_vel = (f['velocity'][0], f['velocity'][1])
 
-                fork_margin = self._get_fork_margin(f_pos, f_vel, robot_pos)
-                radius_sum = self.robot_radius + self.forklift_radius + fork_margin
+                fork_margin = self._get_fork_margin(
+                    f_pos, f_vel, robot_pos
+                )
+
+                radius_sum = (
+                    self.robot_radius + self.forklift_radius + fork_margin
+                )
 
                 ttc = self._calculate_ttc(
                     robot_pos,
@@ -245,21 +309,34 @@ class TTCNode(Node):
                     radius_sum
                 )
 
+                # 관계별 최소 TTC 저장
+                pair_ttc['지게차-로봇'] = min(
+                    pair_ttc['지게차-로봇'],
+                    ttc
+                )
+
+                # 전체 최소 TTC 갱신
                 if ttc < min_ttc:
                     min_ttc = ttc
+
                     most_dangerous_track_id = f.get(
                         'track_id',
                         -1
                     )
-                    most_dangerous_subject = "로봇-지게차"
 
+                    most_dangerous_subject = '로봇-지게차'
+
+            # ------------------------------------------------------------
             # 2. 사람 - 로봇
+            # ------------------------------------------------------------
             for p in persons:
 
                 p_pos = (p['position'][0], p['position'][1])
                 p_vel = (p['velocity'][0], p['velocity'][1])
 
-                radius_sum = self.robot_radius + self.person_radius
+                radius_sum = (
+                    self.robot_radius + self.person_radius
+                )
 
                 ttc = self._calculate_ttc(
                     robot_pos,
@@ -269,15 +346,26 @@ class TTCNode(Node):
                     radius_sum
                 )
 
+                # 관계별 최소 TTC 저장
+                pair_ttc['사람-로봇'] = min(
+                    pair_ttc['사람-로봇'],
+                    ttc
+                )
+
+                # 전체 최소 TTC 갱신
                 if ttc < min_ttc:
                     min_ttc = ttc
+
                     most_dangerous_track_id = p.get(
                         'track_id',
                         -1
                     )
-                    most_dangerous_subject = "로봇-사람"
 
+                    most_dangerous_subject = '로봇-사람'
+
+            # ------------------------------------------------------------
             # 3. 지게차 - 사람
+            # ------------------------------------------------------------
             for f in forklifts:
 
                 f_pos = (f['position'][0], f['position'][1])
@@ -288,8 +376,17 @@ class TTCNode(Node):
                     p_pos = (p['position'][0], p['position'][1])
                     p_vel = (p['velocity'][0], p['velocity'][1])
 
-                    fork_margin = self._get_fork_margin(f_pos, f_vel, p_pos)
-                    radius_sum = self.forklift_radius + self.person_radius + fork_margin
+                    fork_margin = self._get_fork_margin(
+                        f_pos,
+                        f_vel,
+                        p_pos
+                    )
+
+                    radius_sum = (
+                        self.forklift_radius
+                        + self.person_radius
+                        + fork_margin
+                    )
 
                     ttc = self._calculate_ttc(
                         f_pos,
@@ -299,20 +396,32 @@ class TTCNode(Node):
                         radius_sum
                     )
 
+                    # 관계별 최소 TTC 저장
+                    pair_ttc['지게차-사람'] = min(
+                        pair_ttc['지게차-사람'],
+                        ttc
+                    )
+
+                    # 전체 최소 TTC 갱신
                     if ttc < min_ttc:
                         min_ttc = ttc
+
                         most_dangerous_track_id = f.get(
                             'track_id',
                             p.get('track_id', -1)
                         )
-                        most_dangerous_subject = "지게차-사람"
+
+                        most_dangerous_subject = '지게차-사람'
 
         # ================================================================
         # *_ONLY
         # ================================================================
         elif state.endswith('_ONLY'):
 
-            target_class = state.replace('_ONLY', '').lower()
+            target_class = state.replace(
+                '_ONLY',
+                ''
+            ).lower()
 
             target_tracks = [
                 t for t in tracks
@@ -326,19 +435,30 @@ class TTCNode(Node):
 
                 # 객체 종류에 따라 반경 및 주체 선택
                 if target_class == 'person':
+
                     target_radius = self.person_radius
-                    subject_name = "로봇-사람"
-                    fork_margin = 0.0
-                elif target_class == 'forklift':
-                    target_radius = self.forklift_radius
-                    subject_name = "로봇-지게차"
-                    fork_margin = self._get_fork_margin(trk_pos, trk_vel, robot_pos)
-                else:
-                    target_radius = 0.0
-                    subject_name = "NONE"
+                    subject_name = '로봇-사람'
                     fork_margin = 0.0
 
-                radius_sum = self.robot_radius + target_radius + fork_margin
+                elif target_class == 'forklift':
+
+                    target_radius = self.forklift_radius
+                    subject_name = '로봇-지게차'
+                    fork_margin = self._get_fork_margin(
+                        trk_pos,
+                        trk_vel,
+                        robot_pos
+                    )
+
+                else:
+
+                    target_radius = 0.0
+                    subject_name = 'NONE'
+                    fork_margin = 0.0
+
+                radius_sum = (
+                    self.robot_radius + target_radius + fork_margin
+                )
 
                 ttc = self._calculate_ttc(
                     robot_pos,
@@ -349,26 +469,26 @@ class TTCNode(Node):
                 )
 
                 if ttc < min_ttc:
+
                     min_ttc = ttc
+
                     most_dangerous_track_id = trk.get(
                         'track_id',
                         -1
                     )
+
                     most_dangerous_subject = subject_name
 
         # ================================================================
         # Risk Level
         # ================================================================
-        if min_ttc <= self.emergency_ttc:
-            overall_risk_level = "EMERGENCY"
+        overall_risk_level = self._get_risk_level(
+            min_ttc
+        )
 
-        elif min_ttc <= self.warning_ttc:
-            overall_risk_level = "WARNING"
-
-        else:
-            overall_risk_level = "NORMAL"
-
-        # Alert
+        # ================================================================
+        # Alert Payload
+        # ================================================================
         alert_payload = {
             'header': {
                 'stamp': stamp
@@ -380,24 +500,56 @@ class TTCNode(Node):
                 else -1.0
             ),
             'target_track_id': most_dangerous_track_id,
-            'target_subject': most_dangerous_subject if min_ttc != float('inf') else 'NONE'
+            'target_subject': (
+                most_dangerous_subject
+                if min_ttc != float('inf')
+                else 'NONE'
+            )
         }
 
         self.latest_alert_payload = alert_payload
-        self.last_track_update_time = self.get_clock().now().nanoseconds * 1e-9
 
+        self.last_track_update_time = (
+            self.get_clock().now().nanoseconds * 1e-9
+        )
+
+        # ================================================================
+        # Publish Alert
+        # ================================================================
         json_msg = String()
+
         json_msg.data = json.dumps(
             alert_payload,
             ensure_ascii=False
         )
 
-        self.pub_ttc_alerts.publish(json_msg)
+        self.pub_ttc_alerts.publish(
+            json_msg
+        )
 
+        # ================================================================
         # Logging
-        if overall_risk_level != "NORMAL":
+        # ================================================================
+        if state == 'BOTH':
+
+            # BOTH일 때는 세 관계를 각각 동시에 출력
+            for subject, ttc in pair_ttc.items():
+
+                if ttc == float('inf'):
+                    continue
+
+                risk_level = self._get_risk_level(ttc)
+
+                self.get_logger().info(
+                    f'[{risk_level}] [{subject}] '
+                    f'TTC: {ttc:.2f}s'
+                )
+
+        elif overall_risk_level != 'NORMAL':
+
             self.get_logger().warn(
-                f'[{overall_risk_level}] [{most_dangerous_subject}] '
+                f'[{overall_risk_level}] '
+                f'[{most_dangerous_subject}] '
                 f'Min TTC: {min_ttc:.2f}s '
                 f'(Track ID: {most_dangerous_track_id})'
             )
