@@ -70,6 +70,8 @@ class FireFusionNode(Node):
         self.declare_parameter('lidar_sync_tolerance', 0.15)
         self.lidar_sync_tolerance = self.get_parameter('lidar_sync_tolerance').get_parameter_value().double_value
 
+        self.last_warning_log_time=0.0
+
         # ── TF2 Listener Setup ─────────────────────────────────────────
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
@@ -270,16 +272,14 @@ class FireFusionNode(Node):
             try:
                 return self.tf_buffer.lookup_transform(target_frame, source_frame, rclpy.time.Time())
             except Exception as e:
-                self.get_logger().warn_throttle(
-                    2.0,
+                self.get_logger().warning(
                     f'TF unavailable ({source_frame} -> {target_frame}): {e}'
                 )
                 return None
 
     def _candidates_callback(self, msg: String) -> None:
         if not self.camera_info_received:
-            self.get_logger().warn_throttle(
-                2.0,
+            self.get_logger().warning(
                 'Camera info not received yet. Skipping fire 3D fusion.'
             )
             return
@@ -316,8 +316,7 @@ class FireFusionNode(Node):
 
         tf_camera_to_base = self._get_tf(self.target_frame, self.camera_frame_id, stamp)
         if tf_camera_to_base is None:
-            self.get_logger().warn_throttle(
-                2.0,
+            self.get_logger().warning(
                 f'Camera TF unavailable: {self.camera_frame_id} -> {self.target_frame}'
             )
             return
@@ -370,7 +369,7 @@ class FireFusionNode(Node):
             try:
                 p_base = do_transform_point(p_cam, tf_camera_to_base)
             except Exception as e:
-                self.get_logger().warn_throttle(2.0, f'Camera -> base transform failed: {e}')
+                self.get_logger().warning(f'Camera -> base transform failed: {e}')
                 continue
 
             base_x = p_base.point.x
@@ -418,15 +417,17 @@ class FireFusionNode(Node):
                 synced_frame['rgb_header']
             )
 
-            for fire in fire_tracks:
-                self.get_logger().warn_throttle(
-                    1.0,
-                    f'FIRE DETECTED id={fire["fire_id"]} '
-                    f'base={fire["position"]} '
-                    f'map={fire["position_map"]} '
-                    f'depth={fire["depth"]:.2f}m '
-                    f'lidar={fire["lidar_distance"]}'
-                )
+            now=self.get_clock().now().nanoseconds*1e-9
+            if now-self.last_warning_log_time>=2.0:
+                self.last_warning_log_time=now
+                for fire in fire_tracks:
+                    self.get_logger().warn(
+                        f'FIRE DETECTED id={fire["fire_id"]} '
+                        f'base={fire["position"]} '
+                        f'map={fire["position_map"]} '
+                        f'depth={fire["depth"]:.2f}m '
+                        f'lidar={fire["lidar_distance"]}'
+                    )
 
     def _calculate_3d_from_depth(self, bbox: List[float]) -> Optional[Tuple[float, float, float]]:
         if self.latest_depth_img is None:
