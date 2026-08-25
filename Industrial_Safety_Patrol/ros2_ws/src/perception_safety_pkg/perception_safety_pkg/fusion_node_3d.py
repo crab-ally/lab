@@ -314,7 +314,7 @@ class FusionNode3D(Node):
             ppe_ok = det['ppe_ok']
             confidence = det['confidence']
 
-            # 1. 버퍼에서 매칭된 Depth Image + 2D BBox로 카메라 좌표계 3D 연산
+            # 1. 버퍼에서 매칭된 Depth Image + 2D BBox → 카메라 좌표계 3D 연산
             cam_x, cam_y, cam_z = self._calculate_3d_from_depth(bbox, depth_img, depth_encoding)
             if cam_z is None:
                 # Depth 연산 실패 시 active_track_ids에 추가하지 않음 -> EKF miss_count 정상 실시간 증가
@@ -327,13 +327,13 @@ class FusionNode3D(Node):
             # 3D 위치 산출 성공 시에만 활성 트랙 ID 목록에 등록
             active_track_ids.add(track_id)
 
-            # 3. TF2로 Camera Frame -> base_link 좌표 변환
             p_cam = PointStamped()
-            p_cam.header.frame_id = self.camera_frame_id
+            p_cam.header.frame_id = self.camera_frame_id  # camera_link
             p_cam.point.x = cam_x
             p_cam.point.y = cam_y
             p_cam.point.z = cam_z
 
+            # 3. TF2로 camera_link → base_link 좌표 변환
             p_base = do_transform_point(p_cam, tf_transform)
             base_x = p_base.point.x
             base_y = p_base.point.y
@@ -447,19 +447,14 @@ class FusionNode3D(Node):
 
         return x_cam, y_cam, z_cam
 
-    def _refine_with_scan(
-        self,
-        cam_x: float,
-        cam_y: float,
-        cam_z: float,
-        detection_stamp: float,
-        bbox_height_m: float = 1.7
-    ) -> float:
+    def _refine_with_scan(self, cam_x: float, cam_y: float, cam_z: float, detection_stamp: float, bbox_height_m: float = 1.7) -> float:
         """2D LiDAR /scan 데이터로 Depth 센서 측정거리 보정 (높이 차이 검증 포함)"""
+
+        # 라이다 데이터가 없다면 그대로 리턴
         if self.latest_scan is None or self.latest_scan_stamp is None:
             return cam_z
 
-        # Scan Stale Data 검사 (0.2초 초과 시 보정 패스)
+        # 라이다 데이터가 너무 오래되었다면 그대로 리턴
         if abs(detection_stamp - self.latest_scan_stamp) > 0.2:
             return cam_z
 
@@ -488,9 +483,9 @@ class FusionNode3D(Node):
         except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
             return cam_z
 
-        # [높이 차이 검증] LiDAR 평면이 물체의 3D 높이 범위 바깥이면 보정 패스
+        # LiDAR 수평 스캔 평면(z≈0)이 물체 높이 범위(±half_h) 바깥이면 보정 패스
         half_h = bbox_height_m / 2.0
-        if not (-half_h <= lz <= half_h):
+        if abs(lz) > half_h:
             return cam_z
 
         angle_rad = math.atan2(ly, lx)
