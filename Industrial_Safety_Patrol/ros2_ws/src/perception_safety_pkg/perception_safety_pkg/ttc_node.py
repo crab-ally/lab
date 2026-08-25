@@ -43,7 +43,7 @@ class TTCNode(Node):
         self.person_radius = self.get_parameter('person_radius').get_parameter_value().double_value
         self.forklift_radius = self.get_parameter('forklift_radius').get_parameter_value().double_value
 
-        # ── Robot velocity state ───────────────────────────────────────
+        # ── Robot velocity state (Body 로컬 기준 선속도) ───────────────
         self.robot_vx = 0.0
         self.robot_vy = 0.0
 
@@ -115,7 +115,7 @@ class TTCNode(Node):
         self.pub_ttc_alerts.publish(json_msg)
 
     def _odom_callback(self, msg: Odometry) -> None:
-        """로봇의 현재 선속도 저장"""
+        """로봇의 현재 선속도 저장 (Body 로컬 기준)"""
         self.robot_vx = msg.twist.twist.linear.x
         self.robot_vy = msg.twist.twist.linear.y
 
@@ -207,9 +207,11 @@ class TTCNode(Node):
         most_dangerous_track_id = -1
         most_dangerous_subject = "NONE"
 
-        # 로봇은 현재 위치를 (0, 0)으로 사용 (base_link 기준)
+        # 로봇은 base_link 좌표계의 원점 (0, 0) 기준 고정
+        # tracks_3d의 position/velocity는 이미 base_link 기준 상대 위치 및 상대 속도이므로
+        # 로봇 자체의 base_link 기준 속도는 (0.0, 0.0)을 적용하여 상대 속도 이중 감산/좌표 왜곡 방지
         robot_pos = (0.0, 0.0)
-        robot_vel = (self.robot_vx, self.robot_vy)
+        robot_vel = (0.0, 0.0)
 
         persons = [
             t for t in tracks
