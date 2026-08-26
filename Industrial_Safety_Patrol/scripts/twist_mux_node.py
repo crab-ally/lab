@@ -46,11 +46,13 @@ class TwistMuxNode(Node):
         self.last_nav_time = 0.0
         self.last_alert_time = 0.0
         self.last_warning_time=0.0
+        self.last_timeout_log_time=0.0
 
         self.teleop_received = False
 
         # 현재 TTC 위험 상태
         self.current_risk_level = "NORMAL"
+        self.target_subject="NONE"
 
         # ── Subscribers ───────────────────────────────────────────────
 
@@ -113,13 +115,9 @@ class TwistMuxNode(Node):
         """TTC 위험 상태 수신"""
         try:
             payload = json.loads(msg.data)
-            self.current_risk_level = payload.get(
-                'risk_level',
-                'NORMAL'
-            )
-            self.last_alert_time = (
-                self.get_clock().now().nanoseconds * 1e-9
-            )
+            self.current_risk_level = payload.get('risk_level', 'NORMAL')
+            self.target_subject = payload.get('target_subject', 'NONE')
+            self.last_alert_time = self.get_clock().now().nanoseconds * 1e-9
         except json.JSONDecodeError as e:
             self.get_logger().error(
                 f'TTC Alert JSON Decode Error: {e}'
@@ -139,9 +137,10 @@ class TwistMuxNode(Node):
         # --------------------------------------------------------------
         if (self.last_alert_time>0.0) and (now-self.last_alert_time>self.cmd_timeout):
             self.current_risk_level = "EMERGENCY"
-            if now-self.last_warning_time>=2.0:
+            self.target_subject="NONE"
+            if now-self.last_timeout_log_time>=2.0:
                 self.get_logger().warning("TTC alert timeout: stopping robot.")
-                self.last_warning_time=now
+                self.last_timeout_log_time=now
 
         # --------------------------------------------------------------
         # 2. EMERGENCY
@@ -149,7 +148,9 @@ class TwistMuxNode(Node):
         if self.current_risk_level == "EMERGENCY":
 
             if self.target_subject == "지게차-사람":
-                self.get_logger().warning("EMERGENCY: 지게차-사람 충돌 위험")
+                if now-self.last_warning_time>=1.0:
+                    self.get_logger().warning("EMERGENCY: 지게차-사람 충돌 위험")
+                    self.last_warning_time=now
 
                 # 현재 상태 유지
                 if self.teleop_received:
@@ -159,6 +160,11 @@ class TwistMuxNode(Node):
 
             elif self.target_subject in ("지게차-로봇","사람-로봇"):
 
+                if now-self.last_warning_time>=1.0:
+                    self.get_logger().warning(
+                        f"EMERGENCY: {self.target_subject} 충돌 위험. 로봇을 정지합니다"
+                    )
+                    self.last_warning_time=now
                 final_cmd.linear.x = 0.0
                 final_cmd.linear.y = 0.0
                 final_cmd.angular.z = 0.0
@@ -183,6 +189,11 @@ class TwistMuxNode(Node):
                     final_cmd = self.latest_nav_cmd
 
             elif self.target_subject in ("지게차-로봇","사람-로봇"):
+                if now-self.last_warning_time>=1.0:
+                    self.get_logger().warning(
+                        f"WARNING: {self.target_subject} 충돌 위험. 로봇을 감속합니다"
+                    )
+                    self.last_warning_time=now
                 # 로봇 감속
                 if self.teleop_received:
                     final_cmd.linear.x = self.latest_teleop_cmd.linear.x * self.slowdown_ratio
