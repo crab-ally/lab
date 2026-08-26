@@ -5,17 +5,18 @@
 
 출력:
     /camera/fall_detection/image
-    /fall_alarm
+    /fall_alarm (JSON)
 """
 
 import os
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
+import json
 import math
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
-from std_msgs.msg import Bool
+from std_msgs.msg import String
 from cv_bridge import CvBridge
 import cv2
 from ultralytics import YOLO
@@ -48,9 +49,24 @@ class FallDetectionNode(Node):
         # ROS Subscribers / Publishers
         # ========================================================
 
-        self.image_sub = self.create_subscription(Image, '/camera/image_raw', self.image_callback, 10)
-        self.image_pub = self.create_publisher(Image, '/camera/fall_detection/image', 10)
-        self.alert_pub = self.create_publisher(Bool, '/fall_alarm', 10)
+        self.image_sub = self.create_subscription(
+            Image,
+            '/camera/image_raw',
+            self.image_callback,
+            10
+        )
+
+        self.image_pub = self.create_publisher(
+            Image,
+            '/camera/fall_detection/image',
+            10
+        )
+
+        self.alert_pub = self.create_publisher(
+            String,
+            '/fall_alarm',
+            10
+        )
 
         # ========================================================
         # Tracking
@@ -59,7 +75,6 @@ class FallDetectionNode(Node):
         self.tracking_history = {}
         self.TRACKING_WARMUP_FRAMES = 10
 
-        # Detection loss 허용 프레임
         self.MAX_MISSED_FRAMES = 5
         self.missed_frames = {}
 
@@ -82,11 +97,6 @@ class FallDetectionNode(Node):
         # ========================================================
 
         self.track_states = {}
-
-        self.get_logger().info(f'Confidence threshold: {self.CONF_THRESHOLD}')
-        self.get_logger().info(f'Keypoint confidence threshold: {self.KEYPOINT_CONF_THRESHOLD}')
-        self.get_logger().info(f'Horizontal angle threshold: {self.HORIZONTAL_ANGLE_THRESHOLD} deg')
-        self.get_logger().info(f'Max missed frames: {self.MAX_MISSED_FRAMES}')
         self.get_logger().info('Fall Detection Node has been started.')
 
     # ============================================================
@@ -100,6 +110,7 @@ class FallDetectionNode(Node):
         num_kpts = len(kpt)
 
         for idx in ids:
+
             if idx >= num_kpts:
                 continue
 
@@ -133,12 +144,14 @@ class FallDetectionNode(Node):
 
         # Custom 12 Keypoint
         if num_kpts == 12:
+
             shoulder_ids = [1, 2]
             hip_ids = [7]
             knee_ids = [8, 9]
 
         # COCO 17 Keypoint
         elif num_kpts >= 17:
+
             shoulder_ids = [5, 6]
             hip_ids = [11, 12]
             knee_ids = [13, 14]
@@ -200,18 +213,51 @@ class FallDetectionNode(Node):
 
         shoulder, hip, knee = points
 
-        shoulder_hip_angle = self.calculate_line_angle(shoulder, hip)
-        hip_knee_angle = self.calculate_line_angle(hip, knee)
+        shoulder_hip_angle = self.calculate_line_angle(
+            shoulder,
+            hip
+        )
 
-        if shoulder_hip_angle is None or hip_knee_angle is None:
-            return False, shoulder_hip_angle, hip_knee_angle, points
+        hip_knee_angle = self.calculate_line_angle(
+            hip,
+            knee
+        )
+
+        if (
+            shoulder_hip_angle is None
+            or hip_knee_angle is None
+        ):
+            return (
+                False,
+                shoulder_hip_angle,
+                hip_knee_angle,
+                points
+            )
 
         geometry_fall = (
             shoulder_hip_angle <= self.HORIZONTAL_ANGLE_THRESHOLD
-            and hip_knee_angle <= self.HORIZONTAL_ANGLE_THRESHOLD
+            and
+            hip_knee_angle <= self.HORIZONTAL_ANGLE_THRESHOLD
         )
 
-        return geometry_fall, shoulder_hip_angle, hip_knee_angle, points
+        return (
+            geometry_fall,
+            shoulder_hip_angle,
+            hip_knee_angle,
+            points
+        )
+
+    def publish_fall_alarm(self,track_id,confidence,isfallen,stamp,class_name='person'):
+        data={
+            'track_id':track_id,
+            'class_name':class_name,
+            'confidence':confidence,
+            'isfallen':isfallen,
+            'stamp':stamp
+        }
+        msg=String()
+        msg.data=json.dumps(data)
+        self.alert_pub.publish(msg)
 
     # ============================================================
     # Geometry Visualization
@@ -241,20 +287,17 @@ class FallDetectionNode(Node):
 
     def image_callback(self, msg):
 
-        # ========================================================
         # 1. ROS Image -> OpenCV
-        # ========================================================
-
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         except Exception as e:
             self.get_logger().error(f"Failed to convert image: {e}")
             return
 
-        # ========================================================
-        # 2. YOLO Tracking
-        # ========================================================
+        # 2. Timestamp
+        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
+        # 3. YOLO Tracking
         results = self.model.track(
             cv_image,
             persist=True,
@@ -264,36 +307,60 @@ class FallDetectionNode(Node):
 
         current_track_ids = set()
         person_detected_global = False
-        fall_detected_global = False
 
         if results and len(results) > 0:
 
             result = results[0]
+
             boxes = result.boxes
             keypoints = result.keypoints
 
             if boxes is not None and keypoints is not None:
 
-                track_ids = boxes.id.int().cpu().tolist() if boxes.id is not None else []
-                classes = boxes.cls.int().cpu().tolist() if boxes.cls is not None else []
+                track_ids = (
+                    boxes.id.int().cpu().tolist()
+                    if boxes.id is not None
+                    else []
+                )
+
+                classes = (
+                    boxes.cls.int().cpu().tolist()
+                    if boxes.cls is not None
+                    else []
+                )
+
                 xyxy = boxes.xyxy.cpu().numpy()
-                confidences = boxes.conf.cpu().numpy() if boxes.conf is not None else []
+
+                confidences = (
+                    boxes.conf.cpu().numpy()
+                    if boxes.conf is not None
+                    else []
+                )
+
                 kpts = keypoints.data.cpu().numpy()
 
-                # ====================================================
-                # 3. Person Loop
-                # ====================================================
-
+                # 4. Person Loop
                 for i in range(len(xyxy)):
 
-                    x1, y1, x2, y2 = map(int, xyxy[i])
+                    x1, y1, x2, y2 = map(
+                        int,
+                        xyxy[i]
+                    )
 
-                    track_id = track_ids[i] if i < len(track_ids) else -1
+                    track_id = (
+                        track_ids[i]
+                        if i < len(track_ids)
+                        else -1
+                    )
 
                     if track_id == -1:
                         continue
 
-                    confidence = float(confidences[i]) if i < len(confidences) else 0.0
+                    confidence = (
+                        float(confidences[i])
+                        if i < len(confidences)
+                        else 0.0
+                    )
 
                     if confidence < self.CONF_THRESHOLD:
                         continue
@@ -306,18 +373,17 @@ class FallDetectionNode(Node):
                     self.missed_frames[track_id] = 0
 
                     kpt = kpts[i]
-                    cls_id = classes[i] if i < len(classes) else 0
 
-                    # ====================================================
-                    # 4. YOLO Fall
-                    # ====================================================
+                    cls_id = (
+                        classes[i]
+                        if i < len(classes)
+                        else 0
+                    )
 
+                    # 5. YOLO Fall
                     yolo_falling = cls_id == 0
 
-                    # ====================================================
-                    # 5. Keypoint Geometry
-                    # ====================================================
-
+                    # 6. Keypoint Geometry
                     (
                         geometry_fall,
                         shoulder_hip_angle,
@@ -325,19 +391,24 @@ class FallDetectionNode(Node):
                         geometry_points
                     ) = self.calculate_geometry(kpt)
 
-                    is_falling = yolo_falling and geometry_fall
+                    is_falling = (
+                        yolo_falling
+                        and geometry_fall
+                    )
 
-                    # ====================================================
-                    # 6. Tracking Frame Count
-                    # ====================================================
+                    # 7. Tracking Frame Count
+                    self.tracking_history[track_id] = (
+                        self.tracking_history.get(
+                            track_id,
+                            0
+                        ) + 1
+                    )
 
-                    self.tracking_history[track_id] = self.tracking_history.get(track_id, 0) + 1
-                    tracking_frames = self.tracking_history[track_id]
+                    tracking_frames = (
+                        self.tracking_history[track_id]
+                    )
 
-                    # ====================================================
-                    # 7. Track Initialization
-                    # ====================================================
-
+                    # 8. Track Initialization
                     if track_id not in self.initial_fall_votes:
                         self.initial_fall_votes[track_id] = 0
 
@@ -347,10 +418,7 @@ class FallDetectionNode(Node):
                     if track_id not in self.track_states:
                         self.track_states[track_id] = "tracking"
 
-                    # ====================================================
-                    # 8. Warm-up
-                    # ====================================================
-
+                    # 9. Warm-up
                     if tracking_frames <= self.TRACKING_WARMUP_FRAMES:
 
                         if is_falling:
@@ -361,24 +429,29 @@ class FallDetectionNode(Node):
                         label = (
                             f"ID:{track_id} "
                             f"TRACKING "
-                            f"({tracking_frames}/{self.TRACKING_WARMUP_FRAMES}) "
+                            f"({tracking_frames}/"
+                            f"{self.TRACKING_WARMUP_FRAMES}) "
                             f"Conf:{confidence:.2f}"
                         )
 
-                    # ====================================================
-                    # 9. Initial State
-                    # ====================================================
-
+                    # 10. Initial State
                     elif self.track_states[track_id] == "tracking":
 
-                        fall_votes = self.initial_fall_votes[track_id]
-                        fall_ratio = fall_votes / float(self.TRACKING_WARMUP_FRAMES)
+                        fall_votes = (
+                            self.initial_fall_votes[track_id]
+                        )
+
+                        fall_ratio = (
+                            fall_votes
+                            /
+                            float(self.TRACKING_WARMUP_FRAMES)
+                        )
 
                         if fall_ratio >= self.INITIAL_FALL_RATIO:
 
                             self.track_states[track_id] = "unsafe"
                             self.fall_history[track_id] = self.FALL_CANDIDATE_FRAMES
-                            fall_detected_global = True
+
                             color = (0, 0, 255)
 
                             label = (
@@ -391,6 +464,7 @@ class FallDetectionNode(Node):
 
                             self.track_states[track_id] = "safe"
                             self.fall_history[track_id] = 0
+
                             color = (0, 255, 0)
 
                             label = (
@@ -399,10 +473,7 @@ class FallDetectionNode(Node):
                                 f"Conf:{confidence:.2f}"
                             )
 
-                    # ====================================================
-                    # 10. Fall State Machine
-                    # ====================================================
-
+                    # 11. Fall State Machine
                     current_state = self.track_states[track_id]
 
                     # ----------------------------------------------------
@@ -455,8 +526,6 @@ class FallDetectionNode(Node):
                                 self.track_states[track_id] = "unsafe"
                                 self.fall_history[track_id] = self.FALL_CANDIDATE_FRAMES
 
-                                fall_detected_global = True
-
                                 color = (0, 0, 255)
 
                                 label = (
@@ -503,8 +572,6 @@ class FallDetectionNode(Node):
                                 self.fall_history[track_id] + 1
                             )
 
-                            fall_detected_global = True
-
                             color = (0, 0, 255)
 
                             label = (
@@ -534,8 +601,6 @@ class FallDetectionNode(Node):
 
                             else:
 
-                                fall_detected_global = True
-
                                 color = (0, 0, 255)
 
                                 label = (
@@ -544,11 +609,25 @@ class FallDetectionNode(Node):
                                     f"Conf:{confidence:.2f}"
                                 )
 
-                    # ====================================================
-                    # 11. Bounding Box
-                    # ====================================================
+                    # 12. 최종 낙상 상태
+                    isfallen = self.track_states[track_id] == "unsafe"
 
-                    cv2.rectangle(cv_image, (x1, y1), (x2, y2), color, 2)
+                    # 사람별 fall alarm 발행
+                    self.publish_fall_alarm(
+                        track_id=track_id,
+                        confidence=confidence,
+                        isfallen=isfallen,
+                        stamp=stamp
+                    )
+
+                    # 13. Bounding Box
+                    cv2.rectangle(
+                        cv_image,
+                        (x1, y1),
+                        (x2, y2),
+                        color,
+                        2
+                    )
 
                     cv2.putText(
                         cv_image,
@@ -560,11 +639,11 @@ class FallDetectionNode(Node):
                         2
                     )
 
-                    # ====================================================
-                    # 12. Geometry Information
-                    # ====================================================
-
-                    if shoulder_hip_angle is not None and hip_knee_angle is not None:
+                    # 14. Geometry Information
+                    if (
+                        shoulder_hip_angle is not None
+                        and hip_knee_angle is not None
+                    ):
 
                         geometry_text = (
                             f"S-H:{shoulder_hip_angle:.1f} "
@@ -574,17 +653,20 @@ class FallDetectionNode(Node):
                         cv2.putText(
                             cv_image,
                             geometry_text,
-                            (x1, min(cv_image.shape[0] - 10, y2 + 25)),
+                            (
+                                x1,
+                                min(
+                                    cv_image.shape[0] - 10,
+                                    y2 + 25
+                                )
+                            ),
                             cv2.FONT_HERSHEY_SIMPLEX,
                             0.5,
                             color,
                             2
                         )
 
-                    # ====================================================
-                    # 13. Skeleton
-                    # ====================================================
-
+                    # 15. Skeleton
                     num_kpts = len(kpt)
 
                     if num_kpts == 12:
@@ -620,15 +702,13 @@ class FallDetectionNode(Node):
                             (14, 16)
                         ]
 
-                    # ====================================================
-                    # 14. Keypoint 표시
-                    # ====================================================
-
+                    # 16. Keypoint 표시
                     for pt_idx in range(num_kpts):
 
                         px, py, conf = kpt[pt_idx]
 
                         if conf > self.KEYPOINT_CONF_THRESHOLD:
+
                             cv2.circle(
                                 cv_image,
                                 (int(px), int(py)),
@@ -637,86 +717,124 @@ class FallDetectionNode(Node):
                                 -1
                             )
 
-                    # ====================================================
-                    # 15. Geometry 표시
-                    # ====================================================
+                    # 17. Geometry 표시
+                    self.draw_geometry(
+                        cv_image,
+                        geometry_points,
+                        color
+                    )
 
-                    self.draw_geometry(cv_image, geometry_points, color)
-
-                    # ====================================================
-                    # 16. Skeleton 연결
-                    # ====================================================
-
+                    # 18. Skeleton 연결
                     for edge in skeleton_edges:
 
                         p1, p2 = edge
 
-                        if p1 < num_kpts and p2 < num_kpts:
+                        if (
+                            p1 < num_kpts
+                            and p2 < num_kpts
+                        ):
 
                             x1_k, y1_k, conf1 = kpt[p1]
                             x2_k, y2_k, conf2 = kpt[p2]
 
                             if (
                                 conf1 > self.KEYPOINT_CONF_THRESHOLD
-                                and conf2 > self.KEYPOINT_CONF_THRESHOLD
+                                and
+                                conf2 > self.KEYPOINT_CONF_THRESHOLD
                             ):
+
                                 cv2.line(
                                     cv_image,
-                                    (int(x1_k), int(y1_k)),
-                                    (int(x2_k), int(y2_k)),
+                                    (
+                                        int(x1_k),
+                                        int(y1_k)
+                                    ),
+                                    (
+                                        int(x2_k),
+                                        int(y2_k)
+                                    ),
                                     color,
                                     2
                                 )
 
-        # ========================================================
-        # 17. Detection Loss / Track 유지
-        # ========================================================
-
-        all_track_ids = set(self.tracking_history.keys())
+        # 19. Detection Loss / Track 유지
+        all_track_ids = set(
+            self.tracking_history.keys()
+        )
 
         for track_id in all_track_ids:
 
             # 이번 프레임에 검출됨
             if track_id in current_track_ids:
+
                 self.missed_frames[track_id] = 0
                 continue
 
             # Detection loss
-            self.missed_frames[track_id] = self.missed_frames.get(track_id, 0) + 1
+            self.missed_frames[track_id] = (
+                self.missed_frames.get(
+                    track_id,
+                    0
+                ) + 1
+            )
 
             # 일정 프레임까지 기존 track 유지
-            if self.missed_frames[track_id] <= self.MAX_MISSED_FRAMES:
+            if (
+                self.missed_frames[track_id]
+                <= self.MAX_MISSED_FRAMES
+            ):
                 continue
 
             # 오래 사라지면 track 삭제
-            self.tracking_history.pop(track_id, None)
-            self.initial_fall_votes.pop(track_id, None)
-            self.fall_history.pop(track_id, None)
-            self.track_states.pop(track_id, None)
-            self.missed_frames.pop(track_id, None)
+            self.tracking_history.pop(
+                track_id,
+                None
+            )
+
+            self.initial_fall_votes.pop(
+                track_id,
+                None
+            )
+
+            self.fall_history.pop(
+                track_id,
+                None
+            )
+
+            self.track_states.pop(
+                track_id,
+                None
+            )
+
+            self.missed_frames.pop(
+                track_id,
+                None
+            )
 
         # ========================================================
-        # 18. 결과 이미지 Publish
+        # 20. 결과 이미지 Publish
         # ========================================================
 
         if person_detected_global:
+
             try:
 
-                processed_msg = self.bridge.cv2_to_imgmsg(cv_image, encoding='bgr8')
+                processed_msg = self.bridge.cv2_to_imgmsg(
+                    cv_image,
+                    encoding='bgr8'
+                )
+
                 processed_msg.header = msg.header
-                self.image_pub.publish(processed_msg)
+
+                self.image_pub.publish(
+                    processed_msg
+                )
 
             except Exception as e:
 
-                self.get_logger().error(f"Failed to publish image: {e}")
-
-        # ========================================================
-        # 19. Fall Alarm
-        # ========================================================
-
-        alert_msg = Bool()
-        alert_msg.data = fall_detected_global
-        self.alert_pub.publish(alert_msg)
+                self.get_logger().error(
+                    f"Failed to publish image: {e}"
+                )
 
 
 def main(args=None):
@@ -726,13 +844,10 @@ def main(args=None):
 
     try:
         rclpy.spin(node)
-
     except KeyboardInterrupt:
         node.get_logger().info('Fall Detection Node stopped cleanly')
-
     except Exception as e:
         node.get_logger().error(f'Exception in Fall Detection Node: {e}')
-
     finally:
         cv2.destroyAllWindows()
         node.destroy_node()
