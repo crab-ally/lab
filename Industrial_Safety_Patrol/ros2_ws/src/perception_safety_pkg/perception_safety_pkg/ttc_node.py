@@ -91,7 +91,6 @@ class TTCNode(Node):
         # ── Heartbeat Timer (10 Hz) ────────────────────────────────────
         self.latest_alert_payload = {
             'risk_level': 'NORMAL',
-            'min_ttc': -1.0,
             'target_track_id': -1,
             'target_subject': 'NONE'
         }
@@ -118,7 +117,6 @@ class TTCNode(Node):
             payload = {
                 'header': {'stamp': now},
                 'risk_level': 'NORMAL',
-                'min_ttc': -1.0,
                 'target_track_id': -1,
                 'target_subject': 'NONE'
             }
@@ -494,11 +492,6 @@ class TTCNode(Node):
                 'stamp': stamp
             },
             'risk_level': overall_risk_level,
-            'min_ttc': (
-                round(min_ttc, 2)
-                if min_ttc != float('inf')
-                else -1.0
-            ),
             'target_track_id': most_dangerous_track_id,
             'target_subject': (
                 most_dangerous_subject
