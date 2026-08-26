@@ -322,7 +322,7 @@ class TTCNode(Node):
                         -1
                     )
 
-                    most_dangerous_subject = '로봇-지게차'
+                    most_dangerous_subject = '지게차-로봇'
 
             # ------------------------------------------------------------
             # 2. 사람 - 로봇
@@ -359,7 +359,7 @@ class TTCNode(Node):
                         -1
                     )
 
-                    most_dangerous_subject = '로봇-사람'
+                    most_dangerous_subject = '사람-로봇'
 
             # ------------------------------------------------------------
             # 3. 지게차 - 사람
@@ -435,13 +435,13 @@ class TTCNode(Node):
                 if target_class == 'person':
 
                     target_radius = self.person_radius
-                    subject_name = '로봇-사람'
+                    subject_name = '사람-로봇'
                     fork_margin = 0.0
 
                 elif target_class == 'forklift':
 
                     target_radius = self.forklift_radius
-                    subject_name = '로봇-지게차'
+                    subject_name = '지게차-로봇'
                     fork_margin = self._get_fork_margin(
                         trk_pos,
                         trk_vel,
