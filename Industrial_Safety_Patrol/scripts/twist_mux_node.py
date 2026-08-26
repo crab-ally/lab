@@ -135,7 +135,7 @@ class TwistMuxNode(Node):
         final_cmd = Twist()
 
         # --------------------------------------------------------------
-        # 1. TTC Alert 타임아웃 검사 (새 메시지 수신 전까지 정지 유지 및 2초 쿨다운 로그)
+        # 1. TTC Alert 타임아웃 검사 (perception_safety_pkg 수신 끊길 시)
         # --------------------------------------------------------------
         if (self.last_alert_time>0.0) and (now-self.last_alert_time>self.cmd_timeout):
             self.current_risk_level = "EMERGENCY"
@@ -147,46 +147,65 @@ class TwistMuxNode(Node):
         # 2. EMERGENCY
         # --------------------------------------------------------------
         if self.current_risk_level == "EMERGENCY":
-            # 무조건 정지
-            final_cmd.linear.x = 0.0
-            final_cmd.linear.y = 0.0
-            final_cmd.angular.z = 0.0
+
+            if self.target_subject == "지게차-사람":
+                self.get_logger().warning("EMERGENCY: 지게차-사람 충돌 위험")
+
+                # 현재 상태 유지
+                if self.teleop_received:
+                    final_cmd = self.latest_teleop_cmd
+                elif (self.last_nav_time > 0) and ((now - self.last_nav_time) <= self.cmd_timeout):
+                    final_cmd = self.latest_nav_cmd
+
+            elif self.target_subject in ("지게차-로봇","사람-로봇"):
+
+                final_cmd.linear.x = 0.0
+                final_cmd.linear.y = 0.0
+                final_cmd.angular.z = 0.0
+
+            else:
+                # 대상이 없거나 알 수 없는 경우 안전을 위해 정지
+                final_cmd.linear.x = 0.0
+                final_cmd.linear.y = 0.0
+                final_cmd.angular.z = 0.0
 
         # --------------------------------------------------------------
         # 3. WARNING
         # --------------------------------------------------------------
         elif self.current_risk_level == "WARNING":
-            # Teleop이 최근에 들어왔다면 Teleop 우선
-            if self.teleop_received:
 
-                # 감속
-                final_cmd.linear.x = (
-                    self.latest_teleop_cmd.linear.x * self.slowdown_ratio
-                )
-                final_cmd.linear.y = (
-                    self.latest_teleop_cmd.linear.y * self.slowdown_ratio
-                )
-                final_cmd.angular.z = (
-                    self.latest_teleop_cmd.angular.z * self.slowdown_ratio
-                )
+            if self.target_subject == "지게차-사람":
+                self.get_logger().warning("WARNING: 지게차-사람 충돌 위험")
 
-            # Teleop이 없으면 Nav2
-            elif (self.last_nav_time > 0) and ((now - self.last_nav_time) <= self.cmd_timeout):
-                final_cmd.linear.x = (
-                    self.latest_nav_cmd.linear.x * self.slowdown_ratio
-                )
-                final_cmd.linear.y = (
-                    self.latest_nav_cmd.linear.y * self.slowdown_ratio
-                )
-                final_cmd.angular.z = (
-                    self.latest_nav_cmd.angular.z * self.slowdown_ratio
-                )
+                if self.teleop_received:
+                    final_cmd = self.latest_teleop_cmd
+                elif (self.last_nav_time > 0) and ((now - self.last_nav_time) <= self.cmd_timeout):
+                    final_cmd = self.latest_nav_cmd
 
-            # 둘 다 없거나 타임아웃이면 정지
+            elif self.target_subject in ("지게차-로봇","사람-로봇"):
+                # 로봇 감속
+                if self.teleop_received:
+                    final_cmd.linear.x = self.latest_teleop_cmd.linear.x * self.slowdown_ratio
+                    final_cmd.linear.y = self.latest_teleop_cmd.linear.y * self.slowdown_ratio
+                    final_cmd.angular.z = self.latest_teleop_cmd.angular.z * self.slowdown_ratio
+
+                elif (self.last_nav_time > 0) and ((now - self.last_nav_time) <= self.cmd_timeout):
+                    final_cmd.linear.x = self.latest_nav_cmd.linear.x * self.slowdown_ratio
+                    final_cmd.linear.y = self.latest_nav_cmd.linear.y * self.slowdown_ratio
+                    final_cmd.angular.z = self.latest_nav_cmd.angular.z * self.slowdown_ratio
+
             else:
-                final_cmd.linear.x = 0.0
-                final_cmd.linear.y = 0.0
-                final_cmd.angular.z = 0.0
+                # 대상이 없거나 알 수 없는 경우 감속
+                if self.teleop_received:
+                    final_cmd.linear.x = self.latest_teleop_cmd.linear.x * self.slowdown_ratio
+                    final_cmd.linear.y = self.latest_teleop_cmd.linear.y * self.slowdown_ratio
+                    final_cmd.angular.z = self.latest_teleop_cmd.angular.z * self.slowdown_ratio
+
+                elif (self.last_nav_time > 0) and ((now - self.last_nav_time) <= self.cmd_timeout):
+                    final_cmd.linear.x = self.latest_nav_cmd.linear.x * self.slowdown_ratio
+                    final_cmd.linear.y = self.latest_nav_cmd.linear.y * self.slowdown_ratio
+                    final_cmd.angular.z = self.latest_nav_cmd.angular.z * self.slowdown_ratio
+
 
         # --------------------------------------------------------------
         # 4. NORMAL
