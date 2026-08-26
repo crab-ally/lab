@@ -322,6 +322,7 @@ class FireFusionNode(Node):
             return
 
         fire_tracks: List[dict] = []
+        debug_fires: List[dict] = []
 
         for candidate in candidates:
             try:
@@ -337,12 +338,11 @@ class FireFusionNode(Node):
             cam_x, cam_y, cam_z = result
             lidar_distance = self._get_lidar_distance(cam_x, cam_z, synced_scan)
 
-            fusion_distance = cam_z
-            lidar_valid = False
-
+            # LiDAR와 Depth 값의 차이가 tolerance 이내일 때 융합
             if lidar_distance is not None and abs(lidar_distance - cam_z) <= self.lidar_depth_tolerance:
                 fusion_distance = 0.7 * cam_z + 0.3 * lidar_distance
-                lidar_valid = True
+            else:
+                fusion_distance = cam_z
 
             if cam_z <= 0:
                 continue
@@ -354,8 +354,6 @@ class FireFusionNode(Node):
 
             plane_valid = self._check_plane_geometry(bbox, cam_z)
 
-            if synced_scan is not None and lidar_distance is not None and not lidar_valid:
-                continue
             if not plane_valid:
                 continue
 
@@ -392,19 +390,14 @@ class FireFusionNode(Node):
 
             fire_track = {
                 'fire_id': candidate_id,
-                'bbox': bbox,
                 'position': [round(float(base_x), 2), round(float(base_y), 2), round(float(base_z), 2)],
                 'position_map': map_position,
                 'distance': round(float(math.hypot(base_x, base_y)), 2),
-                'depth': round(float(cam_z), 2),
-                'lidar_distance': round(float(lidar_distance), 2) if lidar_distance is not None else None,
-                'lidar_valid': lidar_valid,
-                'plane_valid': plane_valid,
-                'temporal_hits': candidate.get('temporal_hits', 0),
                 'stamp': stamp_value
             }
 
             fire_tracks.append(fire_track)
+            debug_fires.append({'fire_id':candidate_id,'bbox':bbox})
 
         self._publish_tracks(stamp_value, fire_tracks)
         self._publish_alarm(len(fire_tracks) > 0)
@@ -413,7 +406,7 @@ class FireFusionNode(Node):
         if fire_tracks:
             self._publish_debug_image(
                 rgb_image,
-                fire_tracks,
+                debug_fires,
                 synced_frame['rgb_header']
             )
 
@@ -425,8 +418,6 @@ class FireFusionNode(Node):
                         f'FIRE DETECTED id={fire["fire_id"]} '
                         f'base={fire["position"]} '
                         f'map={fire["position_map"]} '
-                        f'depth={fire["depth"]:.2f}m '
-                        f'lidar={fire["lidar_distance"]}'
                     )
 
     def _calculate_3d_from_depth(self, bbox: List[float]) -> Optional[Tuple[float, float, float]]:
@@ -584,12 +575,9 @@ class FireFusionNode(Node):
         display = image.copy()
 
         for fire in fires:
-            x1, y1, x2, y2 = map(int, fire['bbox'])
-
+            x1,y1,x2,y2 = map(int, fire['bbox'])
             cv2.rectangle(display, (x1, y1), (x2, y2), (0, 0, 255), 3)
-
-            label = f'FINAL FIRE ID:{fire["fire_id"]} D:{fire["depth"]:.2f}m'
-
+            label = f'FIRE ID:{fire["fire_id"]}'
             cv2.putText(
                 display,
                 label,
@@ -679,7 +667,7 @@ class FireFusionNode(Node):
             text_marker.pose.position.y = float(y)
             text_marker.pose.position.z = float(z) + 0.6
 
-            text_marker.text = f"FIRE ID:{fire_id}\nD:{fire['depth']:.2f}m"
+            text_marker.text = f"FIRE ID:{fire_id}"
             text_marker.scale.z = 0.35
             text_marker.color.r = 1.0
             text_marker.color.g = 1.0
