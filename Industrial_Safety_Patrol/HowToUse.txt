@@ -31,7 +31,11 @@
 7. docker compose up fall_detection
 
 # ==================== Data processing ====================
-8. docker compose up event_logger
+8. cd ros2_ws && colcon build --packages-select event_logger_pkg
+8-1. docker compose up event_logger
+8-2. docker compose exec db psql -U admin -d patrol_db
+8-3. SELECT id,timestamp,event_type,severity,track_id,metadata FROM safety_events ORDER BY id DESC;
+8-4. \q
 
 9. docker compose up ws_bridge
 
