@@ -19,13 +19,14 @@ Publishes:
 import json
 import math
 from collections import deque
-from typing import Dict, List, Optional, Set, Tuple
+from typing import List, Optional, Set, Tuple
 
 import cv2
 import numpy as np
 import rclpy
 import tf2_ros
 import message_filters
+
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from std_msgs.msg import String, Bool
@@ -38,11 +39,10 @@ from builtin_interfaces.msg import Time
 
 
 class FireFusionNode(Node):
-    """2D 화재 후보군 + Depth + LiDAR + TF2 기반 3D 화재 위치 추정 및 알람 노드"""
+    """2D 화재 후보 + RGB/Depth + LiDAR + TF2 기반 3D 화재 위치 추정 및 알람 노드"""
 
     def __init__(self) -> None:
         super().__init__('fire_fusion_node')
-
         self.bridge = CvBridge()
 
         # ── Parameters ────────────────────────────────────────────────
@@ -70,96 +70,51 @@ class FireFusionNode(Node):
         self.declare_parameter('lidar_sync_tolerance', 0.15)
         self.lidar_sync_tolerance = self.get_parameter('lidar_sync_tolerance').get_parameter_value().double_value
 
-        self.last_warning_log_time=0.0
+        self.last_warning_log_time = 0.0
 
-        # ── TF2 Listener Setup ─────────────────────────────────────────
+        # ── TF2 ───────────────────────────────────────────────────────
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
         # ── Camera Intrinsics ─────────────────────────────────────────
-        self.fx: float = 600.0
-        self.fy: float = 600.0
-        self.cx: float = 320.0
-        self.cy: float = 240.0
-        self.camera_info_received: bool = False
-        self.camera_frame_id: str = 'camera_optical_frame'
+        self.fx = 600.0
+        self.fy = 600.0
+        self.cx = 320.0
+        self.cy = 240.0
+        self.camera_info_received = False
+        self.camera_frame_id = 'camera_optical_frame'
 
-        # ── Frame Buffers & Storage ───────────────────────────────────
+        # ── Buffers ───────────────────────────────────────────────────
         self.sync_frames: deque = deque(maxlen=20)
         self.scan_cache: deque = deque(maxlen=30)
         self.latest_rgb_img: Optional[np.ndarray] = None
         self.latest_depth_img: Optional[np.ndarray] = None
-        self.latest_depth_encoding: str = '16UC1'
+        self.latest_depth_encoding = '16UC1'
         self.latest_scan: Optional[LaserScan] = None
 
-        # RViz Marker Cleanup용 이전 ID 저장소
+        # ── Marker Cleanup ────────────────────────────────────────────
         self.prev_active_marker_ids: Set[int] = set()
 
-        # ── QoS Profile ───────────────────────────────────────────────
-        sensor_qos = QoSProfile(
-            depth=10,
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            durability=DurabilityPolicy.VOLATILE
-        )
+        # ── QoS ───────────────────────────────────────────────────────
+        sensor_qos = QoSProfile(depth=10,reliability=ReliabilityPolicy.BEST_EFFORT,durability=DurabilityPolicy.VOLATILE)
 
-        # ── Subscriptions & Publishers ─────────────────────────────────
-        self.sub_candidates = self.create_subscription(
-            String,
-            '/fire_candidates',
-            self._candidates_callback,
-            10
-        )
+        # ── Subscriptions ────────────────────────────────────────────
+        self.sub_candidates = self.create_subscription(String,'/fire_candidates',self._candidates_callback,10)
 
-        self.rgb_sub = message_filters.Subscriber(
-            self, Image, '/camera/image_raw', qos_profile=sensor_qos
-        )
-        self.depth_sub = message_filters.Subscriber(
-            self, Image, '/camera/depth/image_raw', qos_profile=sensor_qos
-        )
-        self.rgb_depth_sync = message_filters.ApproximateTimeSynchronizer(
-            [self.rgb_sub, self.depth_sub],
-            queue_size=10,
-            slop=self.sync_slop
-        )
+        self.rgb_sub = message_filters.Subscriber(self,Image,'/camera/image_raw',qos_profile=sensor_qos)
+        self.depth_sub = message_filters.Subscriber(self,Image,'/camera/depth/image_raw',qos_profile=sensor_qos)
+
+        self.rgb_depth_sync = message_filters.ApproximateTimeSynchronizer([self.rgb_sub,self.depth_sub],queue_size=10,slop=self.sync_slop)
         self.rgb_depth_sync.registerCallback(self._rgb_depth_callback)
 
-        self.sub_info = self.create_subscription(
-            CameraInfo,
-            '/camera/depth/camera_info',
-            self._camera_info_callback,
-            10
-        )
+        self.sub_info = self.create_subscription(CameraInfo,'/camera/depth/camera_info',self._camera_info_callback,10)
+        self.sub_scan = self.create_subscription(LaserScan,'/scan',self._scan_callback,sensor_qos)
 
-        self.sub_scan = self.create_subscription(
-            LaserScan,
-            '/scan',
-            self._scan_callback,
-            sensor_qos
-        )
-
-        self.pub_fire_tracks = self.create_publisher(
-            String,
-            '/fire_tracks_3d',
-            10
-        )
-
-        self.pub_alarm = self.create_publisher(
-            Bool,
-            '/fire_alarm',
-            10
-        )
-
-        self.pub_markers = self.create_publisher(
-            MarkerArray,
-            '/fire_fusion/debug_markers',
-            10
-        )
-
-        self.pub_debug_image = self.create_publisher(
-            Image,
-            '/camera/fire_fusion/debug_image',
-            10
-        )
+        # ── Publishers ────────────────────────────────────────────────
+        self.pub_fire_tracks = self.create_publisher(String,'/fire_tracks_3d',10)
+        self.pub_alarm = self.create_publisher(Bool,'/fire_alarm',10)
+        self.pub_markers = self.create_publisher(MarkerArray,'/fire_fusion/debug_markers',10)
+        self.pub_debug_image = self.create_publisher(Image,'/camera/fire_fusion/debug_image',10)
 
         self.get_logger().info('Fire Fusion Node (3D Fire Detection + TF + Alarm) is ready.')
 
@@ -167,19 +122,19 @@ class FireFusionNode(Node):
     def _stamp_to_float(stamp: Time) -> float:
         return float(stamp.sec) + float(stamp.nanosec) * 1e-9
 
-    def _float_to_ros_time(self, value: float) -> Time:
+    def _float_to_ros_time(self,value: float) -> Time:
         try:
             val = float(value)
             sec = int(val)
-            nanosec = int((val - sec) * 1e9)
+            nanosec = int((val-sec)*1e9)
             if nanosec >= 1000000000:
                 sec += 1
                 nanosec -= 1000000000
-            return Time(sec=sec, nanosec=nanosec)
+            return Time(sec=sec,nanosec=nanosec)
         except Exception:
             return Time()
 
-    def _camera_info_callback(self, msg: CameraInfo) -> None:
+    def _camera_info_callback(self,msg: CameraInfo) -> None:
         if msg.k[0] > 0:
             self.fx = msg.k[0]
         if msg.k[4] > 0:
@@ -192,20 +147,17 @@ class FireFusionNode(Node):
 
         if not self.camera_info_received:
             self.camera_info_received = True
-            self.get_logger().info(
-                f'Camera Intrinsics Loaded: fx={self.fx:.1f}, fy={self.fy:.1f}, '
-                f'cx={self.cx:.1f}, cy={self.cy:.1f}, frame_id={self.camera_frame_id}'
-            )
+            self.get_logger().info(f'Camera Intrinsics Loaded: fx={self.fx:.1f}, fy={self.fy:.1f}, cx={self.cx:.1f}, cy={self.cy:.1f}, frame_id={self.camera_frame_id}')
 
-    def _rgb_depth_callback(self, rgb_msg: Image, depth_msg: Image) -> None:
+    def _rgb_depth_callback(self,rgb_msg: Image,depth_msg: Image) -> None:
         try:
-            rgb_image = self.bridge.imgmsg_to_cv2(rgb_msg, desired_encoding='bgr8')
+            rgb_image = self.bridge.imgmsg_to_cv2(rgb_msg,desired_encoding='bgr8')
 
-            if depth_msg.encoding in ['16UC1', 'mono16']:
-                depth_image = self.bridge.imgmsg_to_cv2(depth_msg, desired_encoding='passthrough')
+            if depth_msg.encoding in ['16UC1','mono16']:
+                depth_image = self.bridge.imgmsg_to_cv2(depth_msg,desired_encoding='passthrough')
                 depth_encoding = '16UC1'
             elif depth_msg.encoding == '32FC1':
-                depth_image = self.bridge.imgmsg_to_cv2(depth_msg, desired_encoding='32FC1')
+                depth_image = self.bridge.imgmsg_to_cv2(depth_msg,desired_encoding='32FC1')
                 depth_encoding = '32FC1'
             else:
                 self.get_logger().warn(f'Unsupported depth encoding: {depth_msg.encoding}')
@@ -214,7 +166,7 @@ class FireFusionNode(Node):
             rgb_stamp = self._stamp_to_float(rgb_msg.header.stamp)
             depth_stamp = self._stamp_to_float(depth_msg.header.stamp)
 
-            if abs(rgb_stamp - depth_stamp) > self.sync_slop:
+            if abs(rgb_stamp-depth_stamp) > self.sync_slop:
                 return
 
             self.sync_frames.append({
@@ -225,21 +177,19 @@ class FireFusionNode(Node):
                 'rgb_header': rgb_msg.header,
                 'depth_header': depth_msg.header
             })
+
         except Exception as e:
             self.get_logger().error(f'RGB/Depth synchronization error: {e}')
 
-    def _scan_callback(self, msg: LaserScan) -> None:
-        self.scan_cache.append({
-            'stamp': self._stamp_to_float(msg.header.stamp),
-            'scan': msg
-        })
+    def _scan_callback(self,msg: LaserScan) -> None:
+        self.scan_cache.append({'stamp':self._stamp_to_float(msg.header.stamp),'scan':msg})
 
-    def _get_synced_frame(self, target_stamp: float) -> Optional[dict]:
+    def _get_synced_frame(self,target_stamp: float) -> Optional[dict]:
         if not self.sync_frames:
             return None
 
-        best = min(self.sync_frames, key=lambda x: abs(x['stamp'] - target_stamp))
-        delta = abs(best['stamp'] - target_stamp)
+        best = min(self.sync_frames,key=lambda x:abs(x['stamp']-target_stamp))
+        delta = abs(best['stamp']-target_stamp)
 
         if delta > self.candidate_sync_tolerance:
             self.get_logger().debug(f'No synchronized RGB/Depth frame: delta={delta:.3f}s')
@@ -247,41 +197,32 @@ class FireFusionNode(Node):
 
         return best
 
-    def _get_synced_scan(self, target_stamp: float) -> Optional[LaserScan]:
+    def _get_synced_scan(self,target_stamp: float) -> Optional[LaserScan]:
         if not self.scan_cache:
             return None
 
-        best = min(self.scan_cache, key=lambda x: abs(x['stamp'] - target_stamp))
-        delta = abs(best['stamp'] - target_stamp)
+        best = min(self.scan_cache,key=lambda x:abs(x['stamp']-target_stamp))
+        delta = abs(best['stamp']-target_stamp)
 
         if delta > self.lidar_sync_tolerance:
             return None
 
         return best['scan']
 
-    def _get_tf(self, target_frame: str, source_frame: str, stamp: Time) -> Optional[tf2_ros.TransformStamped]:
+    def _get_tf(self,target_frame: str,source_frame: str,stamp: Time) -> Optional[tf2_ros.TransformStamped]:
         try:
             tf_time = rclpy.time.Time.from_msg(stamp)
-            return self.tf_buffer.lookup_transform(
-                target_frame,
-                source_frame,
-                tf_time,
-                timeout=rclpy.duration.Duration(seconds=0.05)
-            )
-        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+            return self.tf_buffer.lookup_transform(target_frame,source_frame,tf_time,timeout=rclpy.duration.Duration(seconds=0.05))
+        except (tf2_ros.LookupException,tf2_ros.ConnectivityException,tf2_ros.ExtrapolationException):
             try:
-                return self.tf_buffer.lookup_transform(target_frame, source_frame, rclpy.time.Time())
+                return self.tf_buffer.lookup_transform(target_frame,source_frame,rclpy.time.Time())
             except Exception as e:
-                self.get_logger().warning(
-                    f'TF unavailable ({source_frame} -> {target_frame}): {e}'
-                )
+                self.get_logger().warning(f'TF unavailable ({source_frame} -> {target_frame}): {e}')
                 return None
 
-    def _candidates_callback(self, msg: String) -> None:
+    def _candidates_callback(self,msg: String) -> None:
         if not self.camera_info_received:
-            self.get_logger().warning(
-                'Camera info not received yet. Skipping fire 3D fusion.'
-            )
+            self.get_logger().warning('Camera info not received yet. Skipping fire 3D fusion.')
             return
 
         try:
@@ -290,35 +231,43 @@ class FireFusionNode(Node):
             self.get_logger().error(f'Fire candidate JSON error: {e}')
             return
 
-        header = payload.get('header', {})
-        stamp_value = float(header.get('stamp', 0.0))
-        candidates = payload.get('candidates', [])
+        header = payload.get('header',{})
+        candidate_stamp = float(header.get('stamp',0.0))
+        candidates = payload.get('candidates',[])
 
         if not candidates:
             self._publish_alarm(False)
-            self._publish_tracks(stamp_value, [])
+            self._publish_tracks(candidate_stamp,[])
             self._publish_markers([])
             return
 
-        synced_frame = self._get_synced_frame(stamp_value)
+        # fire_candidates timestamp와 가장 가까운 RGB+Depth 프레임 선택
+        synced_frame = self._get_synced_frame(candidate_stamp)
+
         if synced_frame is None:
             return
 
+        # 실제 처리에 사용한 RGB 이미지
         rgb_image = synced_frame['rgb']
+        rgb_header = synced_frame['rgb_header']
+
+        # 실제 RGB 이미지 timestamp를 최종 이벤트 timestamp로 사용
+        rgb_stamp = self._stamp_to_float(rgb_header.stamp)
+        stamp = rgb_header.stamp
+
         self.latest_rgb_img = rgb_image
         self.latest_depth_img = synced_frame['depth']
         self.latest_depth_encoding = synced_frame['depth_encoding']
 
-        synced_scan = self._get_synced_scan(stamp_value)
+        # LiDAR도 실제 RGB timestamp 기준으로 선택
+        synced_scan = self._get_synced_scan(rgb_stamp)
         self.latest_scan = synced_scan
 
-        stamp = self._float_to_ros_time(stamp_value)
+        # TF도 실제 RGB timestamp 기준
+        tf_camera_to_base = self._get_tf(self.target_frame,self.camera_frame_id,stamp)
 
-        tf_camera_to_base = self._get_tf(self.target_frame, self.camera_frame_id, stamp)
         if tf_camera_to_base is None:
-            self.get_logger().warning(
-                f'Camera TF unavailable: {self.camera_frame_id} -> {self.target_frame}'
-            )
+            self.get_logger().warning(f'Camera TF unavailable: {self.camera_frame_id} -> {self.target_frame}')
             return
 
         fire_tracks: List[dict] = []
@@ -328,33 +277,31 @@ class FireFusionNode(Node):
             try:
                 candidate_id = int(candidate['candidate_id'])
                 bbox = candidate['bbox']
-            except (KeyError, TypeError, ValueError):
+            except (KeyError,TypeError,ValueError):
                 continue
 
             result = self._calculate_3d_from_depth(bbox)
+
             if result is None:
                 continue
 
-            cam_x, cam_y, cam_z = result
-            lidar_distance = self._get_lidar_distance(cam_x, cam_z, synced_scan)
+            cam_x,cam_y,cam_z = result
+            lidar_distance = self._get_lidar_distance(cam_x,cam_z,synced_scan)
 
-            # LiDAR와 Depth 값의 차이가 tolerance 이내일 때 융합
-            if lidar_distance is not None and abs(lidar_distance - cam_z) <= self.lidar_depth_tolerance:
-                fusion_distance = 0.7 * cam_z + 0.3 * lidar_distance
+            if lidar_distance is not None and abs(lidar_distance-cam_z) <= self.lidar_depth_tolerance:
+                fusion_distance = 0.7*cam_z+0.3*lidar_distance
             else:
                 fusion_distance = cam_z
 
             if cam_z <= 0:
                 continue
 
-            scale = fusion_distance / cam_z
+            scale = fusion_distance/cam_z
             cam_x *= scale
             cam_y *= scale
             cam_z = fusion_distance
 
-            plane_valid = self._check_plane_geometry(bbox, cam_z)
-
-            if not plane_valid:
+            if not self._check_plane_geometry(bbox,cam_z):
                 continue
 
             p_cam = PointStamped()
@@ -365,7 +312,7 @@ class FireFusionNode(Node):
             p_cam.point.z = cam_z
 
             try:
-                p_base = do_transform_point(p_cam, tf_camera_to_base)
+                p_base = do_transform_point(p_cam,tf_camera_to_base)
             except Exception as e:
                 self.get_logger().warning(f'Camera -> base transform failed: {e}')
                 continue
@@ -375,85 +322,76 @@ class FireFusionNode(Node):
             base_z = p_base.point.z
 
             map_position = None
-            tf_base_to_map = self._get_tf(self.map_frame, self.target_frame, stamp)
+            tf_base_to_map = self._get_tf(self.map_frame,self.target_frame,stamp)
 
             if tf_base_to_map is not None:
                 try:
-                    p_map = do_transform_point(p_base, tf_base_to_map)
-                    map_position = [
-                        round(float(p_map.point.x), 2),
-                        round(float(p_map.point.y), 2),
-                        round(float(p_map.point.z), 2)
-                    ]
+                    p_map = do_transform_point(p_base,tf_base_to_map)
+                    map_position = [round(float(p_map.point.x),2),round(float(p_map.point.y),2),round(float(p_map.point.z),2)]
                 except Exception as e:
                     self.get_logger().debug(f'Base -> map transform failed: {e}')
 
-            fire_track = {
+            fire_tracks.append({
                 'fire_id': candidate_id,
-                'position': [round(float(base_x), 2), round(float(base_y), 2), round(float(base_z), 2)],
+                'position': [round(float(base_x),2),round(float(base_y),2),round(float(base_z),2)],
                 'position_map': map_position,
-                'distance': round(float(math.hypot(base_x, base_y)), 2),
-                'stamp': stamp_value
-            }
+                'distance': round(float(math.hypot(base_x,base_y)),2),
+                'stamp': rgb_stamp
+            })
 
-            fire_tracks.append(fire_track)
             debug_fires.append({'fire_id':candidate_id,'bbox':bbox})
 
-        self._publish_tracks(stamp_value, fire_tracks)
-        self._publish_alarm(len(fire_tracks) > 0)
+        # fire_tracks_3d timestamp = 실제 RGB timestamp
+        self._publish_tracks(rgb_stamp,fire_tracks)
+        self._publish_alarm(len(fire_tracks)>0)
         self._publish_markers(fire_tracks)
 
+        # debug_image도 동일한 RGB frame/header 사용
         if fire_tracks:
-            self._publish_debug_image(
-                rgb_image,
-                debug_fires,
-                synced_frame['rgb_header']
-            )
+            self._publish_debug_image(rgb_image,debug_fires,rgb_header)
 
-            now=self.get_clock().now().nanoseconds*1e-9
-            if now-self.last_warning_log_time>=2.0:
-                self.last_warning_log_time=now
+            now = self.get_clock().now().nanoseconds*1e-9
+
+            if now-self.last_warning_log_time >= 2.0:
+                self.last_warning_log_time = now
+
                 for fire in fire_tracks:
-                    self.get_logger().warn(
-                        f'FIRE DETECTED id={fire["fire_id"]} '
-                        f'base={fire["position"]} '
-                        f'map={fire["position_map"]} '
-                    )
+                    self.get_logger().warn(f'FIRE DETECTED id={fire["fire_id"]} base={fire["position"]} map={fire["position_map"]} rgb_stamp={rgb_stamp:.6f}')
 
-    def _calculate_3d_from_depth(self, bbox: List[float]) -> Optional[Tuple[float, float, float]]:
+    def _calculate_3d_from_depth(self,bbox: List[float]) -> Optional[Tuple[float,float,float]]:
         if self.latest_depth_img is None:
             return None
 
-        h_img, w_img = self.latest_depth_img.shape[:2]
-        xmin, ymin, xmax, ymax = map(int, bbox)
+        h_img,w_img = self.latest_depth_img.shape[:2]
+        xmin,ymin,xmax,ymax = map(int,bbox)
 
-        xmin = max(0, min(w_img - 1, xmin))
-        xmax = max(0, min(w_img, xmax))
-        ymin = max(0, min(h_img - 1, ymin))
-        ymax = max(0, min(h_img, ymax))
+        xmin = max(0,min(w_img-1,xmin))
+        xmax = max(0,min(w_img,xmax))
+        ymin = max(0,min(h_img-1,ymin))
+        ymax = max(0,min(h_img,ymax))
 
         if xmax <= xmin or ymax <= ymin:
             return None
 
-        cx_box = (xmin + xmax) / 2.0
-        cy_box = (ymin + ymax) / 2.0
-        box_w = xmax - xmin
-        box_h = ymax - ymin
+        cx_box = (xmin+xmax)/2.0
+        cy_box = (ymin+ymax)/2.0
+        box_w = xmax-xmin
+        box_h = ymax-ymin
 
-        rx1 = max(0, int(cx_box - box_w * 0.25))
-        rx2 = min(w_img, int(cx_box + box_w * 0.25))
-        ry1 = max(0, int(cy_box - box_h * 0.25))
-        ry2 = min(h_img, int(cy_box + box_h * 0.25))
+        rx1 = max(0,int(cx_box-box_w*0.25))
+        rx2 = min(w_img,int(cx_box+box_w*0.25))
+        ry1 = max(0,int(cy_box-box_h*0.25))
+        ry2 = min(h_img,int(cy_box+box_h*0.25))
 
         if rx2 <= rx1 or ry2 <= ry1:
             return None
 
-        depth_roi = self.latest_depth_img[ry1:ry2, rx1:rx2]
+        depth_roi = self.latest_depth_img[ry1:ry2,rx1:rx2]
 
         if self.latest_depth_encoding == '16UC1':
-            valid_depths = depth_roi[depth_roi > 0].astype(np.float32) / 1000.0
+            valid_depths = depth_roi[depth_roi>0].astype(np.float32)/1000.0
         else:
-            valid_depths = depth_roi[np.isfinite(depth_roi) & (depth_roi > 0.1)]
+            valid_depths = depth_roi[np.isfinite(depth_roi)&(depth_roi>0.1)]
 
         if len(valid_depths) < 10:
             return None
@@ -463,30 +401,28 @@ class FireFusionNode(Node):
         if z_cam < self.min_depth or z_cam > self.max_depth:
             return None
 
-        x_cam = (cx_box - self.cx) * z_cam / self.fx
-        y_cam = (cy_box - self.cy) * z_cam / self.fy
+        x_cam = (cx_box-self.cx)*z_cam/self.fx
+        y_cam = (cy_box-self.cy)*z_cam/self.fy
 
-        return x_cam, y_cam, z_cam
+        return x_cam,y_cam,z_cam
 
-    def _get_lidar_distance(self, cam_x: float, cam_z: float, scan: Optional[LaserScan]) -> Optional[float]:
-        """2D LiDAR /scan 데이터 기반 거리 교차 검증 (Window Search 적용)"""
+    def _get_lidar_distance(self,cam_x: float,cam_z: float,scan: Optional[LaserScan]) -> Optional[float]:
         if scan is None:
             return None
 
-        angle_rad = -math.atan2(cam_x, cam_z)
+        angle_rad = -math.atan2(cam_x,cam_z)
 
         if angle_rad < scan.angle_min or angle_rad > scan.angle_max:
             return None
 
-        idx = int((angle_rad - scan.angle_min) / scan.angle_increment)
+        idx = int((angle_rad-scan.angle_min)/scan.angle_increment)
 
-        # 주변 빔(Window Search: idx ± 2) 탐색으로 노이즈 및 결측치 방지
         valid_ranges = []
         window_size = 2
-        min_idx = max(0, idx - window_size)
-        max_idx = min(len(scan.ranges) - 1, idx + window_size)
+        min_idx = max(0,idx-window_size)
+        max_idx = min(len(scan.ranges)-1,idx+window_size)
 
-        for i in range(min_idx, max_idx + 1):
+        for i in range(min_idx,max_idx+1):
             r = scan.ranges[i]
             if scan.range_min <= r <= scan.range_max and not math.isnan(r) and not math.isinf(r):
                 valid_ranges.append(r)
@@ -496,29 +432,30 @@ class FireFusionNode(Node):
 
         return None
 
-    def _check_plane_geometry(self, bbox: List[float], representative_depth: float) -> bool:
+    def _check_plane_geometry(self,bbox: List[float],representative_depth: float) -> bool:
         if self.latest_depth_img is None:
             return False
 
-        h_img, w_img = self.latest_depth_img.shape[:2]
-        xmin, ymin, xmax, ymax = map(int, bbox)
+        h_img,w_img = self.latest_depth_img.shape[:2]
+        xmin,ymin,xmax,ymax = map(int,bbox)
 
-        xmin = max(0, xmin)
-        ymin = max(0, ymin)
-        xmax = min(w_img, xmax)
-        ymax = min(h_img, ymax)
+        xmin = max(0,xmin)
+        ymin = max(0,ymin)
+        xmax = min(w_img,xmax)
+        ymax = min(h_img,ymax)
 
         if xmax <= xmin or ymax <= ymin:
             return False
 
-        roi = self.latest_depth_img[ymin:ymax, xmin:xmax]
+        roi = self.latest_depth_img[ymin:ymax,xmin:xmax]
+
         if roi.size == 0:
             return False
 
-        step_y = max(1, roi.shape[0] // 15)
-        step_x = max(1, roi.shape[1] // 15)
+        step_y = max(1,roi.shape[0]//15)
+        step_x = max(1,roi.shape[1]//15)
 
-        ys, xs = np.mgrid[ymin:ymax:step_y, xmin:xmax:step_x]
+        ys,xs = np.mgrid[ymin:ymax:step_y,xmin:xmax:step_x]
         xs = xs.flatten()
         ys = ys.flatten()
 
@@ -527,109 +464,107 @@ class FireFusionNode(Node):
 
         depth_values = []
 
-        for px, py in zip(xs, ys):
-            depth = self.latest_depth_img[py, px]
+        for px,py in zip(xs,ys):
+            depth = self.latest_depth_img[py,px]
+
             if self.latest_depth_encoding == '16UC1':
-                depth_val = float(depth) / 1000.0
+                depth_val = float(depth)/1000.0
             else:
                 depth_val = float(depth)
 
             if not np.isfinite(depth_val) or depth_val < self.min_depth or depth_val > self.max_depth:
                 continue
 
-            depth_values.append((float(px), float(py), depth_val))
+            depth_values.append((float(px),float(py),depth_val))
 
         if len(depth_values) < 10:
             return True
 
         points = []
 
-        for px, py, z in depth_values:
-            x = (px - self.cx) * z / self.fx
-            y = (py - self.cy) * z / self.fy
-            points.append([x, y, z])
+        for px,py,z in depth_values:
+            x = (px-self.cx)*z/self.fx
+            y = (py-self.cy)*z/self.fy
+            points.append([x,y,z])
 
-        points_arr = np.asarray(points, dtype=np.float64)
-        center = np.mean(points_arr, axis=0)
-        centered = points_arr - center
+        points_arr = np.asarray(points,dtype=np.float64)
+        center = np.mean(points_arr,axis=0)
+        centered = points_arr-center
 
         try:
-            _, _, vh = np.linalg.svd(centered)
+            _,_,vh = np.linalg.svd(centered)
         except np.linalg.LinAlgError:
             return True
 
         normal = vh[-1]
-        residuals = np.abs(centered @ normal)
+        residuals = np.abs(centered@normal)
 
         median_residual = float(np.median(residuals))
-        p95_residual = float(np.percentile(residuals, 95))
+        p95_residual = float(np.percentile(residuals,95))
 
         plane_like = median_residual < 0.015 and p95_residual < 0.05
 
         return not plane_like
 
-    def _publish_debug_image(self, image: np.ndarray, fires: List[dict], header) -> None:
+    def _publish_debug_image(self,image: np.ndarray,fires: List[dict],header) -> None:
         if image is None or not fires:
             return
 
         display = image.copy()
 
         for fire in fires:
-            x1,y1,x2,y2 = map(int, fire['bbox'])
-            cv2.rectangle(display, (x1, y1), (x2, y2), (0, 0, 255), 3)
+            x1,y1,x2,y2 = map(int,fire['bbox'])
+
+            cv2.rectangle(display,(x1,y1),(x2,y2),(0,0,255),3)
+
             label = f'FIRE ID:{fire["fire_id"]}'
-            cv2.putText(
-                display,
-                label,
-                (x1, max(y1 - 10, 25)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 0, 255),
-                2
-            )
+
+            cv2.putText(display,label,(x1,max(y1-10,25)),cv2.FONT_HERSHEY_SIMPLEX,0.6,(0,0,255),2)
 
         try:
-            debug_msg = self.bridge.cv2_to_imgmsg(display, encoding='bgr8')
+            debug_msg = self.bridge.cv2_to_imgmsg(display,encoding='bgr8')
+
+            # 원본 RGB header 그대로 사용
             debug_msg.header = header
+
             self.pub_debug_image.publish(debug_msg)
+
         except Exception as e:
             self.get_logger().error(f'Failed to publish debug image: {e}')
 
-    def _publish_tracks(self, stamp: float, fires: List[dict]) -> None:
+    def _publish_tracks(self,stamp: float,fires: List[dict]) -> None:
         output = {
             'header': {
                 'stamp': stamp,
                 'frame_id': self.target_frame,
                 'map_frame': self.map_frame
             },
-            'fire_detected': len(fires) > 0,
+            'fire_detected': len(fires)>0,
             'fire_count': len(fires),
             'fires': fires
         }
 
         msg = String()
-        msg.data = json.dumps(output, ensure_ascii=False)
+        msg.data = json.dumps(output,ensure_ascii=False)
         self.pub_fire_tracks.publish(msg)
 
-    def _publish_alarm(self, state: bool) -> None:
+    def _publish_alarm(self,state: bool) -> None:
         msg = Bool()
         msg.data = bool(state)
         self.pub_alarm.publish(msg)
 
-    def _publish_markers(self, fires: List[dict]) -> None:
-        """RViz2 시각화 마커 발행 (DELETE Cleanup 포함)"""
+    def _publish_markers(self,fires: List[dict]) -> None:
         marker_array = MarkerArray()
         current_active_marker_ids: Set[int] = set()
 
         for fire in fires:
             fire_id = int(fire['fire_id'])
             sphere_id = fire_id
-            text_id = fire_id + 10000
+            text_id = fire_id+10000
 
             current_active_marker_ids.add(sphere_id)
             current_active_marker_ids.add(text_id)
 
-            # Sphere Marker (Red for fire)
             marker = Marker()
             marker.header.frame_id = self.target_frame
             marker.header.stamp = self.get_clock().now().to_msg()
@@ -638,7 +573,8 @@ class FireFusionNode(Node):
             marker.type = Marker.SPHERE
             marker.action = Marker.ADD
 
-            x, y, z = fire['position']
+            x,y,z = fire['position']
+
             marker.pose.position.x = float(x)
             marker.pose.position.y = float(y)
             marker.pose.position.z = float(z)
@@ -655,7 +591,6 @@ class FireFusionNode(Node):
 
             marker_array.markers.append(marker)
 
-            # Text Marker
             text_marker = Marker()
             text_marker.header = marker.header
             text_marker.ns = "fire_tracks_text"
@@ -665,10 +600,11 @@ class FireFusionNode(Node):
 
             text_marker.pose.position.x = float(x)
             text_marker.pose.position.y = float(y)
-            text_marker.pose.position.z = float(z) + 0.6
+            text_marker.pose.position.z = float(z)+0.6
 
             text_marker.text = f"FIRE ID:{fire_id}"
             text_marker.scale.z = 0.35
+
             text_marker.color.r = 1.0
             text_marker.color.g = 1.0
             text_marker.color.b = 1.0
@@ -676,8 +612,8 @@ class FireFusionNode(Node):
 
             marker_array.markers.append(text_marker)
 
-        # 소화/미감지 마커 삭제 Cleanup (Marker.DELETE)
-        removed_ids = self.prev_active_marker_ids - current_active_marker_ids
+        removed_ids = self.prev_active_marker_ids-current_active_marker_ids
+
         for m_id in removed_ids:
             del_marker = Marker()
             del_marker.header.frame_id = self.target_frame
