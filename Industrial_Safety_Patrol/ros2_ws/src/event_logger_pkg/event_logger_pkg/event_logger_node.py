@@ -349,41 +349,60 @@ class EventLoggerNode(Node):
         if not msg.data:
             return
 
-        track_id = -1
-        key = 'fire'
-        event_type = 'FIRE_DETECTION'
-
-        if not self._should_log(track_id, key, event_type):
-            return
-
         fire_data = self._latest_fire_tracks
 
         if fire_data is None:
             self.get_logger().warn('[EventLogger] Fire alarm received but /fire_tracks_3d data is not available.')
             return
 
+        fires = fire_data.get('fires', [])
+
+        if not isinstance(fires, list) or not fires:
+            return
+
         event_epoch = self._latest_fire_track_epoch if self._latest_fire_track_epoch is not None else time.time()
         timestamp = self._epoch_to_iso(event_epoch)
-        position_map = self._extract_position_map(fire_data)
 
-        image_path = self._save_buffered_snapshot(
-            self._fire_images,
-            'FIRE_DETECTION',
-            -1,
-            event_epoch,
-        )
+        for fire in fires:
+            if not isinstance(fire, dict):
+                continue
 
-        row = self._build_row(
-            event_type='FIRE_DETECTION',
-            severity='WARNING',
-            track_id=-1,
-            image_path=image_path,
-            timestamp=timestamp,
-            epoch=event_epoch,
-            metadata={'position_map': position_map},
-        )
+            track_id = self._safe_int(fire.get('fire_id', -1))
 
-        self._write(row, (track_id, key, event_type))
+            if track_id < 0:
+                continue
+
+            key = f'fire_{track_id}'
+            event_type = 'FIRE_DETECTION'
+
+            if not self._should_log(track_id, key, event_type):
+                continue
+
+            image_path = self._save_buffered_snapshot(
+                self._fire_images,
+                'FIRE_DETECTION',
+                track_id,
+                event_epoch,
+            )
+
+            position_map = fire.get('position_map')
+
+            row = self._build_row(
+                event_type='FIRE_DETECTION',
+                severity='WARNING',
+                track_id=track_id,
+                image_path=image_path,
+                timestamp=timestamp,
+                epoch=event_epoch,
+                metadata={
+                    'fire_id': track_id,
+                    'position': fire.get('position'),
+                    'position_map': position_map,
+                    'distance': fire.get('distance'),
+                },
+            )
+
+            self._write(row, (track_id, key, event_type))
 
     # ════════════════════════════════════════════════════════════════════════
     # PPE
