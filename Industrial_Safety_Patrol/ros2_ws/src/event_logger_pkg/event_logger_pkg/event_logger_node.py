@@ -13,7 +13,7 @@ Events topic:
 
     2. PPE_VIOLATION
        - /detections_2d
-       - /perception/debug_image
+       - /camera/image_raw
 
     3. TTC_ALERT
        - /ttc_alerts
@@ -188,11 +188,8 @@ class EventLoggerNode(Node):
         # 동일한 (track_id, key, event_type) 중복 저장 방지
         self._logged_events: set[tuple[int, str, str]] = set()
 
-        # 원본 RGB 이미지 버퍼
+        # 모든 이벤트에서 사용하는 원본 RGB 이미지 버퍼
         self._camera_images = deque()
-
-        # PPE debug image 버퍼
-        self._perception_images = deque()
 
         sensor_qos = QoSProfile(
             depth=10,
@@ -209,12 +206,8 @@ class EventLoggerNode(Node):
         # ── Fire ──────────────────────────────────────────────────────
         self.create_subscription(String, '/fire_tracks_3d', self._fire_tracks_callback, reliable_qos)
 
-        # Fire 이벤트 사진은 debug_image가 아니라 원본 RGB를 사용
-        self.create_subscription(Image, '/camera/image_raw', self._camera_image_callback, sensor_qos)
-
         # ── PPE ───────────────────────────────────────────────────────
         self.create_subscription(String, '/detections_2d', self._detections_callback, reliable_qos)
-        self.create_subscription(Image, '/perception/debug_image', self._perception_image_callback, sensor_qos)
 
         # ── TTC ───────────────────────────────────────────────────────
         self.create_subscription(String, '/ttc_alerts', self._ttc_callback, reliable_qos)
@@ -222,6 +215,11 @@ class EventLoggerNode(Node):
         # ── Fall ──────────────────────────────────────────────────────
         self.create_subscription(String, '/fall_alarm', self._fall_alarm_callback, reliable_qos)
 
+        # ── Common Camera ─────────────────────────────────────────────
+        # 모든 이벤트 사진은 원본 RGB 이미지를 사용
+        self.create_subscription(Image, '/camera/image_raw', self._camera_image_callback, sensor_qos)
+
+        # ── Odom ──────────────────────────────────────────────────────
         self.create_subscription(Odometry, '/odom', self._odom_callback, sensor_qos)
 
         self.get_logger().info('EventLogger Node started.')
@@ -252,15 +250,6 @@ class EventLoggerNode(Node):
         stamp = self._ros_stamp_to_epoch(msg)
         self._camera_images.append((stamp, image))
         self._cleanup_image_buffer(self._camera_images, stamp)
-
-    def _perception_image_callback(self, msg: Image) -> None:
-        image = self._convert_image(msg)
-        if image is None:
-            return
-
-        stamp = self._ros_stamp_to_epoch(msg)
-        self._perception_images.append((stamp, image))
-        self._cleanup_image_buffer(self._perception_images, stamp)
 
     def _convert_image(self, msg: Image):
         try:
@@ -314,7 +303,7 @@ class EventLoggerNode(Node):
             if not self._should_log(track_id, key, event_type):
                 continue
 
-            # Fire debug image가 아닌 동일 timestamp의 원본 RGB 저장
+            # 원본 RGB 이미지 저장
             image_path = self._save_buffered_snapshot(
                 self._camera_images,
                 'FIRE_DETECTION',
@@ -345,10 +334,15 @@ class EventLoggerNode(Node):
 
     def _detections_callback(self, msg: String) -> None:
         try:
-            detections = json.loads(msg.data)
+            data = json.loads(msg.data)
         except (json.JSONDecodeError, TypeError):
             self.get_logger().warn('[EventLogger] Invalid JSON in /detections_2d')
             return
+
+        if not isinstance(data, dict):
+            return
+
+        detections = data.get('detections', [])
 
         if not isinstance(detections, list):
             return
@@ -371,8 +365,9 @@ class EventLoggerNode(Node):
             event_epoch = event_epoch if event_epoch is not None else time.time()
             timestamp = self._epoch_to_iso(event_epoch)
 
+            # PPE도 원본 RGB 이미지 저장
             image_path = self._save_buffered_snapshot(
-                self._perception_images,
+                self._camera_images,
                 'PPE_VIOLATION',
                 track_id,
                 event_epoch,
@@ -528,10 +523,7 @@ class EventLoggerNode(Node):
             return ''
 
         if closest_diff > self._image_match_tolerance:
-            self.get_logger().warn(
-                f'[EventLogger] Image timestamp mismatch: '
-                f'{closest_diff:.3f}s for {label}'
-            )
+            self.get_logger().warn(f'[EventLogger] Image timestamp mismatch: {closest_diff:.3f}s for {label}')
 
         try:
             ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')
@@ -547,10 +539,7 @@ class EventLoggerNode(Node):
                 self.get_logger().warn(f'[EventLogger] Failed to write image: {filepath}')
                 return ''
 
-            self.get_logger().info(
-                f'[EventLogger] Image saved | track={track_id} | '
-                f'diff={closest_diff:.3f}s | path={filepath}'
-            )
+            self.get_logger().info(f'[EventLogger] Image saved | track={track_id} | diff={closest_diff:.3f}s | path={filepath}')
 
             return str(filepath)
 
@@ -622,6 +611,7 @@ class EventLoggerNode(Node):
 
         if timestamp is not None:
             parsed = self._parse_timestamp(timestamp)
+
             if parsed is not None:
                 return parsed
 
