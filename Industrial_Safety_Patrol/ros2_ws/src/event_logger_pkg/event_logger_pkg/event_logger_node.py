@@ -80,10 +80,7 @@ class SQLiteBackend:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._path = db_path
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(
-            db_path,
-            check_same_thread=False
-        )
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.executescript(self.DDL)
         self._conn.commit()
 
@@ -96,7 +93,6 @@ class SQLiteBackend:
             (:timestamp, :epoch, :robot_x, :robot_y, :event_type,
              :severity, :track_id, :image_path, :metadata)
         """
-
         with self._lock:
             self._conn.execute(sql, row)
             self._conn.commit()
@@ -131,14 +127,7 @@ class PostgreSQLBackend:
     """
 
     def __init__(self, host: str, port: int, dbname: str, user: str, password: str) -> None:
-        self._dsn = dict(
-            host=host,
-            port=port,
-            dbname=dbname,
-            user=user,
-            password=password,
-        )
-
+        self._dsn = dict(host=host, port=port, dbname=dbname, user=user, password=password)
         self._lock = threading.Lock()
         self._conn = psycopg2.connect(**self._dsn)
         self._conn.autocommit = False
@@ -191,62 +180,16 @@ class EventLoggerNode(Node):
 
         # ── Parameters ──────────────────────────────────────────────────────
 
-        self.declare_parameter(
-            'db_path',
-            '/workspace/data/safety_events.db'
-        )
+        self.declare_parameter('db_path', '/workspace/data/safety_events.db')
+        self.declare_parameter('image_dir', '/workspace/data/event_images')
+        self.declare_parameter('image_buffer_sec', 5.0)
+        self.declare_parameter('image_match_tolerance_sec', 0.3)
 
-        self.declare_parameter(
-            'image_dir',
-            '/workspace/data/event_images'
-        )
+        self._db_path = self.get_parameter('db_path').get_parameter_value().string_value
+        self._image_dir = self.get_parameter('image_dir').get_parameter_value().string_value
+        self._image_buffer_sec = self.get_parameter('image_buffer_sec').get_parameter_value().double_value
+        self._image_match_tolerance = self.get_parameter('image_match_tolerance_sec').get_parameter_value().double_value
 
-        self.declare_parameter(
-            'min_log_interval_sec',
-            1.0
-        )
-
-        self.declare_parameter(
-            'image_buffer_sec',
-            5.0
-        )
-
-        self.declare_parameter(
-            'image_match_tolerance_sec',
-            0.3
-        )
-
-        self._db_path = (
-            self.get_parameter('db_path')
-            .get_parameter_value()
-            .string_value
-        )
-
-        self._image_dir = (
-            self.get_parameter('image_dir')
-            .get_parameter_value()
-            .string_value
-        )
-
-        self._min_interval = (
-            self.get_parameter('min_log_interval_sec')
-            .get_parameter_value()
-            .double_value
-        )
-
-        self._image_buffer_sec = (
-            self.get_parameter('image_buffer_sec')
-            .get_parameter_value()
-            .double_value
-        )
-
-        self._image_match_tolerance = (
-            self.get_parameter('image_match_tolerance_sec')
-            .get_parameter_value()
-            .double_value
-        )
-
-        # 이미지 저장 폴더 자동 생성
         Path(self._image_dir).mkdir(parents=True, exist_ok=True)
 
         # ── DB ───────────────────────────────────────────────────────────────
@@ -257,11 +200,11 @@ class EventLoggerNode(Node):
         # ── Common State ────────────────────────────────────────────────────
 
         self._bridge = CvBridge()
-
         self._robot_x = 0.0
         self._robot_y = 0.0
 
-        self._last_log_time: dict[str, float] = {}
+        # 동일한 (track_id, key, event_type) 중복 저장 방지
+        self._logged_events: set[tuple[int, str, str]] = set()
 
         # ── Image Buffers ───────────────────────────────────────────────────
 
@@ -290,78 +233,30 @@ class EventLoggerNode(Node):
 
         # ── Subscriptions: Fire ─────────────────────────────────────────────
 
-        self.create_subscription(
-            Bool,
-            '/fire_alarm',
-            self._fire_alarm_callback,
-            reliable_qos,
-        )
-
-        self.create_subscription(
-            String,
-            '/fire_tracks_3d',
-            self._fire_tracks_callback,
-            reliable_qos,
-        )
-
-        self.create_subscription(
-            Image,
-            '/camera/fire_fusion/debug_image',
-            self._fire_image_callback,
-            sensor_qos,
-        )
+        self.create_subscription(Bool, '/fire_alarm', self._fire_alarm_callback, reliable_qos)
+        self.create_subscription(String, '/fire_tracks_3d', self._fire_tracks_callback, reliable_qos)
+        self.create_subscription(Image, '/camera/fire_fusion/debug_image', self._fire_image_callback, sensor_qos)
 
         # ── Subscriptions: PPE ──────────────────────────────────────────────
 
-        self.create_subscription(
-            String,
-            '/detections_2d',
-            self._detections_callback,
-            reliable_qos,
-        )
-
-        self.create_subscription(
-            Image,
-            '/perception/debug_image',
-            self._perception_image_callback,
-            sensor_qos,
-        )
+        self.create_subscription(String, '/detections_2d', self._detections_callback, reliable_qos)
+        self.create_subscription(Image, '/perception/debug_image', self._perception_image_callback, sensor_qos)
 
         # ── Subscriptions: TTC ──────────────────────────────────────────────
 
-        self.create_subscription(
-            String,
-            '/ttc_alerts',
-            self._ttc_callback,
-            reliable_qos,
-        )
+        self.create_subscription(String, '/ttc_alerts', self._ttc_callback, reliable_qos)
 
         # ── Subscriptions: Fall ─────────────────────────────────────────────
 
-        self.create_subscription(
-            String,
-            '/fall_alarm',
-            self._fall_alarm_callback,
-            reliable_qos,
-        )
+        self.create_subscription(String, '/fall_alarm', self._fall_alarm_callback, reliable_qos)
 
         # ── Common Camera ───────────────────────────────────────────────────
 
-        self.create_subscription(
-            Image,
-            '/camera/image_raw',
-            self._camera_image_callback,
-            sensor_qos,
-        )
+        self.create_subscription(Image, '/camera/image_raw', self._camera_image_callback, sensor_qos)
 
         # ── Common: Odom ────────────────────────────────────────────────────
 
-        self.create_subscription(
-            Odometry,
-            '/odom',
-            self._odom_callback,
-            sensor_qos,
-        )
+        self.create_subscription(Odometry, '/odom', self._odom_callback, sensor_qos)
 
         self.get_logger().info('EventLogger Node started.')
 
@@ -370,32 +265,15 @@ class EventLoggerNode(Node):
     # ════════════════════════════════════════════════════════════════════════
 
     def _init_db(self):
-        db_host = os.environ.get(
-            'DB_HOST',
-            ''
-        )
+        db_host = os.environ.get('DB_HOST', '')
 
         if db_host:
             return PostgreSQLBackend(
                 host=db_host,
-                port=int(
-                    os.environ.get(
-                        'DB_PORT',
-                        5432
-                    )
-                ),
-                dbname=os.environ.get(
-                    'DB_NAME',
-                    'patrol_db'
-                ),
-                user=os.environ.get(
-                    'DB_USER',
-                    'admin'
-                ),
-                password=os.environ.get(
-                    'DB_PASS',
-                    'password123'
-                )
+                port=int(os.environ.get('DB_PORT', 5432)),
+                dbname=os.environ.get('DB_NAME', 'patrol_db'),
+                user=os.environ.get('DB_USER', 'admin'),
+                password=os.environ.get('DB_PASS', 'password123')
             )
 
         return SQLiteBackend(self._db_path)
@@ -414,54 +292,30 @@ class EventLoggerNode(Node):
 
     def _camera_image_callback(self, msg: Image) -> None:
         image = self._convert_image(msg)
-
         if image is None:
             return
 
         stamp = self._ros_stamp_to_epoch(msg)
-
-        self._camera_images.append(
-            (stamp, image)
-        )
-
-        self._cleanup_image_buffer(
-            self._camera_images,
-            stamp
-        )
+        self._camera_images.append((stamp, image))
+        self._cleanup_image_buffer(self._camera_images, stamp)
 
     def _fire_image_callback(self, msg: Image) -> None:
         image = self._convert_image(msg)
-
         if image is None:
             return
 
         stamp = self._ros_stamp_to_epoch(msg)
-
-        self._fire_images.append(
-            (stamp, image)
-        )
-
-        self._cleanup_image_buffer(
-            self._fire_images,
-            stamp
-        )
+        self._fire_images.append((stamp, image))
+        self._cleanup_image_buffer(self._fire_images, stamp)
 
     def _perception_image_callback(self, msg: Image) -> None:
         image = self._convert_image(msg)
-
         if image is None:
             return
 
         stamp = self._ros_stamp_to_epoch(msg)
-
-        self._perception_images.append(
-            (stamp, image)
-        )
-
-        self._cleanup_image_buffer(
-            self._perception_images,
-            stamp
-        )
+        self._perception_images.append((stamp, image))
+        self._cleanup_image_buffer(self._perception_images, stamp)
 
     def _convert_image(self, msg: Image):
         try:
@@ -471,10 +325,7 @@ class EventLoggerNode(Node):
             return None
 
     def _cleanup_image_buffer(self, buffer, current_stamp: float) -> None:
-        cutoff = (
-            current_stamp
-            - self._image_buffer_sec
-        )
+        cutoff = current_stamp - self._image_buffer_sec
 
         while buffer and buffer[0][0] < cutoff:
             buffer.popleft()
@@ -484,10 +335,6 @@ class EventLoggerNode(Node):
     # ════════════════════════════════════════════════════════════════════════
 
     def _fire_tracks_callback(self, msg: String) -> None:
-        """
-        /fire_tracks_3d 최신 데이터 저장.
-        """
-
         try:
             data = json.loads(msg.data)
         except (json.JSONDecodeError, TypeError):
@@ -495,54 +342,29 @@ class EventLoggerNode(Node):
             return
 
         self._latest_fire_tracks = data
+        timestamp = self._extract_timestamp(data)
+        self._latest_fire_track_epoch = timestamp if timestamp is not None else time.time()
 
-        timestamp = self._extract_timestamp(
-            data
-        )
-
-        if timestamp is None:
-            timestamp = time.time()
-
-        self._latest_fire_track_epoch = timestamp
-
-    def _fire_alarm_callback(
-        self,
-        msg: Bool
-    ) -> None:
-        """
-        /fire_alarm == true일 때 화재 이벤트 기록.
-        """
-
+    def _fire_alarm_callback(self, msg: Bool) -> None:
         if not msg.data:
             return
 
+        track_id = -1
         key = 'fire'
+        event_type = 'FIRE_DETECTION'
 
-        if not self._should_log(key):
+        if not self._should_log(track_id, key, event_type):
             return
 
         fire_data = self._latest_fire_tracks
 
         if fire_data is None:
-            self.get_logger().warn(
-                '[EventLogger] Fire alarm received but '
-                '/fire_tracks_3d data is not available.'
-            )
+            self.get_logger().warn('[EventLogger] Fire alarm received but /fire_tracks_3d data is not available.')
             return
 
-        event_epoch = (
-            self._latest_fire_track_epoch
-            if self._latest_fire_track_epoch is not None
-            else time.time()
-        )
-
-        timestamp = self._epoch_to_iso(
-            event_epoch
-        )
-
-        position_map = self._extract_position_map(
-            fire_data
-        )
+        event_epoch = self._latest_fire_track_epoch if self._latest_fire_track_epoch is not None else time.time()
+        timestamp = self._epoch_to_iso(event_epoch)
+        position_map = self._extract_position_map(fire_data)
 
         image_path = self._save_buffered_snapshot(
             self._fire_images,
@@ -558,85 +380,42 @@ class EventLoggerNode(Node):
             image_path=image_path,
             timestamp=timestamp,
             epoch=event_epoch,
-            metadata={
-                'position_map': position_map,
-            },
+            metadata={'position_map': position_map},
         )
 
-        self._write(
-            row,
-            key
-        )
+        self._write(row, (track_id, key, event_type))
 
     # ════════════════════════════════════════════════════════════════════════
     # PPE
     # ════════════════════════════════════════════════════════════════════════
 
-    def _detections_callback(
-        self,
-        msg: String
-    ) -> None:
-        """
-        /detections_2d에서 ppe_ok == false인 탐지 기록.
-        """
-
+    def _detections_callback(self, msg: String) -> None:
         try:
-            detections = json.loads(
-                msg.data
-            )
-        except (
-            json.JSONDecodeError,
-            TypeError
-        ):
-            self.get_logger().warn(
-                '[EventLogger] Invalid JSON in /detections_2d'
-            )
+            detections = json.loads(msg.data)
+        except (json.JSONDecodeError, TypeError):
+            self.get_logger().warn('[EventLogger] Invalid JSON in /detections_2d')
             return
 
-        if not isinstance(
-            detections,
-            list
-        ):
+        if not isinstance(detections, list):
             return
 
         for det in detections:
-
-            if not isinstance(
-                det,
-                dict
-            ):
+            if not isinstance(det, dict):
                 continue
 
-            ppe_ok = det.get(
-                'ppe_ok',
-                True
-            )
-
-            if ppe_ok:
+            if det.get('ppe_ok', True):
                 continue
 
-            track_id = self._safe_int(
-                det.get(
-                    'track_id',
-                    -1
-                )
-            )
-
+            track_id = self._safe_int(det.get('track_id', -1))
             key = f'ppe_{track_id}'
+            event_type = 'PPE_VIOLATION'
 
-            if not self._should_log(key):
+            if not self._should_log(track_id, key, event_type):
                 continue
 
-            event_epoch = self._extract_timestamp(
-                det
-            )
-
-            if event_epoch is None:
-                event_epoch = time.time()
-
-            timestamp = self._epoch_to_iso(
-                event_epoch
-            )
+            event_epoch = self._extract_timestamp(det)
+            event_epoch = event_epoch if event_epoch is not None else time.time()
+            timestamp = self._epoch_to_iso(event_epoch)
 
             image_path = self._save_buffered_snapshot(
                 self._perception_images,
@@ -653,101 +432,43 @@ class EventLoggerNode(Node):
                 timestamp=timestamp,
                 epoch=event_epoch,
                 metadata={
-                    'class_name': det.get(
-                        'class_name',
-                        ''
-                    ),
-                    'confidence': det.get(
-                        'confidence',
-                        0.0
-                    ),
-                    'bbox': det.get(
-                        'bbox',
-                        []
-                    )
+                    'class_name': det.get('class_name', ''),
+                    'confidence': det.get('confidence', 0.0),
+                    'bbox': det.get('bbox', [])
                 },
             )
 
-            self._write(
-                row,
-                key
-            )
+            self._write(row, (track_id, key, event_type))
 
     # ════════════════════════════════════════════════════════════════════════
     # TTC
     # ════════════════════════════════════════════════════════════════════════
 
-    def _ttc_callback(
-        self,
-        msg: String
-    ) -> None:
-        """
-        /ttc_alerts에서 WARNING / EMERGENCY 이벤트 기록.
-
-        현재 TTC payload:
-            header.stamp
-            risk_level
-            target_track_id
-            target_subject
-        """
-
+    def _ttc_callback(self, msg: String) -> None:
         try:
-            data = json.loads(
-                msg.data
-            )
-        except (
-            json.JSONDecodeError,
-            TypeError
-        ):
-            self.get_logger().warn(
-                '[EventLogger] Invalid JSON in /ttc_alerts'
-            )
+            data = json.loads(msg.data)
+        except (json.JSONDecodeError, TypeError):
+            self.get_logger().warn('[EventLogger] Invalid JSON in /ttc_alerts')
             return
 
-        if not isinstance(
-            data,
-            dict
-        ):
+        if not isinstance(data, dict):
             return
 
-        risk_level = str(
-            data.get(
-                'risk_level',
-                'SAFE'
-            )
-        ).upper()
+        risk_level = str(data.get('risk_level', 'SAFE')).upper()
 
-        if risk_level not in (
-            'WARNING',
-            'EMERGENCY'
-        ):
+        if risk_level not in ('WARNING', 'EMERGENCY'):
             return
 
-        track_id = self._safe_int(
-            data.get(
-                'target_track_id',
-                -1
-            )
-        )
+        track_id = self._safe_int(data.get('target_track_id', -1))
+        key = f'ttc_{track_id}_{risk_level}'
+        event_type = 'TTC_ALERT'
 
-        key = (
-            f'ttc_{track_id}_'
-            f'{risk_level}'
-        )
-
-        if not self._should_log(key):
+        if not self._should_log(track_id, key, event_type):
             return
 
-        event_epoch = self._extract_timestamp(
-            data
-        )
-
-        if event_epoch is None:
-            event_epoch = time.time()
-
-        timestamp = self._epoch_to_iso(
-            event_epoch
-        )
+        event_epoch = self._extract_timestamp(data)
+        event_epoch = event_epoch if event_epoch is not None else time.time()
+        timestamp = self._epoch_to_iso(event_epoch)
 
         image_path = self._save_buffered_snapshot(
             self._camera_images,
@@ -765,91 +486,40 @@ class EventLoggerNode(Node):
             epoch=event_epoch,
             metadata={
                 'risk_level': risk_level,
-                'target_subject': data.get(
-                    'target_subject',
-                    ''
-                ),
+                'target_subject': data.get('target_subject', ''),
             },
         )
 
-        self._write(
-            row,
-            key
-        )
+        self._write(row, (track_id, key, event_type))
 
     # ════════════════════════════════════════════════════════════════════════
     # Fall Detection
     # ════════════════════════════════════════════════════════════════════════
 
-    def _fall_alarm_callback(
-        self,
-        msg: String
-    ) -> None:
-        """
-        /fall_alarm에서 isfallen == true인 작업자 기록.
-
-        현재 /fall_alarm payload:
-            track_id
-            class_name
-            confidence
-            isfallen
-            stamp
-        """
-
+    def _fall_alarm_callback(self, msg: String) -> None:
         try:
-            data = json.loads(
-                msg.data
-            )
-        except (
-            json.JSONDecodeError,
-            TypeError
-        ):
-            self.get_logger().warn(
-                '[EventLogger] Invalid JSON in /fall_alarm'
-            )
+            data = json.loads(msg.data)
+        except (json.JSONDecodeError, TypeError):
+            self.get_logger().warn('[EventLogger] Invalid JSON in /fall_alarm')
             return
 
-        if not isinstance(
-            data,
-            dict
-        ):
+        if not isinstance(data, dict):
             return
 
-        # 낙상 상태가 아니면 기록하지 않음
-        isfallen = data.get(
-            'isfallen',
-            False
-        )
-
-        if not isfallen:
+        if not data.get('isfallen', False):
             return
 
-        track_id = self._safe_int(
-            data.get(
-                'track_id',
-                -1
-            )
-        )
-
-        # 작업자별 로그 간격 제한
+        track_id = self._safe_int(data.get('track_id', -1))
         key = f'fall_{track_id}'
+        event_type = 'FALL_DETECTION'
 
-        if not self._should_log(key):
+        if not self._should_log(track_id, key, event_type):
             return
 
-        # 이벤트 timestamp
-        event_epoch = self._extract_timestamp(
-            data
-        )
+        event_epoch = self._extract_timestamp(data)
+        event_epoch = event_epoch if event_epoch is not None else time.time()
+        timestamp = self._epoch_to_iso(event_epoch)
 
-        if event_epoch is None:
-            event_epoch = time.time()
-
-        timestamp = self._epoch_to_iso(
-            event_epoch
-        )
-
-        # /camera/image_raw에서 이벤트 시점과 가장 가까운 이미지 저장
         image_path = self._save_buffered_snapshot(
             self._camera_images,
             'FALL_DETECTION',
@@ -865,54 +535,31 @@ class EventLoggerNode(Node):
             timestamp=timestamp,
             epoch=event_epoch,
             metadata={
-                'class_name': data.get(
-                    'class_name',
-                    ''
-                ),
-                'confidence': data.get(
-                    'confidence',
-                    0.0
-                ),
+                'class_name': data.get('class_name', ''),
+                'confidence': data.get('confidence', 0.0),
                 'isfallen': True,
             },
         )
 
-        self._write(
-            row,
-            key
-        )
+        self._write(row, (track_id, key, event_type))
 
     # ════════════════════════════════════════════════════════════════════════
-    # Helpers
+    # Duplicate Check
     # ════════════════════════════════════════════════════════════════════════
 
-    def _should_log(
-        self,
-        key: str
-    ) -> bool:
-        now = time.time()
+    def _should_log(self, track_id: int, key: str, event_type: str) -> bool:
+        event_key = (track_id, key, event_type)
 
-        last = self._last_log_time.get(
-            key,
-            0.0
-        )
-
-        if (
-            now - last
-        ) < self._min_interval:
+        if event_key in self._logged_events:
             return False
-
-        self._last_log_time[key] = now
 
         return True
 
-    def _save_buffered_snapshot(
-        self, buffer, label: str, track_id: int, event_epoch: float
-    ) -> str:
-        """
-        이벤트 시간과 가장 가까운 이미지를 이벤트별 폴더에 저장합니다.
-        """
+    # ════════════════════════════════════════════════════════════════════════
+    # Image Save
+    # ════════════════════════════════════════════════════════════════════════
 
+    def _save_buffered_snapshot(self, buffer, label: str, track_id: int, event_epoch: float) -> str:
         if not buffer:
             self.get_logger().warn(f'[EventLogger] No image available for {label}.')
             return ''
@@ -921,7 +568,6 @@ class EventLoggerNode(Node):
         closest_diff = float('inf')
 
         for stamp, image in buffer:
-
             diff = abs(stamp - event_epoch)
 
             if diff < closest_diff:
@@ -938,35 +584,17 @@ class EventLoggerNode(Node):
             )
 
         try:
-            ts = datetime.now(
-                timezone.utc
-            ).strftime(
-                '%Y%m%d_%H%M%S_%f'
-            )
-
-            # 이벤트 타입별 폴더 생성
+            ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')
             event_dir = Path(self._image_dir) / label
             event_dir.mkdir(parents=True, exist_ok=True)
 
-            filename = (
-                f'{label}_track{track_id}_{ts}.jpg'
-            )   
+            filename = f'{label}_track{track_id}_{ts}.jpg'
+            filepath = event_dir / filename
 
-            filepath = (
-                event_dir
-                / filename
-            )
-
-            success = cv2.imwrite(
-                str(filepath),
-                closest_image
-            )
+            success = cv2.imwrite(str(filepath), closest_image)
 
             if not success:
-                self.get_logger().warn(
-                    f'[EventLogger] Failed to write image: '
-                    f'{filepath}'
-                )
+                self.get_logger().warn(f'[EventLogger] Failed to write image: {filepath}')
                 return ''
 
             return str(filepath)
@@ -974,6 +602,10 @@ class EventLoggerNode(Node):
         except Exception as e:
             self.get_logger().warn(f'[EventLogger] Snapshot save failed: {e}')
             return ''
+
+    # ════════════════════════════════════════════════════════════════════════
+    # DB Row
+    # ════════════════════════════════════════════════════════════════════════
 
     def _build_row(
         self,
@@ -985,7 +617,6 @@ class EventLoggerNode(Node):
         epoch: float,
         metadata: dict,
     ) -> dict:
-
         return {
             'timestamp': timestamp,
             'epoch': epoch,
@@ -995,333 +626,147 @@ class EventLoggerNode(Node):
             'severity': severity,
             'track_id': track_id,
             'image_path': image_path,
-            'metadata': json.dumps(
-                metadata,
-                ensure_ascii=False
-            ),
+            'metadata': json.dumps(metadata, ensure_ascii=False),
         }
 
-    def _write(
-        self,
-        row: dict,
-        key: str
-    ) -> None:
+    # ════════════════════════════════════════════════════════════════════════
+    # DB Write
+    # ════════════════════════════════════════════════════════════════════════
+
+    def _write(self, row: dict, event_key: tuple[int, str, str]) -> None:
         try:
-            self._db.insert(
-                row
-            )
+            self._db.insert(row)
+            self._logged_events.add(event_key)
 
             self.get_logger().info(
                 f"[EventLogger] Logged | "
                 f"{row['event_type']} | "
                 f"{row['severity']} | "
                 f"track={row['track_id']} | "
-                f"pos=({row['robot_x']:.2f}, "
-                f"{row['robot_y']:.2f})"
+                f"pos=({row['robot_x']:.2f}, {row['robot_y']:.2f})"
             )
 
         except Exception as e:
-            self.get_logger().error(
-                f'[EventLogger] DB write failed: {e}'
-            )
+            self.get_logger().error(f'[EventLogger] DB write failed: {e}')
 
     # ════════════════════════════════════════════════════════════════════════
     # Timestamp Helpers
     # ════════════════════════════════════════════════════════════════════════
 
-    def _ros_stamp_to_epoch(
-        self,
-        msg: Image
-    ) -> float:
-        """
-        ROS Header timestamp를 Unix epoch으로 변환.
-        """
-
+    def _ros_stamp_to_epoch(self, msg: Image) -> float:
         sec = msg.header.stamp.sec
         nanosec = msg.header.stamp.nanosec
+        return float(sec) + float(nanosec) * 1e-9
 
-        return (
-            float(sec)
-            + float(nanosec) * 1e-9
-        )
-
-    def _extract_timestamp(
-        self,
-        data
-    ) -> float | None:
-        """
-        JSON 데이터에서 timestamp를
-        최대한 유연하게 추출합니다.
-
-        지원:
-            timestamp: Unix epoch
-            timestamp: ISO string
-            stamp: Unix epoch
-            stamp:
-                sec / nanosec
-            header.stamp:
-                sec / nanosec
-        """
-
-        if not isinstance(
-            data,
-            dict
-        ):
+    def _extract_timestamp(self, data) -> float | None:
+        if not isinstance(data, dict):
             return None
 
-        # timestamp
-        timestamp = data.get(
-            'timestamp'
-        )
+        timestamp = data.get('timestamp')
 
         if timestamp is not None:
-
-            parsed = self._parse_timestamp(
-                timestamp
-            )
+            parsed = self._parse_timestamp(timestamp)
 
             if parsed is not None:
                 return parsed
 
-        # stamp
-        stamp = data.get(
-            'stamp'
-        )
+        stamp = data.get('stamp')
 
         if stamp is not None:
-
-            # stamp이 숫자 또는 문자열인 경우
-            parsed = self._parse_timestamp(
-                stamp
-            )
+            parsed = self._parse_timestamp(stamp)
 
             if parsed is not None:
                 return parsed
 
-            # stamp이 sec/nanosec dict인 경우
-            if isinstance(
-                stamp,
-                dict
-            ):
-
-                sec = stamp.get(
-                    'sec'
-                )
-
-                nanosec = stamp.get(
-                    'nanosec',
-                    stamp.get(
-                        'nsec',
-                        0
-                    )
-                )
+            if isinstance(stamp, dict):
+                sec = stamp.get('sec')
+                nanosec = stamp.get('nanosec', stamp.get('nsec', 0))
 
                 if sec is not None:
-
                     try:
-                        return (
-                            float(sec)
-                            + float(nanosec) * 1e-9
-                        )
-
-                    except (
-                        TypeError,
-                        ValueError
-                    ):
+                        return float(sec) + float(nanosec) * 1e-9
+                    except (TypeError, ValueError):
                         pass
 
-        # header.stamp
-        header = data.get(
-            'header'
-        )
+        header = data.get('header')
 
-        if isinstance(
-            header,
-            dict
-        ):
+        if isinstance(header, dict):
+            stamp = header.get('stamp')
 
-            stamp = header.get(
-                'stamp'
-            )
-
-            if isinstance(
-                stamp,
-                dict
-            ):
-
-                sec = stamp.get(
-                    'sec'
-                )
-
-                nanosec = stamp.get(
-                    'nanosec',
-                    stamp.get(
-                        'nsec',
-                        0
-                    )
-                )
+            if isinstance(stamp, dict):
+                sec = stamp.get('sec')
+                nanosec = stamp.get('nanosec', stamp.get('nsec', 0))
 
                 if sec is not None:
-
                     try:
-                        return (
-                            float(sec)
-                            + float(nanosec) * 1e-9
-                        )
-
-                    except (
-                        TypeError,
-                        ValueError
-                    ):
+                        return float(sec) + float(nanosec) * 1e-9
+                    except (TypeError, ValueError):
                         pass
 
         return None
 
-    def _parse_timestamp(
-        self,
-        timestamp
-    ) -> float | None:
+    def _parse_timestamp(self, timestamp) -> float | None:
+        if isinstance(timestamp, (int, float)):
+            return float(timestamp)
 
-        if isinstance(
-            timestamp,
-            (int, float)
-        ):
-            return float(
-                timestamp
-            )
-
-        if not isinstance(
-            timestamp,
-            str
-        ):
+        if not isinstance(timestamp, str):
             return None
 
         try:
-            return float(
-                timestamp
-            )
+            return float(timestamp)
         except ValueError:
             pass
 
         try:
-            value = timestamp.replace(
-                'Z',
-                '+00:00'
-            )
-
-            dt = datetime.fromisoformat(
-                value
-            )
+            value = timestamp.replace('Z', '+00:00')
+            dt = datetime.fromisoformat(value)
 
             if dt.tzinfo is None:
-                dt = dt.replace(
-                    tzinfo=timezone.utc
-                )
+                dt = dt.replace(tzinfo=timezone.utc)
 
             return dt.timestamp()
 
-        except (
-            ValueError,
-            TypeError
-        ):
+        except (ValueError, TypeError):
             return None
 
-    def _epoch_to_iso(
-        self,
-        epoch: float
-    ) -> str:
+    def _epoch_to_iso(self, epoch: float) -> str:
+        return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
 
-        return datetime.fromtimestamp(
-            epoch,
-            tz=timezone.utc
-        ).isoformat()
-
-    def _extract_position_map(
-        self,
-        data
-    ):
-        """
-        /fire_tracks_3d에서 position_map을 추출합니다.
-        """
-
-        if not isinstance(
-            data,
-            dict
-        ):
+    def _extract_position_map(self, data):
+        if not isinstance(data, dict):
             return None
 
         if 'position_map' in data:
-            return data[
-                'position_map'
-            ]
+            return data['position_map']
 
-        tracks = data.get(
-            'tracks'
-        )
+        tracks = data.get('tracks')
 
-        if isinstance(
-            tracks,
-            list
-        ):
-
+        if isinstance(tracks, list):
             positions = []
 
             for track in tracks:
-
-                if isinstance(
-                    track,
-                    dict
-                ):
-
-                    if 'position_map' in track:
-                        positions.append(
-                            track[
-                                'position_map'
-                            ]
-                        )
+                if isinstance(track, dict) and 'position_map' in track:
+                    positions.append(track['position_map'])
 
             if positions:
                 return positions
 
-        if isinstance(
-            data,
-            list
-        ):
-
+        if isinstance(data, list):
             positions = []
 
             for track in data:
-
-                if isinstance(
-                    track,
-                    dict
-                ):
-
-                    if 'position_map' in track:
-                        positions.append(
-                            track[
-                                'position_map'
-                            ]
-                        )
+                if isinstance(track, dict) and 'position_map' in track:
+                    positions.append(track['position_map'])
 
             if positions:
                 return positions
 
         return None
 
-    def _safe_int(
-        self,
-        value: object
-    ) -> int:
-
+    def _safe_int(self, value: object) -> int:
         try:
-            return int(
-                value
-            )
-        except (
-            TypeError,
-            ValueError
-        ):
+            return int(value)
+        except (TypeError, ValueError):
             return -1
 
     # ════════════════════════════════════════════════════════════════════════
@@ -1329,7 +774,6 @@ class EventLoggerNode(Node):
     # ════════════════════════════════════════════════════════════════════════
 
     def destroy_node(self) -> None:
-
         try:
             self._db.close()
         except Exception:
@@ -1339,9 +783,7 @@ class EventLoggerNode(Node):
 
 
 def main(args=None) -> None:
-
     rclpy.init(args=args)
-
     node = EventLoggerNode()
 
     try:
