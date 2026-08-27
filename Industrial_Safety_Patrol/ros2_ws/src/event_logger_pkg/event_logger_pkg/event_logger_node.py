@@ -317,7 +317,6 @@ class EventLoggerNode(Node):
                 timestamp=timestamp,
                 epoch=event_epoch,
                 metadata={
-                    'fire_id': track_id,
                     'position': fire.get('position'),
                     'position_map': fire.get('position_map'),
                     'distance': fire.get('distance'),
@@ -378,9 +377,7 @@ class EventLoggerNode(Node):
                 timestamp=timestamp,
                 epoch=event_epoch,
                 metadata={
-                    'class_name': det.get('class_name', ''),
                     'confidence': det.get('confidence', 0.0),
-                    'bbox': det.get('bbox', [])
                 },
             )
 
@@ -406,7 +403,10 @@ class EventLoggerNode(Node):
             return
 
         track_id = self._safe_int(data.get('target_track_id', -1))
-        key = f'ttc_{track_id}_{risk_level}'
+        target_subject = str(data.get('target_subject', '')).strip()
+
+        # 동일 track_id + risk_level + target_subject인 경우 중복 저장하지 않음
+        key = f'ttc_{track_id}_{risk_level}_{target_subject}'
         event_type = 'TTC_ALERT'
 
         if not self._should_log(track_id, key, event_type):
@@ -432,8 +432,7 @@ class EventLoggerNode(Node):
             timestamp=timestamp,
             epoch=event_epoch,
             metadata={
-                'risk_level': risk_level,
-                'target_subject': data.get('target_subject', ''),
+                'target_subject': target_subject,
             },
         )
 
@@ -482,9 +481,7 @@ class EventLoggerNode(Node):
             timestamp=timestamp,
             epoch=event_epoch,
             metadata={
-                'class_name': data.get('class_name', ''),
                 'confidence': data.get('confidence', 0.0),
-                'isfallen': True,
             },
         )
 
