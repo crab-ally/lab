@@ -633,15 +633,20 @@ class EventLoggerNode(Node):
         if isinstance(header, dict):
             stamp = header.get('stamp')
 
-            if isinstance(stamp, dict):
-                sec = stamp.get('sec')
-                nanosec = stamp.get('nanosec', stamp.get('nsec', 0))
+            if stamp is not None:
+                if isinstance(stamp, dict):
+                    sec = stamp.get('sec')
+                    nanosec = stamp.get('nanosec', stamp.get('nsec', 0))
 
-                if sec is not None:
-                    try:
-                        return float(sec) + float(nanosec) * 1e-9
-                    except (TypeError, ValueError):
-                        pass
+                    if sec is not None:
+                        try:
+                            return float(sec) + float(nanosec) * 1e-9
+                        except (TypeError, ValueError):
+                            pass
+                else:
+                    parsed = self._parse_timestamp(stamp)
+                    if parsed is not None:
+                        return parsed
 
         return None
 
