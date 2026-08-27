@@ -9,7 +9,7 @@ Events topic:
 
     1. FIRE_DETECTION
        - /fire_tracks_3d
-       - /camera/fire_fusion/debug_image
+       - /camera/image_raw
 
     2. PPE_VIOLATION
        - /detections_2d
@@ -188,8 +188,10 @@ class EventLoggerNode(Node):
         # 동일한 (track_id, key, event_type) 중복 저장 방지
         self._logged_events: set[tuple[int, str, str]] = set()
 
+        # 원본 RGB 이미지 버퍼
         self._camera_images = deque()
-        self._fire_images = deque()
+
+        # PPE debug image 버퍼
         self._perception_images = deque()
 
         sensor_qos = QoSProfile(
@@ -206,7 +208,9 @@ class EventLoggerNode(Node):
 
         # ── Fire ──────────────────────────────────────────────────────
         self.create_subscription(String, '/fire_tracks_3d', self._fire_tracks_callback, reliable_qos)
-        self.create_subscription(Image, '/camera/fire_fusion/debug_image', self._fire_image_callback, sensor_qos)
+
+        # Fire 이벤트 사진은 debug_image가 아니라 원본 RGB를 사용
+        self.create_subscription(Image, '/camera/image_raw', self._camera_image_callback, sensor_qos)
 
         # ── PPE ───────────────────────────────────────────────────────
         self.create_subscription(String, '/detections_2d', self._detections_callback, reliable_qos)
@@ -218,10 +222,6 @@ class EventLoggerNode(Node):
         # ── Fall ──────────────────────────────────────────────────────
         self.create_subscription(String, '/fall_alarm', self._fall_alarm_callback, reliable_qos)
 
-        # ── Common Camera ─────────────────────────────────────────────
-        self.create_subscription(Image, '/camera/image_raw', self._camera_image_callback, sensor_qos)
-
-        # ── Odom ──────────────────────────────────────────────────────
         self.create_subscription(Odometry, '/odom', self._odom_callback, sensor_qos)
 
         self.get_logger().info('EventLogger Node started.')
@@ -252,15 +252,6 @@ class EventLoggerNode(Node):
         stamp = self._ros_stamp_to_epoch(msg)
         self._camera_images.append((stamp, image))
         self._cleanup_image_buffer(self._camera_images, stamp)
-
-    def _fire_image_callback(self, msg: Image) -> None:
-        image = self._convert_image(msg)
-        if image is None:
-            return
-
-        stamp = self._ros_stamp_to_epoch(msg)
-        self._fire_images.append((stamp, image))
-        self._cleanup_image_buffer(self._fire_images, stamp)
 
     def _perception_image_callback(self, msg: Image) -> None:
         image = self._convert_image(msg)
@@ -303,6 +294,7 @@ class EventLoggerNode(Node):
         if not isinstance(fires, list) or not fires:
             return
 
+        # /fire_tracks_3d의 stamp를 이벤트 기준 timestamp로 사용
         event_epoch = self._extract_timestamp(data)
         event_epoch = event_epoch if event_epoch is not None else time.time()
         timestamp = self._epoch_to_iso(event_epoch)
@@ -322,8 +314,9 @@ class EventLoggerNode(Node):
             if not self._should_log(track_id, key, event_type):
                 continue
 
+            # Fire debug image가 아닌 동일 timestamp의 원본 RGB 저장
             image_path = self._save_buffered_snapshot(
-                self._fire_images,
+                self._camera_images,
                 'FIRE_DETECTION',
                 track_id,
                 event_epoch,
@@ -555,7 +548,8 @@ class EventLoggerNode(Node):
                 return ''
 
             self.get_logger().info(
-                f'[EventLogger] Image saved | track={track_id} | path={filepath}'
+                f'[EventLogger] Image saved | track={track_id} | '
+                f'diff={closest_diff:.3f}s | path={filepath}'
             )
 
             return str(filepath)
