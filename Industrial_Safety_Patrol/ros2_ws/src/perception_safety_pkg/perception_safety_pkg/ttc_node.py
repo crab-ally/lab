@@ -255,12 +255,17 @@ class TTCNode(Node):
         most_dangerous_track_id = -1
         most_dangerous_subject = 'NONE'
 
-        # ── 관계별 TTC ─────────────────────────────────────────────────
-        # BOTH 상태에서 세 관계의 TTC를 각각 저장
+        # ── 관계별 TTC 및 track_id ─────────────────────────────────────
+        # BOTH 상태에서 세 관계의 TTC와 track_id를 각각 저장
         pair_ttc = {
             '지게차-로봇': float('inf'),
             '사람-로봇': float('inf'),
             '지게차-사람': float('inf')
+        }
+        pair_track_id = {
+            '지게차-로봇': -1,
+            '사람-로봇': -1,
+            '지게차-사람': -1
         }
 
         # 로봇은 base_link 좌표계 원점
@@ -307,21 +312,15 @@ class TTCNode(Node):
                     radius_sum
                 )
 
-                # 관계별 최소 TTC 저장
-                pair_ttc['지게차-로봇'] = min(
-                    pair_ttc['지게차-로봇'],
-                    ttc
-                )
+                # 관계별 최소 TTC 및 track_id 저장
+                if ttc < pair_ttc['지게차-로봇']:
+                    pair_ttc['지게차-로봇'] = ttc
+                    pair_track_id['지게차-로봇'] = f.get('track_id', -1)
 
                 # 전체 최소 TTC 갱신
                 if ttc < min_ttc:
                     min_ttc = ttc
-
-                    most_dangerous_track_id = f.get(
-                        'track_id',
-                        -1
-                    )
-
+                    most_dangerous_track_id = f.get('track_id', -1)
                     most_dangerous_subject = '지게차-로봇'
 
             # ------------------------------------------------------------
@@ -344,21 +343,15 @@ class TTCNode(Node):
                     radius_sum
                 )
 
-                # 관계별 최소 TTC 저장
-                pair_ttc['사람-로봇'] = min(
-                    pair_ttc['사람-로봇'],
-                    ttc
-                )
+                # 관계별 최소 TTC 및 track_id 저장
+                if ttc < pair_ttc['사람-로봇']:
+                    pair_ttc['사람-로봇'] = ttc
+                    pair_track_id['사람-로봇'] = p.get('track_id', -1)
 
                 # 전체 최소 TTC 갱신
                 if ttc < min_ttc:
                     min_ttc = ttc
-
-                    most_dangerous_track_id = p.get(
-                        'track_id',
-                        -1
-                    )
-
+                    most_dangerous_track_id = p.get('track_id', -1)
                     most_dangerous_subject = '사람-로봇'
 
             # ------------------------------------------------------------
@@ -394,21 +387,18 @@ class TTCNode(Node):
                         radius_sum
                     )
 
-                    # 관계별 최소 TTC 저장
-                    pair_ttc['지게차-사람'] = min(
-                        pair_ttc['지게차-사람'],
-                        ttc
-                    )
+                    # 관계별 최소 TTC 및 track_id 저장
+                    if ttc < pair_ttc['지게차-사람']:
+                        pair_ttc['지게차-사람'] = ttc
+                        pair_track_id['지게차-사람'] = f.get('track_id', p.get('track_id', -1))
 
                     # 전체 최소 TTC 갱신
                     if ttc < min_ttc:
                         min_ttc = ttc
-
                         most_dangerous_track_id = f.get(
                             'track_id',
                             p.get('track_id', -1)
                         )
-
                         most_dangerous_subject = '지게차-사람'
 
         # ================================================================
@@ -478,56 +468,105 @@ class TTCNode(Node):
                     most_dangerous_subject = subject_name
 
         # ================================================================
-        # Risk Level
+        # Alert Payload & Publish
         # ================================================================
-        overall_risk_level = self._get_risk_level(
-            min_ttc
-        )
-
-        # ================================================================
-        # Alert Payload
-        # ================================================================
-        alert_payload = {
-            'header': {
-                'stamp': stamp
-            },
-            'risk_level': overall_risk_level,
-            'target_track_id': most_dangerous_track_id,
-            'target_subject': (
-                most_dangerous_subject
-                if min_ttc != float('inf')
-                else 'NONE'
-            )
-        }
-
-        self.latest_alert_payload = alert_payload
-
         self.last_track_update_time = (
             self.get_clock().now().nanoseconds * 1e-9
         )
 
-        # ================================================================
-        # Publish Alert
-        # ================================================================
-        json_msg = String()
+        if state == 'BOTH':
+            # 각 관계별로 WARNING 또는 EMERGENCY 상태인 경보 수집
+            active_alerts = []
+            for subject in ('지게차-로봇', '사람-로봇', '지게차-사람'):
+                ttc = pair_ttc[subject]
+                if ttc == float('inf'):
+                    continue
+                r_level = self._get_risk_level(ttc)
+                if r_level in ('WARNING', 'EMERGENCY'):
+                    active_alerts.append({
+                        'header': {
+                            'stamp': stamp
+                        },
+                        'risk_level': r_level,
+                        'target_track_id': pair_track_id[subject],
+                        'target_subject': subject,
+                        'min_ttc': round(ttc, 2)
+                    })
 
-        json_msg.data = json.dumps(
-            alert_payload,
-            ensure_ascii=False
-        )
+            if active_alerts:
+                # 활성 경보 각각을 개별 발행 (Event Logger 및 기타 노드가 모든 위험을 감지할 수 있도록 함)
+                for alert in active_alerts:
+                    json_msg = String()
+                    json_msg.data = json.dumps(alert, ensure_ascii=False)
+                    self.pub_ttc_alerts.publish(json_msg)
 
-        self.pub_ttc_alerts.publish(
-            json_msg
-        )
+                # 최우선 경보 선정 (EMERGENCY > WARNING, 로봇 위험 > 제3자 위험 우선)
+                def risk_score(alert):
+                    score = 0
+                    if alert['risk_level'] == 'EMERGENCY':
+                        score += 100
+                    elif alert['risk_level'] == 'WARNING':
+                        score += 50
+                    if alert['target_subject'] in ('지게차-로봇', '사람-로봇'):
+                        score += 10
+                    return score
+
+                self.latest_alert_payload = max(active_alerts, key=risk_score)
+
+            else:
+                # 위험 상황이 없으면 NORMAL 단일 발행
+                alert_payload = {
+                    'header': {
+                        'stamp': stamp
+                    },
+                    'risk_level': 'NORMAL',
+                    'target_track_id': -1,
+                    'target_subject': 'NONE'
+                }
+                self.latest_alert_payload = alert_payload
+                json_msg = String()
+                json_msg.data = json.dumps(alert_payload, ensure_ascii=False)
+                self.pub_ttc_alerts.publish(json_msg)
+
+        elif state.endswith('_ONLY'):
+            overall_risk_level = self._get_risk_level(min_ttc)
+            alert_payload = {
+                'header': {
+                    'stamp': stamp
+                },
+                'risk_level': overall_risk_level,
+                'target_track_id': most_dangerous_track_id,
+                'target_subject': (
+                    most_dangerous_subject
+                    if min_ttc != float('inf')
+                    else 'NONE'
+                ),
+                'min_ttc': round(min_ttc, 2) if min_ttc != float('inf') else -1.0
+            }
+            self.latest_alert_payload = alert_payload
+            json_msg = String()
+            json_msg.data = json.dumps(alert_payload, ensure_ascii=False)
+            self.pub_ttc_alerts.publish(json_msg)
+
+        else:
+            alert_payload = {
+                'header': {
+                    'stamp': stamp
+                },
+                'risk_level': 'NORMAL',
+                'target_track_id': -1,
+                'target_subject': 'NONE'
+            }
+            self.latest_alert_payload = alert_payload
+            json_msg = String()
+            json_msg.data = json.dumps(alert_payload, ensure_ascii=False)
+            self.pub_ttc_alerts.publish(json_msg)
 
         # ================================================================
         # Logging
         # ================================================================
         if state == 'BOTH':
-
-            # BOTH일 때는 세 관계를 각각 동시에 출력
             for subject, ttc in pair_ttc.items():
-
                 if ttc == float('inf'):
                     continue
 
@@ -538,14 +577,16 @@ class TTCNode(Node):
                     f'TTC: {ttc:.2f}s'
                 )
 
-        elif overall_risk_level != 'NORMAL':
+        else:
+            overall_risk_level = self._get_risk_level(min_ttc)
 
-            self.get_logger().warn(
-                f'[{overall_risk_level}] '
-                f'[{most_dangerous_subject}] '
-                f'Min TTC: {min_ttc:.2f}s '
-                f'(Track ID: {most_dangerous_track_id})'
-            )
+            if overall_risk_level != 'NORMAL':
+                self.get_logger().warn(
+                    f'[{overall_risk_level}] '
+                    f'[{most_dangerous_subject}] '
+                    f'Min TTC: {min_ttc:.2f}s '
+                    f'(Track ID: {most_dangerous_track_id})'
+                )
 
 
 def main(args=None) -> None:
