@@ -8,7 +8,6 @@ Events topic:
     - /odom
 
     1. FIRE_DETECTION
-       - /fire_alarm
        - /fire_tracks_3d
        - /camera/fire_fusion/debug_image
 
@@ -44,16 +43,13 @@ import cv2
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
-from std_msgs.msg import String, Bool
+from std_msgs.msg import String
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 
 import psycopg2
 
-# ════════════════════════════════════════════════════════════════════════════
-# Database Backends
-# ════════════════════════════════════════════════════════════════════════════
 
 class SQLiteBackend:
     """SQLite 기반 이벤트 저장소."""
@@ -62,9 +58,9 @@ class SQLiteBackend:
     CREATE TABLE IF NOT EXISTS safety_events (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp   TEXT    NOT NULL,
-        epoch       REAL    NOT NULL,
-        robot_x     REAL    DEFAULT 0.0,
-        robot_y     REAL    DEFAULT 0.0,
+        epoch       REAL   NOT NULL,
+        robot_x     REAL   DEFAULT 0.0,
+        robot_y     REAL   DEFAULT 0.0,
         event_type  TEXT    NOT NULL,
         severity    TEXT    NOT NULL DEFAULT 'INFO',
         track_id    INTEGER DEFAULT -1,
@@ -162,23 +158,13 @@ class PostgreSQLBackend:
             self._conn.close()
 
     def __repr__(self) -> str:
-        return (
-            f"PostgreSQLBackend("
-            f"{self._dsn['host']}:{self._dsn['port']}/"
-            f"{self._dsn['dbname']})"
-        )
+        return f"PostgreSQLBackend({self._dsn['host']}:{self._dsn['port']}/{self._dsn['dbname']})"
 
-
-# ════════════════════════════════════════════════════════════════════════════
-# Event Logger Node
-# ════════════════════════════════════════════════════════════════════════════
 
 class EventLoggerNode(Node):
 
     def __init__(self) -> None:
         super().__init__('event_logger_node')
-
-        # ── Parameters ──────────────────────────────────────────────────────
 
         self.declare_parameter('db_path', '/workspace/data/safety_events.db')
         self.declare_parameter('image_dir', '/workspace/data/event_images')
@@ -192,12 +178,8 @@ class EventLoggerNode(Node):
 
         Path(self._image_dir).mkdir(parents=True, exist_ok=True)
 
-        # ── DB ───────────────────────────────────────────────────────────────
-
         self._db = self._init_db()
         self.get_logger().info(f'[EventLogger] DB backend: {self._db}')
-
-        # ── Common State ────────────────────────────────────────────────────
 
         self._bridge = CvBridge()
         self._robot_x = 0.0
@@ -206,18 +188,9 @@ class EventLoggerNode(Node):
         # 동일한 (track_id, key, event_type) 중복 저장 방지
         self._logged_events: set[tuple[int, str, str]] = set()
 
-        # ── Image Buffers ───────────────────────────────────────────────────
-
         self._camera_images = deque()
         self._fire_images = deque()
         self._perception_images = deque()
-
-        # ── Fire State ──────────────────────────────────────────────────────
-
-        self._latest_fire_tracks = None
-        self._latest_fire_track_epoch = None
-
-        # ── QoS ─────────────────────────────────────────────────────────────
 
         sensor_qos = QoSProfile(
             depth=10,
@@ -231,38 +204,27 @@ class EventLoggerNode(Node):
             durability=DurabilityPolicy.VOLATILE,
         )
 
-        # ── Subscriptions: Fire ─────────────────────────────────────────────
-
-        self.create_subscription(Bool, '/fire_alarm', self._fire_alarm_callback, reliable_qos)
+        # ── Fire ──────────────────────────────────────────────────────
         self.create_subscription(String, '/fire_tracks_3d', self._fire_tracks_callback, reliable_qos)
         self.create_subscription(Image, '/camera/fire_fusion/debug_image', self._fire_image_callback, sensor_qos)
 
-        # ── Subscriptions: PPE ──────────────────────────────────────────────
-
+        # ── PPE ───────────────────────────────────────────────────────
         self.create_subscription(String, '/detections_2d', self._detections_callback, reliable_qos)
         self.create_subscription(Image, '/perception/debug_image', self._perception_image_callback, sensor_qos)
 
-        # ── Subscriptions: TTC ──────────────────────────────────────────────
-
+        # ── TTC ───────────────────────────────────────────────────────
         self.create_subscription(String, '/ttc_alerts', self._ttc_callback, reliable_qos)
 
-        # ── Subscriptions: Fall ─────────────────────────────────────────────
-
+        # ── Fall ──────────────────────────────────────────────────────
         self.create_subscription(String, '/fall_alarm', self._fall_alarm_callback, reliable_qos)
 
-        # ── Common Camera ───────────────────────────────────────────────────
-
+        # ── Common Camera ─────────────────────────────────────────────
         self.create_subscription(Image, '/camera/image_raw', self._camera_image_callback, sensor_qos)
 
-        # ── Common: Odom ────────────────────────────────────────────────────
-
+        # ── Odom ──────────────────────────────────────────────────────
         self.create_subscription(Odometry, '/odom', self._odom_callback, sensor_qos)
 
         self.get_logger().info('EventLogger Node started.')
-
-    # ════════════════════════════════════════════════════════════════════════
-    # DB Init
-    # ════════════════════════════════════════════════════════════════════════
 
     def _init_db(self):
         db_host = os.environ.get('DB_HOST', '')
@@ -278,17 +240,9 @@ class EventLoggerNode(Node):
 
         return SQLiteBackend(self._db_path)
 
-    # ════════════════════════════════════════════════════════════════════════
-    # Odom
-    # ════════════════════════════════════════════════════════════════════════
-
     def _odom_callback(self, msg: Odometry) -> None:
         self._robot_x = msg.pose.pose.position.x
         self._robot_y = msg.pose.pose.position.y
-
-    # ════════════════════════════════════════════════════════════════════════
-    # Image Callbacks
-    # ════════════════════════════════════════════════════════════════════════
 
     def _camera_image_callback(self, msg: Image) -> None:
         image = self._convert_image(msg)
@@ -330,9 +284,9 @@ class EventLoggerNode(Node):
         while buffer and buffer[0][0] < cutoff:
             buffer.popleft()
 
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
     # Fire
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
 
     def _fire_tracks_callback(self, msg: String) -> None:
         try:
@@ -341,26 +295,16 @@ class EventLoggerNode(Node):
             self.get_logger().warn('[EventLogger] Invalid JSON in /fire_tracks_3d')
             return
 
-        self._latest_fire_tracks = data
-        timestamp = self._extract_timestamp(data)
-        self._latest_fire_track_epoch = timestamp if timestamp is not None else time.time()
-
-    def _fire_alarm_callback(self, msg: Bool) -> None:
-        if not msg.data:
+        if not isinstance(data, dict):
             return
 
-        fire_data = self._latest_fire_tracks
-
-        if fire_data is None:
-            self.get_logger().warn('[EventLogger] Fire alarm received but /fire_tracks_3d data is not available.')
-            return
-
-        fires = fire_data.get('fires', [])
+        fires = data.get('fires', [])
 
         if not isinstance(fires, list) or not fires:
             return
 
-        event_epoch = self._latest_fire_track_epoch if self._latest_fire_track_epoch is not None else time.time()
+        event_epoch = self._extract_timestamp(data)
+        event_epoch = event_epoch if event_epoch is not None else time.time()
         timestamp = self._epoch_to_iso(event_epoch)
 
         for fire in fires:
@@ -385,8 +329,6 @@ class EventLoggerNode(Node):
                 event_epoch,
             )
 
-            position_map = fire.get('position_map')
-
             row = self._build_row(
                 event_type='FIRE_DETECTION',
                 severity='WARNING',
@@ -397,16 +339,16 @@ class EventLoggerNode(Node):
                 metadata={
                     'fire_id': track_id,
                     'position': fire.get('position'),
-                    'position_map': position_map,
+                    'position_map': fire.get('position_map'),
                     'distance': fire.get('distance'),
                 },
             )
 
             self._write(row, (track_id, key, event_type))
 
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
     # PPE
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
 
     def _detections_callback(self, msg: String) -> None:
         try:
@@ -459,9 +401,9 @@ class EventLoggerNode(Node):
 
             self._write(row, (track_id, key, event_type))
 
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
     # TTC
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
 
     def _ttc_callback(self, msg: String) -> None:
         try:
@@ -511,9 +453,9 @@ class EventLoggerNode(Node):
 
         self._write(row, (track_id, key, event_type))
 
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
     # Fall Detection
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
 
     def _fall_alarm_callback(self, msg: String) -> None:
         try:
@@ -562,21 +504,17 @@ class EventLoggerNode(Node):
 
         self._write(row, (track_id, key, event_type))
 
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
     # Duplicate Check
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
 
     def _should_log(self, track_id: int, key: str, event_type: str) -> bool:
         event_key = (track_id, key, event_type)
+        return event_key not in self._logged_events
 
-        if event_key in self._logged_events:
-            return False
-
-        return True
-
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
     # Image Save
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
 
     def _save_buffered_snapshot(self, buffer, label: str, track_id: int, event_epoch: float) -> str:
         if not buffer:
@@ -616,15 +554,19 @@ class EventLoggerNode(Node):
                 self.get_logger().warn(f'[EventLogger] Failed to write image: {filepath}')
                 return ''
 
+            self.get_logger().info(
+                f'[EventLogger] Image saved | track={track_id} | path={filepath}'
+            )
+
             return str(filepath)
 
         except Exception as e:
             self.get_logger().warn(f'[EventLogger] Snapshot save failed: {e}')
             return ''
 
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
     # DB Row
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
 
     def _build_row(
         self,
@@ -648,9 +590,9 @@ class EventLoggerNode(Node):
             'metadata': json.dumps(metadata, ensure_ascii=False),
         }
 
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
     # DB Write
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
 
     def _write(self, row: dict, event_key: tuple[int, str, str]) -> None:
         try:
@@ -662,15 +604,16 @@ class EventLoggerNode(Node):
                 f"{row['event_type']} | "
                 f"{row['severity']} | "
                 f"track={row['track_id']} | "
+                f"image={row['image_path']} | "
                 f"pos=({row['robot_x']:.2f}, {row['robot_y']:.2f})"
             )
 
         except Exception as e:
             self.get_logger().error(f'[EventLogger] DB write failed: {e}')
 
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
     # Timestamp Helpers
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
 
     def _ros_stamp_to_epoch(self, msg: Image) -> float:
         sec = msg.header.stamp.sec
@@ -685,7 +628,6 @@ class EventLoggerNode(Node):
 
         if timestamp is not None:
             parsed = self._parse_timestamp(timestamp)
-
             if parsed is not None:
                 return parsed
 
@@ -751,46 +693,15 @@ class EventLoggerNode(Node):
     def _epoch_to_iso(self, epoch: float) -> str:
         return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
 
-    def _extract_position_map(self, data):
-        if not isinstance(data, dict):
-            return None
-
-        if 'position_map' in data:
-            return data['position_map']
-
-        tracks = data.get('tracks')
-
-        if isinstance(tracks, list):
-            positions = []
-
-            for track in tracks:
-                if isinstance(track, dict) and 'position_map' in track:
-                    positions.append(track['position_map'])
-
-            if positions:
-                return positions
-
-        if isinstance(data, list):
-            positions = []
-
-            for track in data:
-                if isinstance(track, dict) and 'position_map' in track:
-                    positions.append(track['position_map'])
-
-            if positions:
-                return positions
-
-        return None
-
     def _safe_int(self, value: object) -> int:
         try:
             return int(value)
         except (TypeError, ValueError):
             return -1
 
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
     # Shutdown
-    # ════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════
 
     def destroy_node(self) -> None:
         try:
