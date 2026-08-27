@@ -524,7 +524,7 @@ class EventLoggerNode(Node):
             self.get_logger().warn(f'[EventLogger] Image timestamp mismatch: {closest_diff:.3f}s for {label}')
 
         try:
-            ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')
+            ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
             event_dir = Path(self._image_dir) / label
             event_dir.mkdir(parents=True, exist_ok=True)
 
