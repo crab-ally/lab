@@ -283,7 +283,6 @@ class EventLoggerNode(Node):
         if not isinstance(fires, list) or not fires:
             return
 
-        # /fire_tracks_3d의 stamp를 이벤트 기준 timestamp로 사용
         event_epoch = self._extract_timestamp(data)
         event_epoch = event_epoch if event_epoch is not None else time.time()
         timestamp = self._epoch_to_iso(event_epoch)
@@ -303,7 +302,6 @@ class EventLoggerNode(Node):
             if not self._should_log(track_id, key, event_type):
                 continue
 
-            # 원본 RGB 이미지 저장
             image_path = self._save_buffered_snapshot(
                 self._camera_images,
                 'FIRE_DETECTION',
@@ -365,7 +363,6 @@ class EventLoggerNode(Node):
             event_epoch = event_epoch if event_epoch is not None else time.time()
             timestamp = self._epoch_to_iso(event_epoch)
 
-            # PPE도 원본 RGB 이미지 저장
             image_path = self._save_buffered_snapshot(
                 self._camera_images,
                 'PPE_VIOLATION',
@@ -419,9 +416,10 @@ class EventLoggerNode(Node):
         event_epoch = event_epoch if event_epoch is not None else time.time()
         timestamp = self._epoch_to_iso(event_epoch)
 
+        # TTC는 WARNING / EMERGENCY와 관계없이 하나의 폴더에 저장
         image_path = self._save_buffered_snapshot(
             self._camera_images,
-            f'TTC_{risk_level}',
+            'TTC_ALERT',
             track_id,
             event_epoch,
         )
