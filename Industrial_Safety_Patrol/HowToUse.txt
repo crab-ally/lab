@@ -43,7 +43,7 @@
 # ws_bridge + dashboard
 9. docker compose --profile dashboard up
 9-1. http://localhost:8080
-
+9-2. [html 수정 시] docker compose --profile dashboard up -d --build --force-recreate dashboard
 
 # ==================== 보조기능 ====================
 
