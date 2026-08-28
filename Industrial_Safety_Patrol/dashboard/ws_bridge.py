@@ -1,32 +1,34 @@
 #!/usr/bin/env python3
 """
-WebSocket Bridge: ROS2 → WebSocket
+WebSocket Bridge: ROS2 + DB → WebSocket
 
-ROS2 안전 데이터를 수신하여 연결된 모든 WebSocket 클라이언트에 JSON으로 브로드캐스트합니다.
+ROS2 실시간 안전 데이터와 EventLoggerNode가 저장한 DB 데이터를 WebSocket으로 Dashboard에 전달합니다.
 
-Subscribed Topics:
-    - /odom           (nav_msgs/msg/Odometry)   로봇 위치/속도
+ROS2:
+    /odom
+    /fire_tracks_3d
+    /tracks_3d
+    /ttc_alerts
+    /fall_alarm
 
-    1. Fire Detection
-      - /fire_tracks_3d (std_msgs/msg/String)   화재 3D 위치
+DB:
+    DB_HOST가 있으면 PostgreSQL
+    없으면 SQLite
 
-    2. PPE Detection
-      - /tracks_3d      (std_msgs/msg/String)   3D 객체 추적 정보
-
-    3. TTC Detection
-      - /tracks_3d
-      - /ttc_alerts     (std_msgs/msg/String)   TTC 충돌 경보
-
-    4. FallDetection
-      - /fall_alarm     (std_msgs/msg/String)   쓰러짐 경보
-
-WebSocket Server:
+WebSocket:
     ws://0.0.0.0:8765
+
+Client Request:
+    {"type":"get_events","limit":100}
+    {"type":"get_events","limit":100,"event_type":"FIRE_DETECTION"}
+    {"type":"get_events","limit":100,"severity":"WARNING"}
+    {"type":"get_event_stats"}
 """
 
 import asyncio
 import json
 import os
+import sqlite3
 import threading
 import time
 from typing import Set
@@ -37,17 +39,21 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from std_msgs.msg import String
 from nav_msgs.msg import Odometry
 
-try:
-    import websockets
-    from websockets.server import WebSocketServerProtocol
-except ImportError:
-    raise RuntimeError('websockets 패키지가 필요합니다: pip install websockets')
+import websockets
+from websockets.server import WebSocketServerProtocol
+
+import psycopg2
 
 
 _clients: Set['WebSocketServerProtocol'] = set()
 _clients_lock = threading.Lock()
 _loop: asyncio.AbstractEventLoop | None = None
+_ws_node = None
 
+
+# ====================================================================
+# WebSocket Broadcast
+# ====================================================================
 
 def _broadcast(payload: dict) -> None:
     global _loop, _clients
@@ -55,7 +61,7 @@ def _broadcast(payload: dict) -> None:
     if _loop is None:
         return
 
-    message = json.dumps(payload, ensure_ascii=False)
+    message = json.dumps(payload, ensure_ascii=False, default=str)
 
     with _clients_lock:
         targets = set(_clients)
@@ -79,42 +85,183 @@ def _broadcast(payload: dict) -> None:
     asyncio.run_coroutine_threadsafe(_send_all(), _loop)
 
 
+# ====================================================================
+# Database Reader
+# ====================================================================
+
+class EventDatabaseReader:
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.db_host = os.environ.get('DB_HOST', '')
+
+        if self.db_host:
+            self.backend = 'postgresql'
+            self.db_path = None
+            self.pg_config = {
+                'host': self.db_host,
+                'port': int(os.environ.get('DB_PORT', 5432)),
+                'dbname': os.environ.get('DB_NAME', 'patrol_db'),
+                'user': os.environ.get('DB_USER', 'admin'),
+                'password': os.environ.get('DB_PASS', 'password123')
+            }
+            self._conn = psycopg2.connect(**self.pg_config)
+        else:
+            self.backend = 'sqlite'
+            self.db_path = os.environ.get('DB_PATH', '/workspace/data/safety_events.db')
+            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+
+    def _reconnect(self):
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
+        if self.backend == 'postgresql':
+            self._conn = psycopg2.connect(**self.pg_config)
+        else:
+            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+
+    def get_events(self,limit: int = 100,event_type: str | None = None,severity: str | None = None) -> list[dict]:
+        limit = max(1, min(int(limit), 1000))
+
+        sql = """
+        SELECT id,timestamp,epoch,robot_x,robot_y,event_type,severity,track_id,image_path,metadata
+        FROM safety_events
+        WHERE 1=1
+        """
+
+        params = []
+
+        if event_type:
+            sql += " AND event_type = %s" if self.backend == 'postgresql' else " AND event_type = ?"
+            params.append(event_type)
+
+        if severity:
+            sql += " AND severity = %s" if self.backend == 'postgresql' else " AND severity = ?"
+            params.append(severity)
+
+        sql += " ORDER BY epoch DESC LIMIT %s" if self.backend == 'postgresql' else " ORDER BY epoch DESC LIMIT ?"
+        params.append(limit)
+
+        columns = ['id','timestamp','epoch','robot_x','robot_y','event_type','severity','track_id','image_path','metadata']
+
+        with self._lock:
+            try:
+                if self.backend == 'postgresql':
+                    with self._conn.cursor() as cur:
+                        cur.execute(sql, params)
+                        rows = cur.fetchall()
+                else:
+                    cursor = self._conn.cursor()
+                    cursor.execute(sql, params)
+                    rows = cursor.fetchall()
+
+                result = []
+
+                for row in rows:
+                    item = dict(zip(columns, row))
+                    item['metadata'] = self._parse_metadata(item['metadata'])
+                    result.append(item)
+
+                return result
+
+            except Exception:
+                self._reconnect()
+                raise
+
+    def get_stats(self) -> dict:
+        sql = """
+        SELECT event_type,severity,COUNT(*)
+        FROM safety_events
+        GROUP BY event_type,severity
+        ORDER BY event_type,severity
+        """
+
+        with self._lock:
+            try:
+                if self.backend == 'postgresql':
+                    with self._conn.cursor() as cur:
+                        cur.execute(sql)
+                        rows = cur.fetchall()
+                else:
+                    cursor = self._conn.cursor()
+                    cursor.execute(sql)
+                    rows = cursor.fetchall()
+
+                stats = {
+                    'total': 0,
+                    'by_event_type': {},
+                    'by_severity': {}
+                }
+
+                for event_type,severity,count in rows:
+                    count = int(count)
+                    stats['total'] += count
+                    stats['by_event_type'][event_type] = stats['by_event_type'].get(event_type,0) + count
+                    stats['by_severity'][severity] = stats['by_severity'].get(severity,0) + count
+
+                return stats
+
+            except Exception:
+                self._reconnect()
+                raise
+
+    @staticmethod
+    def _parse_metadata(metadata):
+        if metadata is None:
+            return {}
+
+        if isinstance(metadata,dict):
+            return metadata
+
+        if isinstance(metadata,str):
+            try:
+                value = json.loads(metadata)
+                return value if isinstance(value,dict) else {}
+            except json.JSONDecodeError:
+                return {}
+
+        return {}
+
+    def close(self):
+        with self._lock:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+
+
+# ====================================================================
+# WsBridge Node
+# ====================================================================
+
 class WsBridgeNode(Node):
 
     def __init__(self) -> None:
         super().__init__('ws_bridge_node')
 
-        # ============================================================
-        # QoS
-        # ============================================================
+        self.declare_parameter('history_limit',100)
+        self._history_limit = int(self.get_parameter('history_limit').value)
+
+        self._db = EventDatabaseReader()
+
+        self.get_logger().info(f'[WsBridge] DB backend: {self._db.backend}')
 
         sensor_qos = QoSProfile(depth=1,reliability=ReliabilityPolicy.BEST_EFFORT,durability=DurabilityPolicy.VOLATILE)
         reliable_qos = QoSProfile(depth=10,reliability=ReliabilityPolicy.RELIABLE,durability=DurabilityPolicy.VOLATILE)
 
-        # ============================================================
-        # Subscribed Topics
-        # ============================================================
-
-        # Robot Odometry
         self.create_subscription(Odometry,'/odom',self._odom_cb,sensor_qos)
-
-        # Fire Detection
         self.create_subscription(String,'/fire_tracks_3d',self._fire_tracks3d_cb,reliable_qos)
-
-        # PPE Detection / TTC Detection
         self.create_subscription(String,'/tracks_3d',self._tracks3d_cb,reliable_qos)
-
-        # TTC Detection
         self.create_subscription(String,'/ttc_alerts',self._ttc_cb,reliable_qos)
-
-        # Fall Detection
         self.create_subscription(String,'/fall_alarm',self._fall_alarm_cb,reliable_qos)
 
         self.get_logger().info('[WsBridge] ROS2 subscriptions active.')
         self.get_logger().info('[WsBridge] Topics: /odom /fire_tracks_3d /tracks_3d /ttc_alerts /fall_alarm')
 
     # ================================================================
-    # String Topic Common Handler
+    # ROS String Handler
     # ================================================================
 
     def _string_cb(self,msg: String,topic: str) -> None:
@@ -124,57 +271,104 @@ class WsBridgeNode(Node):
             data = msg.data
 
         _broadcast({
-            'topic': topic,
-            'data': data,
-            'ts': time.time()
+            'type':'realtime',
+            'topic':topic,
+            'data':data,
+            'ts':time.time()
         })
-
-    # ================================================================
-    # Fire Detection
-    # ================================================================
 
     def _fire_tracks3d_cb(self,msg: String) -> None:
         self._string_cb(msg,'fire_tracks_3d')
 
-    # ================================================================
-    # PPE Detection / TTC Detection
-    # ================================================================
-
     def _tracks3d_cb(self,msg: String) -> None:
         self._string_cb(msg,'tracks_3d')
 
-    # ================================================================
-    # TTC Detection
-    # ================================================================
-
     def _ttc_cb(self,msg: String) -> None:
         self._string_cb(msg,'ttc_alerts')
-
-    # ================================================================
-    # Fall Detection
-    # ================================================================
 
     def _fall_alarm_cb(self,msg: String) -> None:
         self._string_cb(msg,'fall_alarm')
 
     # ================================================================
-    # Robot Odometry
+    # Odom
     # ================================================================
 
     def _odom_cb(self,msg: Odometry) -> None:
         data = {
-            'x': float(msg.pose.pose.position.x),
-            'y': float(msg.pose.pose.position.y),
-            'z': float(msg.pose.pose.position.z),
-            'vx': float(msg.twist.twist.linear.x),
-            'vy': float(msg.twist.twist.linear.y)
+            'x':float(msg.pose.pose.position.x),
+            'y':float(msg.pose.pose.position.y),
+            'z':float(msg.pose.pose.position.z),
+            'vx':float(msg.twist.twist.linear.x),
+            'vy':float(msg.twist.twist.linear.y)
         }
 
         _broadcast({
-            'topic': 'odom',
-            'data': data,
-            'ts': time.time()
+            'type':'realtime',
+            'topic':'odom',
+            'data':data,
+            'ts':time.time()
         })
+
+    # ================================================================
+    # DB History
+    # ================================================================
+
+    def get_event_history(self,limit=100,event_type=None,severity=None) -> dict:
+        try:
+            events = self._db.get_events(limit,event_type,severity)
+
+            return {
+                'type':'event_history',
+                'data':events,
+                'count':len(events),
+                'ts':time.time()
+            }
+
+        except Exception as e:
+            self.get_logger().error(f'[WsBridge] DB event query failed: {e}')
+
+            return {
+                'type':'error',
+                'error':'event_history_query_failed',
+                'message':str(e),
+                'ts':time.time()
+            }
+
+    # ================================================================
+    # DB Statistics
+    # ================================================================
+
+    def get_event_stats(self) -> dict:
+        try:
+            stats = self._db.get_stats()
+
+            return {
+                'type':'event_stats',
+                'data':stats,
+                'ts':time.time()
+            }
+
+        except Exception as e:
+            self.get_logger().error(f'[WsBridge] DB stats query failed: {e}')
+
+            return {
+                'type':'error',
+                'error':'event_stats_query_failed',
+                'message':str(e),
+                'ts':time.time()
+            }
+
+    # ================================================================
+    # Shutdown
+    # ================================================================
+
+    def destroy_node(self) -> None:
+        try:
+            self._db.close()
+        except Exception:
+            pass
+
+        super().destroy_node()
 
 
 # ====================================================================
@@ -191,15 +385,70 @@ async def _ws_handler(websocket: 'WebSocketServerProtocol') -> None:
 
     try:
         await websocket.send(json.dumps({
-            'topic': 'system',
-            'data': {
-                'status': 'connected',
-                'server': 'WsBridge v1.0'
+            'type':'system',
+            'topic':'system',
+            'data':{
+                'status':'connected',
+                'server':'WsBridge v2.0'
             },
-            'ts': time.time()
+            'ts':time.time()
         },ensure_ascii=False))
 
-        await websocket.wait_closed()
+        history = await asyncio.to_thread(
+            _ws_node.get_event_history,
+            _ws_node._history_limit,
+            None,
+            None
+        )
+
+        await websocket.send(json.dumps(history,ensure_ascii=False,default=str))
+
+        stats = await asyncio.to_thread(_ws_node.get_event_stats)
+
+        await websocket.send(json.dumps(stats,ensure_ascii=False,default=str))
+
+        async for message in websocket:
+            try:
+                request = json.loads(message)
+            except (json.JSONDecodeError,TypeError):
+                await websocket.send(json.dumps({
+                    'type':'error',
+                    'error':'invalid_json',
+                    'ts':time.time()
+                },ensure_ascii=False))
+                continue
+
+            if not isinstance(request,dict):
+                continue
+
+            request_type = request.get('type','')
+
+            if request_type == 'get_events':
+                limit = request.get('limit',_ws_node._history_limit)
+                event_type = request.get('event_type')
+                severity = request.get('severity')
+
+                result = await asyncio.to_thread(
+                    _ws_node.get_event_history,
+                    limit,
+                    event_type,
+                    severity
+                )
+
+                await websocket.send(json.dumps(result,ensure_ascii=False,default=str))
+
+            elif request_type == 'get_event_stats':
+                result = await asyncio.to_thread(_ws_node.get_event_stats)
+                await websocket.send(json.dumps(result,ensure_ascii=False,default=str))
+
+            elif request_type == 'ping':
+                await websocket.send(json.dumps({
+                    'type':'pong',
+                    'ts':time.time()
+                },ensure_ascii=False))
+
+    except Exception as e:
+        print(f'[WsBridge] WebSocket error: {remote}: {e}')
 
     finally:
         with _clients_lock:
@@ -233,6 +482,8 @@ def _start_ws_thread(host: str,port: int) -> None:
 # ====================================================================
 
 def main() -> None:
+    global _ws_node
+
     ws_host = os.environ.get('WS_HOST','0.0.0.0')
     ws_port = int(os.environ.get('WS_PORT','8765'))
 
@@ -240,14 +491,14 @@ def main() -> None:
     ws_thread.start()
 
     rclpy.init()
-    node = WsBridgeNode()
+    _ws_node = WsBridgeNode()
 
     try:
-        rclpy.spin(node)
+        rclpy.spin(_ws_node)
     except KeyboardInterrupt:
-        node.get_logger().info('[WsBridge] stopped.')
+        _ws_node.get_logger().info('WsBridge stopped.')
     finally:
-        node.destroy_node()
+        _ws_node.destroy_node()
         rclpy.shutdown()
 
 
