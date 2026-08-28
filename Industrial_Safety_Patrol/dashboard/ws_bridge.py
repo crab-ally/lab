@@ -11,6 +11,10 @@ ROS2:
     /ttc_alerts
     /fall_alarm
 
+TF:
+    map → odom
+    /odom 좌표를 map 좌표로 변환하여 Dashboard에 전달
+
 DB:
     DB_HOST가 있으면 PostgreSQL
     없으면 SQLite
@@ -36,8 +40,13 @@ from typing import Set
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+
 from std_msgs.msg import String
 from nav_msgs.msg import Odometry
+from geometry_msgs.msg import PointStamped
+
+import tf2_ros
+from tf2_geometry_msgs import do_transform_point
 
 import websockets
 from websockets.server import WebSocketServerProtocol
@@ -248,17 +257,110 @@ class WsBridgeNode(Node):
 
         self.get_logger().info(f'[WsBridge] DB backend: {self._db.backend}')
 
-        sensor_qos = QoSProfile(depth=1,reliability=ReliabilityPolicy.BEST_EFFORT,durability=DurabilityPolicy.VOLATILE)
-        reliable_qos = QoSProfile(depth=10,reliability=ReliabilityPolicy.RELIABLE,durability=DurabilityPolicy.VOLATILE)
+        # ============================================================
+        # TF
+        # ============================================================
 
-        self.create_subscription(Odometry,'/odom',self._odom_cb,sensor_qos)
-        self.create_subscription(String,'/fire_tracks_3d',self._fire_tracks3d_cb,reliable_qos)
-        self.create_subscription(String,'/tracks_3d',self._tracks3d_cb,reliable_qos)
-        self.create_subscription(String,'/ttc_alerts',self._ttc_cb,reliable_qos)
-        self.create_subscription(String,'/fall_alarm',self._fall_alarm_cb,reliable_qos)
+        self._tf_buffer = tf2_ros.Buffer()
+        self._tf_listener = tf2_ros.TransformListener(self._tf_buffer,self)
+
+        self._map_frame = 'map'
+        self._odom_frame = 'odom'
+
+        # ============================================================
+        # QoS
+        # ============================================================
+
+        sensor_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE
+        )
+
+        reliable_qos = QoSProfile(
+            depth=10,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.VOLATILE
+        )
+
+        # ============================================================
+        # ROS2 subscriptions
+        # ============================================================
+
+        self.create_subscription(
+            Odometry,
+            '/odom',
+            self._odom_cb,
+            sensor_qos
+        )
+
+        self.create_subscription(
+            String,
+            '/fire_tracks_3d',
+            self._fire_tracks3d_cb,
+            reliable_qos
+        )
+
+        self.create_subscription(
+            String,
+            '/tracks_3d',
+            self._tracks3d_cb,
+            reliable_qos
+        )
+
+        self.create_subscription(
+            String,
+            '/ttc_alerts',
+            self._ttc_cb,
+            reliable_qos
+        )
+
+        self.create_subscription(
+            String,
+            '/fall_alarm',
+            self._fall_alarm_cb,
+            reliable_qos
+        )
 
         self.get_logger().info('[WsBridge] ROS2 subscriptions active.')
-        self.get_logger().info('[WsBridge] Topics: /odom /fire_tracks_3d /tracks_3d /ttc_alerts /fall_alarm')
+
+    # ================================================================
+    # Odom → Map Transform
+    # ================================================================
+
+    def _odom_to_map(self,msg: Odometry) -> tuple[float,float,float]:
+        point = PointStamped()
+        point.header = msg.header
+        point.header.frame_id = self._odom_frame
+        point.point.x = float(msg.pose.pose.position.x)
+        point.point.y = float(msg.pose.pose.position.y)
+        point.point.z = float(msg.pose.pose.position.z)
+
+        try:
+            transform = self._tf_buffer.lookup_transform(
+                self._map_frame,
+                self._odom_frame,
+                rclpy.time.Time()
+            )
+
+            transformed = do_transform_point(point,transform)
+
+            return (
+                float(transformed.point.x),
+                float(transformed.point.y),
+                float(transformed.point.z)
+            )
+
+        except Exception as e:
+            self.get_logger().debug(
+                f'[WsBridge] map TF unavailable, using odom coordinates: {e}'
+            )
+
+            return (
+                float(msg.pose.pose.position.x),
+                float(msg.pose.pose.position.y),
+                float(msg.pose.pose.position.z)
+            )
 
     # ================================================================
     # ROS String Handler
@@ -294,10 +396,21 @@ class WsBridgeNode(Node):
     # ================================================================
 
     def _odom_cb(self,msg: Odometry) -> None:
+        odom_x = float(msg.pose.pose.position.x)
+        odom_y = float(msg.pose.pose.position.y)
+        odom_z = float(msg.pose.pose.position.z)
+
+        map_x,map_y,map_z = self._odom_to_map(msg)
+
         data = {
-            'x':float(msg.pose.pose.position.x),
-            'y':float(msg.pose.pose.position.y),
-            'z':float(msg.pose.pose.position.z),
+            'x':odom_x,
+            'y':odom_y,
+            'z':odom_z,
+            'map_x':map_x,
+            'map_y':map_y,
+            'map_z':map_z,
+            'frame_id':'map',
+            'source_frame':'odom',
             'vx':float(msg.twist.twist.linear.x),
             'vy':float(msg.twist.twist.linear.y)
         }
@@ -435,11 +548,18 @@ async def _ws_handler(websocket: 'WebSocketServerProtocol') -> None:
                     severity
                 )
 
-                await websocket.send(json.dumps(result,ensure_ascii=False,default=str))
+                await websocket.send(
+                    json.dumps(result,ensure_ascii=False,default=str)
+                )
 
             elif request_type == 'get_event_stats':
-                result = await asyncio.to_thread(_ws_node.get_event_stats)
-                await websocket.send(json.dumps(result,ensure_ascii=False,default=str))
+                result = await asyncio.to_thread(
+                    _ws_node.get_event_stats
+                )
+
+                await websocket.send(
+                    json.dumps(result,ensure_ascii=False,default=str)
+                )
 
             elif request_type == 'ping':
                 await websocket.send(json.dumps({
@@ -487,7 +607,11 @@ def main() -> None:
     ws_host = os.environ.get('WS_HOST','0.0.0.0')
     ws_port = int(os.environ.get('WS_PORT','8765'))
 
-    ws_thread = threading.Thread(target=_start_ws_thread,args=(ws_host,ws_port),daemon=True)
+    ws_thread = threading.Thread(
+        target=_start_ws_thread,
+        args=(ws_host,ws_port),
+        daemon=True
+    )
     ws_thread.start()
 
     rclpy.init()
