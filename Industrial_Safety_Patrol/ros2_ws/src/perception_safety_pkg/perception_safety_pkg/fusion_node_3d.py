@@ -10,7 +10,7 @@ Subscribes:
 
 TF Transformations:
     - camera_frame_id (camera_optical_frame) -> target_frame (base_link)
-    - camera_frame_id (camera_optical_frame) -> scan_frame_id (lidar_link)
+    - target_frame (base_link) -> map_frame (map)
 
 Publishes:
     - /tracks_3d (std_msgs/msg/String - JSON Format)
@@ -38,16 +38,13 @@ from tf2_geometry_msgs import do_transform_point
 from visualization_msgs.msg import Marker, MarkerArray
 
 
-class EKF3D:
-    """DeepSORT track_id별 3D 위치 및 속도 추정 칼만 필터"""
+class KalmanFilter2D:
+    """DeepSORT track_id별 2D 위치 및 속도 추정 칼만 필터"""
+
     def __init__(self, initial_x: float, initial_y: float, stamp: float) -> None:
         self.state = np.array([initial_x, initial_y, 0.0, 0.0], dtype=np.float64)  # [x, y, vx, vy]
         self.P = np.diag([0.5, 0.5, 2.0, 2.0])
-        
-        # 가속도 노이즈 표준편차 (m/s^2)
         self.sigma_a = 1.2
-        
-        # 측정 노이즈
         self.R = np.diag([0.15, 0.15])
         self.H = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype=np.float64)
         self.last_stamp = stamp
@@ -65,7 +62,6 @@ class EKF3D:
             [0, 0,  0,  1]
         ], dtype=np.float64)
 
-        # Continuous White Noise Acceleration Model (Q 행렬 보정)
         dt2 = (dt ** 2) / 2.0
         dt3 = (dt ** 3) / 3.0
         q_var = self.sigma_a ** 2
@@ -92,6 +88,7 @@ class EKF3D:
 
 
 class FusionNode3D(Node):
+
     def __init__(self) -> None:
         super().__init__('fusion_node_3d')
 
@@ -99,10 +96,12 @@ class FusionNode3D(Node):
 
         # ── Parameters ────────────────────────────────────────────────
         self.declare_parameter('target_frame', 'base_link')
+        self.declare_parameter('map_frame', 'map')
         self.declare_parameter('depth_buffer_size', 60)
         self.declare_parameter('max_depth_time_diff', 0.3)
 
         self.target_frame = self.get_parameter('target_frame').get_parameter_value().string_value
+        self.map_frame = self.get_parameter('map_frame').get_parameter_value().string_value
         self.depth_buffer_size = self.get_parameter('depth_buffer_size').get_parameter_value().integer_value
         self.max_depth_time_diff = self.get_parameter('max_depth_time_diff').get_parameter_value().double_value
 
@@ -118,20 +117,19 @@ class FusionNode3D(Node):
         self.camera_info_received = False
 
         # ── Depth Image Buffer (Timestamp 동기화용) ───────────────────
-        # 원소: (stamp: float, depth_img: np.ndarray, encoding: str)
         self.depth_buffer: deque = deque(maxlen=self.depth_buffer_size)
 
         self.latest_scan: Optional[LaserScan] = None
         self.latest_scan_stamp: Optional[float] = None
-        
+
         self.camera_frame_id: str = "camera_optical_frame"
         self.scan_frame_id: str = "lidar_link"
 
-        # RViz Marker Cleanup용 이전 ID 저장소
+        # ── RViz Marker Cleanup용 이전 ID 저장소 ──────────────────────
         self.prev_active_marker_ids: set = set()
 
-        # EKF Trackers
-        self.track_ekf_map: Dict[int, EKF3D] = {}
+        # ── KF Trackers ──────────────────────────────────────────────
+        self.track_kf_map: Dict[int, KalmanFilter2D] = {}
 
         # ── QoS Profile ───────────────────────────────────────────────
         sensor_qos = QoSProfile(
@@ -147,47 +145,15 @@ class FusionNode3D(Node):
         )
 
         # ── Subscriptions & Publishers ─────────────────────────────────
-        self.sub_detections = self.create_subscription(
-            String,
-            '/detections_2d',
-            self._detections_callback,
-            10
-        )
+        self.sub_detections = self.create_subscription(String, '/detections_2d', self._detections_callback, 10)
+        self.sub_depth = self.create_subscription(Image, '/camera/depth/image_raw', self._depth_callback, depth_qos)
+        self.sub_info = self.create_subscription(CameraInfo, '/camera/depth/camera_info', self._camera_info_callback, 10)
+        self.sub_scan = self.create_subscription(LaserScan, '/scan', self._scan_callback, sensor_qos)
 
-        self.sub_depth = self.create_subscription(
-            Image,
-            '/camera/depth/image_raw',
-            self._depth_callback,
-            depth_qos
-        )
+        self.pub_tracks_3d = self.create_publisher(String, '/tracks_3d', 10)
+        self.pub_markers = self.create_publisher(MarkerArray, '/perception/debug_markers', 10)
 
-        self.sub_info = self.create_subscription(
-            CameraInfo,
-            '/camera/depth/camera_info',
-            self._camera_info_callback,
-            10
-        )
-
-        self.sub_scan = self.create_subscription(
-            LaserScan,
-            '/scan',
-            self._scan_callback,
-            sensor_qos
-        )
-
-        self.pub_tracks_3d = self.create_publisher(
-            String,
-            '/tracks_3d',
-            10
-        )
-
-        self.pub_markers = self.create_publisher(
-            MarkerArray,
-            '/perception/debug_markers',
-            10
-        )
-
-        self.get_logger().info('Node 2: 3D Fusion Node (Depth Buffer + /scan + TF) is ready.')
+        self.get_logger().info('Node 2: 3D Fusion Node is ready.')
 
     def _camera_info_callback(self, msg: CameraInfo) -> None:
         if not self.camera_info_received:
@@ -198,17 +164,14 @@ class FusionNode3D(Node):
             if msg.header.frame_id:
                 self.camera_frame_id = msg.header.frame_id
             self.camera_info_received = True
-            self.get_logger().info(
-                f'Camera Intrinsics Loaded: fx={self.fx:.1f}, fy={self.fy:.1f}, '
-                f'cx={self.cx:.1f}, cy={self.cy:.1f}, frame_id={self.camera_frame_id}'
-            )
+            self.get_logger().info('Camera Intrinsics Loaded')
 
     def _depth_callback(self, msg: Image) -> None:
         try:
             if msg.encoding in ['16UC1', 'mono16']:
                 depth_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
                 encoding = '16UC1'
-            elif msg.encoding in ['32FC1']:
+            elif msg.encoding == '32FC1':
                 depth_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='32FC1')
                 encoding = '32FC1'
             else:
@@ -229,16 +192,13 @@ class FusionNode3D(Node):
         best_entry = None
         min_diff = float('inf')
 
-        # 버퍼 내에서 타임스탬프 오차가 가장 작은 프레임 탐색
         for stamp, depth_img, encoding in self.depth_buffer:
             diff = abs(stamp - target_stamp)
             if diff < min_diff:
                 min_diff = diff
                 best_entry = (depth_img, encoding, stamp)
 
-        # 허용 시간 오차 이내인 경우 반환
         if min_diff <= self.max_depth_time_diff and best_entry is not None:
-            # target_stamp보다 1.0초 이상 지난 너무 오래된 버퍼 데이터 정리
             while self.depth_buffer and (target_stamp - self.depth_buffer[0][0]) > 1.0:
                 self.depth_buffer.popleft()
             return best_entry[0], best_entry[1], best_entry[2]
@@ -253,9 +213,7 @@ class FusionNode3D(Node):
 
     def _detections_callback(self, msg: String) -> None:
         if not self.camera_info_received:
-            self.get_logger().warning(
-                'Camera info not received yet. Skipping 3D fusion.'
-            )
+            self.get_logger().warning('Camera info not received yet. Skipping 3D fusion.')
             return
 
         try:
@@ -272,7 +230,7 @@ class FusionNode3D(Node):
         if depth_img is None:
             return
 
-        # 타임스탬프 동기화 기반 TF 조회
+        # 타임스탬프 동기화 기반 Camera -> Base TF 조회
         sec = int(stamp)
         nanosec = int((stamp - sec) * 1e9)
         lookup_time = Time(seconds=sec, nanoseconds=nanosec)
@@ -286,15 +244,9 @@ class FusionNode3D(Node):
             )
         except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
             try:
-                tf_transform = self.tf_buffer.lookup_transform(
-                    self.target_frame,
-                    self.camera_frame_id,
-                    rclpy.time.Time()
-                )
+                tf_transform = self.tf_buffer.lookup_transform(self.target_frame, self.camera_frame_id, rclpy.time.Time())
             except Exception as e:
-                self.get_logger().warning(
-                    f'TF Lookup Failed ({self.camera_frame_id} -> {self.target_frame}): {e}'
-                )
+                self.get_logger().warning(f'TF Lookup Failed ({self.camera_frame_id} -> {self.target_frame}): {e}')
                 return
 
         tracks_3d_payload = []
@@ -312,46 +264,77 @@ class FusionNode3D(Node):
 
             # 1. 버퍼에서 매칭된 Depth Image + 2D BBox → 카메라 좌표계 3D 연산
             cam_x, cam_y, cam_z = self._calculate_3d_from_depth(bbox, depth_img, depth_encoding)
+
             if cam_z is None:
-                # Depth 연산 실패 시 active_track_ids에 추가하지 않음 -> EKF miss_count 정상 실시간 증가
                 continue
 
-            # 2. 2D LiDAR /scan 데이터로 Distance 교차 검증 (높이 차 검증 및 stamp 전달 포함)
+            # 2. 2D LiDAR /scan 데이터로 Distance 교차 검증
             cls_h = 1.7 if class_name == 'person' else 1.8
             cam_z = self._refine_with_scan(cam_x, cam_y, cam_z, stamp, bbox_height_m=cls_h)
 
-            # 3D 위치 산출 성공 시에만 활성 트랙 ID 목록에 등록
             active_track_ids.add(track_id)
 
+            # 3. TF2로 camera_link → base_link 좌표 변환
             p_cam = PointStamped()
-            p_cam.header.frame_id = self.camera_frame_id  # camera_link
+            p_cam.header.frame_id = self.camera_frame_id
             p_cam.point.x = cam_x
             p_cam.point.y = cam_y
             p_cam.point.z = cam_z
 
-            # 3. TF2로 camera_link → base_link 좌표 변환
-            p_base = do_transform_point(p_cam, tf_transform)
+            try:
+                p_base = do_transform_point(p_cam, tf_transform)
+            except Exception as e:
+                self.get_logger().warning(f'Camera -> Base transform failed: {e}')
+                continue
+
             base_x = p_base.point.x
             base_y = p_base.point.y
             base_z = p_base.point.z
 
-            # 4. DeepSORT track_id 기준 EKF 추적
-            if track_id not in self.track_ekf_map:
-                self.track_ekf_map[track_id] = EKF3D(base_x, base_y, stamp)
+            # 4. DeepSORT track_id 기준 KF 추적
+            if track_id not in self.track_kf_map:
+                self.track_kf_map[track_id] = KalmanFilter2D(base_x, base_y, stamp)
 
-            ekf = self.track_ekf_map[track_id]
-            ekf.predict(stamp)
-            ekf.update(base_x, base_y)
+            kf = self.track_kf_map[track_id]
+            kf.predict(stamp)
+            kf.update(base_x, base_y)
 
-            est_x, est_y, est_vx, est_vy = ekf.state
+            est_x, est_y, est_vx, est_vy = kf.state
+
+            # 5. KF로 보정된 base_link 위치를 map 좌표로 변환
+            position_map = None
+            p_base_map = PointStamped()
+            p_base_map.header.frame_id = self.target_frame
+            p_base_map.header.stamp = lookup_time.to_msg()
+            p_base_map.point.x = float(est_x)
+            p_base_map.point.y = float(est_y)
+            p_base_map.point.z = float(base_z)
+
+            try:
+                tf_base_to_map = self.tf_buffer.lookup_transform(
+                    self.map_frame,
+                    self.target_frame,
+                    lookup_time,
+                    timeout=rclpy.duration.Duration(seconds=0.05)
+                )
+                p_map = do_transform_point(p_base_map, tf_base_to_map)
+                position_map = [round(float(p_map.point.x), 2), round(float(p_map.point.y), 2), round(float(p_map.point.z), 2)]
+            except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+                try:
+                    tf_base_to_map = self.tf_buffer.lookup_transform(self.map_frame, self.target_frame, rclpy.time.Time())
+                    p_map = do_transform_point(p_base_map, tf_base_to_map)
+                    position_map = [round(float(p_map.point.x), 2), round(float(p_map.point.y), 2), round(float(p_map.point.z), 2)]
+                except Exception as e:
+                    self.get_logger().debug(f'Base -> Map TF unavailable: {e}')
 
             item_3d = {
                 'track_id': track_id,
                 'class_name': class_name,
+                'confidence': confidence,
                 'position': [round(float(est_x), 2), round(float(est_y), 2), round(float(base_z), 2)],
+                'position_map': position_map,
                 'velocity': [round(float(est_vx), 2), round(float(est_vy), 2)],
                 'ppe_ok': ppe_ok,
-                'confidence': confidence,
                 'stamp': stamp
             }
 
@@ -372,40 +355,28 @@ class FusionNode3D(Node):
         else:
             presence_state = 'NONE'
 
-        # 오랫동안 미감지된 Track 정리 (미감지 프레임에서도 EKF predict 수행하여 위치 추정 유지)
-        for trk_id in list(self.track_ekf_map.keys()):
+        # 오랫동안 미감지된 Track 정리
+        for trk_id in list(self.track_kf_map.keys()):
             if trk_id not in active_track_ids:
-                self.track_ekf_map[trk_id].predict(stamp)
-                self.track_ekf_map[trk_id].miss_count += 1
-                if self.track_ekf_map[trk_id].miss_count > 10:
-                    del self.track_ekf_map[trk_id]
+                self.track_kf_map[trk_id].predict(stamp)
+                self.track_kf_map[trk_id].miss_count += 1
+                if self.track_kf_map[trk_id].miss_count > 10:
+                    del self.track_kf_map[trk_id]
 
-        # ── 1. /tracks_3d 토픽 발행 ────────────────────────────────────
+        # ── /tracks_3d 토픽 발행 ──────────────────────────────────────
         json_msg = String()
         json_msg.data = json.dumps({
-            'header': {
-                'stamp': stamp,
-                'frame_id': self.target_frame
-            },
-            'class_presence': {
-                'person': has_person,
-                'forklift': has_forklift,
-                'state': presence_state
-            },
+            'header': {'stamp': stamp, 'frame_id': self.target_frame, 'map_frame': self.map_frame},
+            'class_presence': {'person': has_person, 'forklift': has_forklift, 'state': presence_state},
             'tracks': tracks_3d_payload
         }, ensure_ascii=False)
 
         self.pub_tracks_3d.publish(json_msg)
 
-        # ── 2. Debug Marker 발행 ──────────────────────────────────────
+        # ── Debug Marker 발행 ─────────────────────────────────────────
         self._publish_markers(tracks_3d_payload)
 
-    def _calculate_3d_from_depth(
-        self,
-        bbox: List[float],
-        depth_img: np.ndarray,
-        depth_encoding: str
-    ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    def _calculate_3d_from_depth(self, bbox: List[float], depth_img: np.ndarray, depth_encoding: str) -> Tuple[Optional[float], Optional[float], Optional[float]]:
         h_img, w_img = depth_img.shape[:2]
         xmin, ymin, xmax, ymax = map(int, bbox)
 
@@ -426,7 +397,7 @@ class FusionNode3D(Node):
         depth_roi = depth_img[ry1:ry2, rx1:rx2]
 
         if depth_encoding == '16UC1':
-            valid_depths = (depth_roi[depth_roi > 0] / 1000.0)
+            valid_depths = depth_roi[depth_roi > 0] / 1000.0
         else:
             valid_depths = depth_roi[~np.isnan(depth_roi) & (depth_roi > 0.1)]
 
@@ -446,11 +417,9 @@ class FusionNode3D(Node):
     def _refine_with_scan(self, cam_x: float, cam_y: float, cam_z: float, detection_stamp: float, bbox_height_m: float = 1.7) -> float:
         """2D LiDAR /scan 데이터로 Depth 센서 측정거리 보정 (높이 차이 검증 포함)"""
 
-        # 라이다 데이터가 없다면 그대로 리턴
         if self.latest_scan is None or self.latest_scan_stamp is None:
             return cam_z
 
-        # 라이다 데이터가 너무 오래되었다면 그대로 리턴
         if abs(detection_stamp - self.latest_scan_stamp) > 0.2:
             return cam_z
 
@@ -465,22 +434,16 @@ class FusionNode3D(Node):
         p_cam.point.z = float(cam_z)
 
         try:
-            tf_cam_to_scan = self.tf_buffer.lookup_transform(
-                scan_frame,
-                self.camera_frame_id,
-                rclpy.time.Time()
-            )
+            tf_cam_to_scan = self.tf_buffer.lookup_transform(scan_frame, self.camera_frame_id, rclpy.time.Time())
             p_scan_frame = do_transform_point(p_cam, tf_cam_to_scan)
-            
             lx = p_scan_frame.point.x
             ly = p_scan_frame.point.y
             lz = p_scan_frame.point.z
-
         except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
             return cam_z
 
-        # LiDAR 수평 스캔 평면(z≈0)이 물체 높이 범위(±half_h) 바깥이면 보정 패스
         half_h = bbox_height_m / 2.0
+
         if abs(lz) > half_h:
             return cam_z
 
@@ -492,7 +455,6 @@ class FusionNode3D(Node):
 
         idx = int((angle_rad - scan.angle_min) / scan.angle_increment)
 
-        # 주변 빔(Window Search: idx ± 2) 탐색으로 노이즈 및 결측치 방지
         valid_ranges = []
         window_size = 2
         min_idx = max(0, idx - window_size)
@@ -513,6 +475,7 @@ class FusionNode3D(Node):
 
     def _publish_markers(self, tracks: List[dict]) -> None:
         """RViz2 시각화 마커 발행 (DELETE Cleanup 포함)"""
+
         marker_array = MarkerArray()
         current_active_marker_ids = set()
 
@@ -574,10 +537,7 @@ class FusionNode3D(Node):
             text_marker.pose.position.z = float(pos[2]) + 1.2
 
             vx, vy = trk['velocity']
-            text_marker.text = (
-                f"ID:{trk['track_id']} ({trk['class_name']})\n"
-                f"V:{math.hypot(vx, vy):.1f}m/s"
-            )
+            text_marker.text = f"ID:{trk['track_id']} ({trk['class_name']})\nV:{math.hypot(vx, vy):.1f}m/s"
 
             text_marker.scale.z = 0.4
             text_marker.color.r = 1.0
@@ -589,6 +549,7 @@ class FusionNode3D(Node):
 
         # 삭제된 마커 Cleanup
         removed_ids = self.prev_active_marker_ids - current_active_marker_ids
+
         for m_id in removed_ids:
             del_marker = Marker()
             del_marker.header.frame_id = self.target_frame
