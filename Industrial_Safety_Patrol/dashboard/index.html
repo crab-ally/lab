@@ -805,6 +805,10 @@
       return icons[type] || icons.DEFAULT;
     }
 
+    function getEventKey(type, severity, trackId) {
+      return `${type}|${severity}|${trackId ?? -1}`;
+    }
+
     function FactoryMap({ robotX, robotY, heatPoints }) {
       const canvasRef = useRef(null);
       const heatDataRef = useRef(null);
@@ -818,14 +822,16 @@
       useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
+
         const ctx = canvas.getContext('2d');
         const W = canvas.width;
         const H = canvas.height;
 
         if (!heatDataRef.current) heatDataRef.current = new Float32Array(W * H);
+
         const data = heatDataRef.current;
 
-        for (let i = 0; i < data.length; i++)data[i] *= HEAT_DECAY;
+        for (let i = 0; i < data.length; i++) data[i] *= HEAT_DECAY;
 
         for (const pt of heatPoints) {
           const cx = Math.round(PAD + ((pt.x + MAP_W / 2) / MAP_W) * (W - PAD * 2));
@@ -837,9 +843,12 @@
             for (let dx = -r; dx <= r; dx++) {
               const dist = Math.sqrt(dx * dx + dy * dy);
               if (dist > r) continue;
+
               const nx = cx + dx;
               const ny = cy + dy;
+
               if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+
               const idx = ny * W + nx;
               data[idx] = Math.min(1, data[idx] + intensity * (1 - dist / r));
             }
@@ -847,11 +856,14 @@
         }
 
         ctx.clearRect(0, 0, W, H);
+
         const imgData = ctx.createImageData(W, H);
 
         for (let i = 0; i < data.length; i++) {
           const v = data[i];
+
           if (v < .02) continue;
+
           const idx4 = i * 4;
           imgData.data[idx4] = 255;
           imgData.data[idx4 + 1] = Math.round((1 - v) * 120);
@@ -900,7 +912,7 @@
 
             <line x1={rx} y1={ry} x2={rx} y2={ry - 14} stroke="var(--cyan)" strokeWidth="2" strokeLinecap="round" />
 
-            <text x={PAD + 4} y={SVG_H - PAD - 4} fill="var(--map-zone)" fontSize="8" fontFamily="JetBrains Mono">({robotX.toFixed(2)}, {robotY.toFixed(2)})</text>
+            <text x={PAD + 4} y={SVG_H - PAD - 4} fill="var(--map-zone)" fontSize="8" fontFamily="JetBrains Mono">MAP ({robotX.toFixed(2)}, {robotY.toFixed(2)})</text>
           </svg>
 
           <canvas ref={canvasRef} className="heatmap-canvas" width={SVG_W} height={SVG_H} style={{ opacity: .65 }} />
@@ -1059,8 +1071,11 @@
 
     function App() {
       const [darkMode, setDarkMode] = useState(() => {
-        try { return localStorage.getItem('safety-dashboard-theme') === 'dark'; }
-        catch { return false; }
+        try {
+          return localStorage.getItem('safety-dashboard-theme') === 'dark';
+        } catch {
+          return false;
+        }
       });
 
       const [connected, setConnected] = useState(false);
@@ -1074,6 +1089,7 @@
       const wsRef = useRef(null);
       const idRef = useRef(0);
       const robotRef = useRef({ x: 0, y: 0 });
+      const eventKeysRef = useRef(new Set());
 
       useEffect(() => {
         document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
@@ -1088,6 +1104,15 @@
       }, []);
 
       const addEvent = useCallback((type, severity, extra = {}) => {
+        const trackId = extra.trackId ?? -1;
+        const key = getEventKey(type, severity, trackId);
+
+        if (type !== 'SYSTEM' && eventKeysRef.current.has(key)) return false;
+
+        if (type !== 'SYSTEM') {
+          eventKeysRef.current.add(key);
+        }
+
         const newEv = {
           id: ++idRef.current,
           type,
@@ -1095,7 +1120,7 @@
           ts: extra.ts ?? Date.now(),
           x: extra.x ?? robotRef.current.x,
           y: extra.y ?? robotRef.current.y,
-          trackId: extra.trackId ?? -1,
+          trackId,
           subject: extra.subject ?? '',
           ttc: extra.ttc
         };
@@ -1108,6 +1133,8 @@
             ...prev.slice(0, 200)
           ]);
         }
+
+        return true;
       }, []);
 
       const handleMessage = useCallback((msg) => {
@@ -1119,8 +1146,8 @@
 
             addEvent(ev.event_type, ev.severity, {
               ts: ev.epoch ? ev.epoch * 1000 : Date.now(),
-              x: ev.robot_x ?? 0,
-              y: ev.robot_y ?? 0,
+              x: ev.map_x ?? ev.robot_x ?? 0,
+              y: ev.map_y ?? ev.robot_y ?? 0,
               trackId: ev.track_id ?? -1,
               subject: meta.target_subject ?? meta.class_name ?? '',
               ttc: meta.ttc
@@ -1131,23 +1158,30 @@
 
         if (msg.type === 'system' && msg.data) {
           if (msg.data.status && msg.data.status !== 'connected') {
-            addEvent('SYSTEM', 'INFO', { subject: `${msg.data.server || 'Server'}: ${msg.data.status}` });
+            addEvent('SYSTEM', 'INFO', {
+              subject: `${msg.data.server || 'Server'}: ${msg.data.status}`
+            });
           }
           return;
         }
 
         const { topic, data } = msg;
+
         if (!topic || !data) return;
 
         if (topic === 'odom') {
           const newPos = {
-            x: data.x ?? 0,
-            y: data.y ?? 0,
+            x: data.map_x ?? data.x ?? 0,
+            y: data.map_y ?? data.y ?? 0,
             vx: data.vx ?? 0,
             vy: data.vy ?? 0
           };
 
-          robotRef.current = { x: newPos.x, y: newPos.y };
+          robotRef.current = {
+            x: newPos.x,
+            y: newPos.y
+          };
+
           setRobot(newPos);
         }
         else if (topic === 'ttc_alerts') {
@@ -1160,8 +1194,8 @@
               ttc: data.ttc ?? data.min_ttc,
               trackId: data.target_track_id,
               subject: data.target_subject,
-              x: data.position?.[0] ?? robotRef.current.x,
-              y: data.position?.[1] ?? robotRef.current.y
+              x: data.map_position?.[0] ?? data.position?.[0] ?? robotRef.current.x,
+              y: data.map_position?.[1] ?? data.position?.[1] ?? robotRef.current.y
             });
           }
           else if (rl === 'NORMAL' || rl === 'SAFE') {
@@ -1176,8 +1210,8 @@
               addEvent('PPE_VIOLATION', 'WARNING', {
                 trackId: t.track_id,
                 subject: 'Worker (No Helmet/Vest)',
-                x: t.position?.[0] ?? robotRef.current.x,
-                y: t.position?.[1] ?? robotRef.current.y
+                x: t.map_position?.[0] ?? t.position?.[0] ?? robotRef.current.x,
+                y: t.map_position?.[1] ?? t.position?.[1] ?? robotRef.current.y
               });
             }
           }
@@ -1189,8 +1223,8 @@
             addEvent('FIRE_DETECTION', 'WARNING', {
               trackId: f.fire_id,
               subject: 'Fire/Smoke Detected',
-              x: f.position?.[0] ?? robotRef.current.x,
-              y: f.position?.[1] ?? robotRef.current.y
+              x: f.map_position?.[0] ?? f.position?.[0] ?? robotRef.current.x,
+              y: f.map_position?.[1] ?? f.position?.[1] ?? robotRef.current.y
             });
           }
         }
@@ -1199,8 +1233,8 @@
             addEvent('FALL_DETECTION', 'WARNING', {
               trackId: data.track_id,
               subject: 'Worker Fallen',
-              x: data.position?.[0] ?? robotRef.current.x,
-              y: data.position?.[1] ?? robotRef.current.y
+              x: data.map_position?.[0] ?? data.position?.[0] ?? robotRef.current.x,
+              y: data.map_position?.[1] ?? data.position?.[1] ?? robotRef.current.y
             });
           }
         }
@@ -1281,7 +1315,7 @@
             <div className="card map-card">
               <div className="card-header">
                 <span className="card-title">🗺️ Factory Map &amp; Robot Position</span>
-                <span className="badge cyan">LIVE</span>
+                <span className="badge cyan">MAP</span>
               </div>
 
               <div className="card-body" style={{ padding: 8 }}>
@@ -1308,7 +1342,7 @@
 
             <div className="card pos-card">
               <div className="card-header">
-                <span className="card-title">📍 Robot Odometry</span>
+                <span className="card-title">📍 Robot Map Position</span>
               </div>
 
               <div className="pos-body">
