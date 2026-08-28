@@ -4,11 +4,11 @@ Node 3: TTC (Time-To-Collision) Node
 
 Subscribes:
     - /tracks_3d (std_msgs/msg/String - JSON Format from Node 2)
-    - /odom (nav_msgs/msg/Odometry) - 로봇의 현재 속도 측정용
+    - /odom (nav_msgs/msg/Odometry)  로봇의 현재 속도 측정용
 
 Publishes:
     - /ttc_alerts (std_msgs/msg/String - JSON Format)
-      [Fields: min_ttc, risk_level, target_track_id, target_subject, timestamp]
+      [Fields: timestamp, risk_level, target_track_id, target_subject, ttc]
 """
 
 import json
@@ -490,7 +490,7 @@ class TTCNode(Node):
                         'risk_level': r_level,
                         'target_track_id': pair_track_id[subject],
                         'target_subject': subject,
-                        'min_ttc': round(ttc, 2)
+                        'ttc': round(ttc, 2)
                     })
 
             if active_alerts:
@@ -541,7 +541,7 @@ class TTCNode(Node):
                     if min_ttc != float('inf')
                     else 'NONE'
                 ),
-                'min_ttc': round(min_ttc, 2) if min_ttc != float('inf') else -1.0
+                'ttc': round(min_ttc, 2) if min_ttc != float('inf') else -1.0
             }
             self.latest_alert_payload = alert_payload
             json_msg = String()
