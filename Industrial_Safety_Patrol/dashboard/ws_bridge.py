@@ -2,19 +2,26 @@
 """
 WebSocket Bridge: ROS2 → WebSocket
 
-ROS2 토픽들을 수신하여 연결된 모든 WebSocket 클라이언트에 JSON으로 브로드캐스트합니다.
+ROS2 안전 데이터를 수신하여 연결된 모든 WebSocket 클라이언트에 JSON으로 브로드캐스트합니다.
 
 Subscribed Topics:
-    /ttc_alerts     (std_msgs/msg/String)   TTC 충돌 경보
-    /detections_2d  (std_msgs/msg/String)   YOLO 탐지 결과
-    /odom           (nav_msgs/msg/Odometry) 로봇 위치
-    /tracks_3d      (std_msgs/msg/String)   3D 추적 정보
+    - /odom           (nav_msgs/msg/Odometry)   로봇 위치/속도
 
-WebSocket Server: ws://0.0.0.0:8765
+    1. Fire Detection
+      - /fire_tracks_3d (std_msgs/msg/String)   화재 3D 위치
 
-Usage:
-    # ROS2 환경 소스 후 실행
-    python3 /workspace/dashboard/ws_bridge.py
+    2. PPE Detection
+      - /tracks_3d      (std_msgs/msg/String)   3D 객체 추적 정보
+
+    3. TTC Detection
+      - /tracks_3d
+      - /ttc_alerts     (std_msgs/msg/String)   TTC 충돌 경보
+
+    4. FallDetection
+      - /fall_alarm     (std_msgs/msg/String)   쓰러짐 경보
+
+WebSocket Server:
+    ws://0.0.0.0:8765
 """
 
 import asyncio
@@ -34,38 +41,37 @@ try:
     import websockets
     from websockets.server import WebSocketServerProtocol
 except ImportError:
-    raise RuntimeError(
-        'websockets 패키지가 필요합니다: pip install websockets'
-    )
+    raise RuntimeError('websockets 패키지가 필요합니다: pip install websockets')
 
-
-# ════════════════════════════════════════════════════════════════════════════
-# Global state: ROS2 스레드 ↔ asyncio 스레드 공유
-# ════════════════════════════════════════════════════════════════════════════
 
 _clients: Set['WebSocketServerProtocol'] = set()
 _clients_lock = threading.Lock()
-_loop: asyncio.AbstractEventLoop | None = None  # asyncio 이벤트 루프 (WebSocket 스레드)
+_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _broadcast(payload: dict) -> None:
-    """ROS2 콜백에서 모든 WebSocket 클라이언트에 메시지를 전송합니다."""
     global _loop, _clients
+
     if _loop is None:
         return
-    message = json.dumps(payload)
+
+    message = json.dumps(payload, ensure_ascii=False)
+
     with _clients_lock:
         targets = set(_clients)
+
     if not targets:
         return
 
     async def _send_all():
         disconnected = set()
+
         for ws in targets:
             try:
                 await ws.send(message)
             except Exception:
                 disconnected.add(ws)
+
         if disconnected:
             with _clients_lock:
                 _clients.difference_update(disconnected)
@@ -73,127 +79,173 @@ def _broadcast(payload: dict) -> None:
     asyncio.run_coroutine_threadsafe(_send_all(), _loop)
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# ROS2 Bridge Node
-# ════════════════════════════════════════════════════════════════════════════
-
 class WsBridgeNode(Node):
+
     def __init__(self) -> None:
         super().__init__('ws_bridge_node')
 
-        sensor_qos = QoSProfile(
-            depth=1,
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            durability=DurabilityPolicy.VOLATILE,
-        )
-        reliable_qos = QoSProfile(
-            depth=10,
-            reliability=ReliabilityPolicy.RELIABLE,
-            durability=DurabilityPolicy.VOLATILE,
-        )
+        # ============================================================
+        # QoS
+        # ============================================================
 
-        self.create_subscription(String, '/ttc_alerts',    self._ttc_cb,        reliable_qos)
-        self.create_subscription(String, '/detections_2d', self._detections_cb,  reliable_qos)
-        self.create_subscription(String, '/tracks_3d',     self._tracks3d_cb,   reliable_qos)
-        self.create_subscription(Odometry, '/odom',        self._odom_cb,       sensor_qos)
+        sensor_qos = QoSProfile(depth=1,reliability=ReliabilityPolicy.BEST_EFFORT,durability=DurabilityPolicy.VOLATILE)
+        reliable_qos = QoSProfile(depth=10,reliability=ReliabilityPolicy.RELIABLE,durability=DurabilityPolicy.VOLATILE)
+
+        # ============================================================
+        # Subscribed Topics
+        # ============================================================
+
+        # Robot Odometry
+        self.create_subscription(Odometry,'/odom',self._odom_cb,sensor_qos)
+
+        # Fire Detection
+        self.create_subscription(String,'/fire_tracks_3d',self._fire_tracks3d_cb,reliable_qos)
+
+        # PPE Detection / TTC Detection
+        self.create_subscription(String,'/tracks_3d',self._tracks3d_cb,reliable_qos)
+
+        # TTC Detection
+        self.create_subscription(String,'/ttc_alerts',self._ttc_cb,reliable_qos)
+
+        # Fall Detection
+        self.create_subscription(String,'/fall_alarm',self._fall_alarm_cb,reliable_qos)
 
         self.get_logger().info('[WsBridge] ROS2 subscriptions active.')
+        self.get_logger().info('[WsBridge] Topics: /odom /fire_tracks_3d /tracks_3d /ttc_alerts /fall_alarm')
 
-    # ── Callbacks ─────────────────────────────────────────────────────────
+    # ================================================================
+    # String Topic Common Handler
+    # ================================================================
 
-    def _ttc_cb(self, msg: String) -> None:
+    def _string_cb(self,msg: String,topic: str) -> None:
         try:
             data = json.loads(msg.data)
-        except json.JSONDecodeError:
-            return
-        _broadcast({'topic': 'ttc_alerts', 'data': data, 'ts': time.time()})
+        except (json.JSONDecodeError,TypeError):
+            data = msg.data
 
-    def _detections_cb(self, msg: String) -> None:
-        try:
-            data = json.loads(msg.data)
-        except (json.JSONDecodeError, TypeError):
-            return
-        _broadcast({'topic': 'detections_2d', 'data': data, 'ts': time.time()})
+        _broadcast({
+            'topic': topic,
+            'data': data,
+            'ts': time.time()
+        })
 
-    def _tracks3d_cb(self, msg: String) -> None:
-        try:
-            data = json.loads(msg.data)
-        except (json.JSONDecodeError, TypeError):
-            return
-        _broadcast({'topic': 'tracks_3d', 'data': data, 'ts': time.time()})
+    # ================================================================
+    # Fire Detection
+    # ================================================================
 
-    def _odom_cb(self, msg: Odometry) -> None:
-        payload = {
-            'x': msg.pose.pose.position.x,
-            'y': msg.pose.pose.position.y,
-            'z': msg.pose.pose.position.z,
-            'vx': msg.twist.twist.linear.x,
-            'vy': msg.twist.twist.linear.y,
+    def _fire_tracks3d_cb(self,msg: String) -> None:
+        self._string_cb(msg,'fire_tracks_3d')
+
+    # ================================================================
+    # PPE Detection / TTC Detection
+    # ================================================================
+
+    def _tracks3d_cb(self,msg: String) -> None:
+        self._string_cb(msg,'tracks_3d')
+
+    # ================================================================
+    # TTC Detection
+    # ================================================================
+
+    def _ttc_cb(self,msg: String) -> None:
+        self._string_cb(msg,'ttc_alerts')
+
+    # ================================================================
+    # Fall Detection
+    # ================================================================
+
+    def _fall_alarm_cb(self,msg: String) -> None:
+        self._string_cb(msg,'fall_alarm')
+
+    # ================================================================
+    # Robot Odometry
+    # ================================================================
+
+    def _odom_cb(self,msg: Odometry) -> None:
+        data = {
+            'x': float(msg.pose.pose.position.x),
+            'y': float(msg.pose.pose.position.y),
+            'z': float(msg.pose.pose.position.z),
+            'vx': float(msg.twist.twist.linear.x),
+            'vy': float(msg.twist.twist.linear.y)
         }
-        _broadcast({'topic': 'odom', 'data': payload, 'ts': time.time()})
+
+        _broadcast({
+            'topic': 'odom',
+            'data': data,
+            'ts': time.time()
+        })
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# WebSocket Server
-# ════════════════════════════════════════════════════════════════════════════
+# ====================================================================
+# WebSocket Handler
+# ====================================================================
 
 async def _ws_handler(websocket: 'WebSocketServerProtocol') -> None:
-    """새 WebSocket 클라이언트 연결 처리."""
     with _clients_lock:
         _clients.add(websocket)
+        client_count = len(_clients)
+
     remote = websocket.remote_address
-    print(f'[WsBridge] Client connected: {remote}  (total={len(_clients)})')
+    print(f'[WsBridge] Client connected: {remote} (total={client_count})')
+
     try:
-        # 연결 인사 메시지
         await websocket.send(json.dumps({
             'topic': 'system',
-            'data': {'status': 'connected', 'server': 'WsBridge v1.0'},
-            'ts': time.time(),
-        }))
-        # 클라이언트가 끊길 때까지 대기
+            'data': {
+                'status': 'connected',
+                'server': 'WsBridge v1.0'
+            },
+            'ts': time.time()
+        },ensure_ascii=False))
+
         await websocket.wait_closed()
+
     finally:
         with _clients_lock:
             _clients.discard(websocket)
-        print(f'[WsBridge] Client disconnected: {remote}  (total={len(_clients)})')
+            client_count = len(_clients)
+
+        print(f'[WsBridge] Client disconnected: {remote} (total={client_count})')
 
 
-async def _run_ws_server(host: str, port: int) -> None:
+# ====================================================================
+# WebSocket Server
+# ====================================================================
+
+async def _run_ws_server(host: str,port: int) -> None:
     global _loop
+
     _loop = asyncio.get_running_loop()
+
     print(f'[WsBridge] WebSocket server listening on ws://{host}:{port}')
-    async with websockets.serve(_ws_handler, host, port):
-        await asyncio.Future()  # run forever
+
+    async with websockets.serve(_ws_handler,host,port):
+        await asyncio.Future()
 
 
-def _start_ws_thread(host: str, port: int) -> None:
-    """별도 스레드에서 asyncio 이벤트 루프를 실행합니다."""
-    asyncio.run(_run_ws_server(host, port))
+def _start_ws_thread(host: str,port: int) -> None:
+    asyncio.run(_run_ws_server(host,port))
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# Entry Point
-# ════════════════════════════════════════════════════════════════════════════
+# ====================================================================
+# Main
+# ====================================================================
 
 def main() -> None:
-    ws_host = os.environ.get('WS_HOST', '0.0.0.0')
-    ws_port = int(os.environ.get('WS_PORT', 8765))
+    ws_host = os.environ.get('WS_HOST','0.0.0.0')
+    ws_port = int(os.environ.get('WS_PORT','8765'))
 
-    # 1. WebSocket 서버를 별도 스레드에서 시작
-    ws_thread = threading.Thread(
-        target=_start_ws_thread,
-        args=(ws_host, ws_port),
-        daemon=True,
-    )
+    ws_thread = threading.Thread(target=_start_ws_thread,args=(ws_host,ws_port),daemon=True)
     ws_thread.start()
 
-    # 2. ROS2 노드 실행
     rclpy.init()
     node = WsBridgeNode()
+
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        node.get_logger().info('[WsBridge] stopped.')
     finally:
         node.destroy_node()
         rclpy.shutdown()
