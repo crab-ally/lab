@@ -30,25 +30,29 @@
 # 사람의 쓰러짐 감지(Yolo Pose 기반)
 7. docker compose up fall_detection
 
+
 # ==================== Data processing ====================
+
+# PostgreSQL
 8. cd ros2_ws && colcon build --packages-select event_logger_pkg
 8-1. docker compose up event_logger
 8-2. docker compose exec db psql -U admin -d patrol_db
 8-3. SELECT id,timestamp,event_type,severity,track_id,metadata FROM safety_events ORDER BY id DESC;
 8-4. \q
 
-9. docker compose up ws_bridge
+# ws_bridge + dashboard
+9. docker compose --profile dashboard up
+9-1. http://localhost:8080
 
-10. docker compose up dashboard
 
 # ==================== 보조기능 ====================
 
 # 로봇 수동 조종 (Teleop)
-11. docker compose run --rm teleop
-11-1. 전진(i), 우회전(l), 좌회전(j), 정지(k)
+10. docker compose run --rm teleop
+10-1. 전진(i), 우회전(l), 좌회전(j), 정지(k)
 
 # 봇 자동 탐색 주행 실행 + 지도 저장
-12. docker compose run --rm auto_explore_map
+11. docker compose run --rm auto_explore_map
 
 
 # ==================== yolo train ====================
