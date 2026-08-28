@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="ko">
 <!-- html 수정 시 dashboard image 재빌드 필요 -->
@@ -891,26 +892,38 @@
             ))}
 
             {[
-              { x: -8, y: 5, label: 'Zone A' },
-              { x: 4, y: 5, label: 'Zone B' },
-              { x: -8, y: -4, label: 'Zone C' },
-              { x: 4, y: -4, label: 'Zone D' }
+              { x: -5.5, y: 5.5, label: 'Inbound', fill: 'rgba(235, 185, 20, 0.30)', stroke: 'rgba(235, 185, 20, 0.65)' },
+              { x: 5.5, y: 5.5, label: 'Warehouse', fill: 'rgba(235, 185, 20, 0.30)', stroke: 'rgba(235, 185, 20, 0.65)' },
+              { x: -5.5, y: -5.5, label: 'Production', fill: 'rgba(235, 185, 20, 0.30)', stroke: 'rgba(235, 185, 20, 0.65)' },
+              { x: 5.5, y: -5.5, label: 'Utility', fill: 'rgba(230, 50, 50, 0.20)', stroke: 'rgba(230, 50, 50, 0.55)' }
             ].map(z => (
-              <text key={z.label} x={scaleX(z.x)} y={scaleY(z.y)} fill="var(--map-zone)" fontSize="9" fontFamily="Inter">{z.label}</text>
-            ))}
-
-            {[
-              { x: -6, y: 2, w: 3, h: 2 },
-              { x: 3, y: 1, w: 2, h: 3 },
-              { x: -2, y: -3, w: 4, h: 2 }
-            ].map((obs, i) => (
-              <rect key={i} x={scaleX(obs.x)} y={scaleY(obs.y + obs.h)} width={(obs.w / MAP_W) * (SVG_W - PAD * 2)} height={(obs.h / MAP_H) * (SVG_H - PAD * 2)} fill="var(--map-obstacle)" stroke="var(--map-border)" strokeWidth=".5" rx="2" />
+              <g key={z.label}>
+                <rect
+                  x={scaleX(z.x - 3.5)}
+                  y={scaleY(z.y + 3.5)}
+                  width={(7 / MAP_W) * (SVG_W - PAD * 2)}
+                  height={(7 / MAP_H) * (SVG_H - PAD * 2)}
+                  fill={z.fill}
+                  stroke={z.stroke}
+                  strokeWidth="1"
+                />
+                <text
+                  x={scaleX(z.x)}
+                  y={scaleY(z.y)}
+                  fill={z.stroke}
+                  fontSize="9"
+                  fontFamily="Inter"
+                  textAnchor="middle"
+                >
+                  {z.label}
+                </text>
+              </g>
             ))}
 
             <circle cx={rx} cy={ry} r="10" fill="rgba(0,229,255,.15)" stroke="var(--cyan)" strokeWidth="1.5" className="robot-dot" />
             <circle cx={rx} cy={ry} r="5" fill="var(--cyan)" className="robot-dot" />
 
-            <line x1={rx} y1={ry} x2={rx} y2={ry - 14} stroke="var(--cyan)" strokeWidth="2" strokeLinecap="round" />
+            <line x1={rx} y1={ry} x2={rx + 14} y2={ry} stroke="var(--cyan)" strokeWidth="2" strokeLinecap="round" />
 
             <text x={PAD + 4} y={SVG_H - PAD - 4} fill="var(--map-zone)" fontSize="8" fontFamily="JetBrains Mono">MAP ({robotX.toFixed(2)}, {robotY.toFixed(2)})</text>
           </svg>
@@ -1082,13 +1095,13 @@
       const [wsUrl, setWsUrl] = useState(WS_URL);
       const [events, setEvents] = useState([]);
       const [ttcAlerts, setTtcAlerts] = useState([]);
-      const [robot, setRobot] = useState({ x: 0, y: 0, vx: 0, vy: 0 });
+      const [robot, setRobot] = useState({ x: -9, y: -9, vx: 0, vy: 0 });
       const [heatPoints, setHeatPoints] = useState([]);
       const [msgCount, setMsgCount] = useState(0);
 
       const wsRef = useRef(null);
       const idRef = useRef(0);
-      const robotRef = useRef({ x: 0, y: 0 });
+      const robotRef = useRef({ x: -9, y: -9 });
       const eventKeysRef = useRef(new Set());
 
       // /tracks_3d의 최신 데이터를 track_id 기준으로 저장
@@ -1435,3 +1448,4 @@
 </body>
 
 </html>
+```
