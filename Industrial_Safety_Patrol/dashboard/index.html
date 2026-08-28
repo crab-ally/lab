@@ -950,7 +950,7 @@
                   {ev.trackId >= 0 && <span>ID #{ev.trackId}</span>}
                   {ev.subject && <span>{ev.subject}</span>}
                   {ev.ttc !== undefined && <span>TTC: {fmtTtc(ev.ttc)}</span>}
-                  <span>({ev.x?.toFixed(1)}, {ev.y?.toFixed(1)})</span>
+                  <span>MAP ({ev.x?.toFixed(1)}, {ev.y?.toFixed(1)})</span>
                 </div>
               </div>
 
@@ -1330,7 +1330,7 @@
             <div className="card map-card">
               <div className="card-header">
                 <span className="card-title">🗺️ Factory Map &amp; Robot Position</span>
-                <span className="badge cyan">MAP</span>
+                <span className="badge cyan">FRAME: map</span>
               </div>
 
               <div className="card-body" style={{ padding: 8 }}>
@@ -1358,6 +1358,7 @@
             <div className="card pos-card">
               <div className="card-header">
                 <span className="card-title">📍 Robot Map Position</span>
+                <span className="badge cyan">FRAME: map</span>
               </div>
 
               <div className="pos-body">
