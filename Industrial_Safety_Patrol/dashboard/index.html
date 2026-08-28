@@ -12,9 +12,9 @@
     href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
     rel="stylesheet" />
 
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
 
   <style>
     *,
@@ -1091,6 +1091,9 @@
       const robotRef = useRef({ x: 0, y: 0 });
       const eventKeysRef = useRef(new Set());
 
+      // /tracks_3d의 최신 데이터를 track_id 기준으로 저장
+      const tracksRef = useRef(new Map());
+
       useEffect(() => {
         document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
 
@@ -1190,12 +1193,19 @@
           if (rl === 'EMERGENCY' || rl === 'WARNING') {
             setTtcAlerts([data]);
 
+            // TTC의 target_track_id로 /tracks_3d의 최신 좌표 검색
+            const targetTrackId = data.target_track_id;
+            const target = tracksRef.current.get(targetTrackId);
+
+            const targetX = target?.position_map?.[0] ?? target?.position?.[0] ?? robotRef.current.x;
+            const targetY = target?.position_map?.[1] ?? target?.position?.[1] ?? robotRef.current.y;
+
             addEvent('TTC_ALERT', rl, {
               ttc: data.ttc ?? data.min_ttc,
-              trackId: data.target_track_id,
+              trackId: targetTrackId,
               subject: data.target_subject,
-              x: data.map_position?.[0] ?? data.position?.[0] ?? robotRef.current.x,
-              y: data.map_position?.[1] ?? data.position?.[1] ?? robotRef.current.y
+              x: targetX,
+              y: targetY
             });
           }
           else if (rl === 'NORMAL' || rl === 'SAFE') {
@@ -1206,12 +1216,17 @@
           const tracks = data.tracks ?? (Array.isArray(data) ? data : []);
 
           for (const t of tracks) {
+            // /tracks_3d의 최신 track 정보를 저장
+            if (t.track_id !== undefined && t.track_id !== null) {
+              tracksRef.current.set(t.track_id, t);
+            }
+
             if (t.class_name === 'person' && t.ppe_ok === false) {
               addEvent('PPE_VIOLATION', 'WARNING', {
                 trackId: t.track_id,
                 subject: 'Worker (No Helmet/Vest)',
-                x: t.map_position?.[0] ?? t.position?.[0] ?? robotRef.current.x,
-                y: t.map_position?.[1] ?? t.position?.[1] ?? robotRef.current.y
+                x: t.position_map?.[0] ?? t.position?.[0] ?? robotRef.current.x,
+                y: t.position_map?.[1] ?? t.position?.[1] ?? robotRef.current.y
               });
             }
           }
@@ -1223,8 +1238,8 @@
             addEvent('FIRE_DETECTION', 'WARNING', {
               trackId: f.fire_id,
               subject: 'Fire/Smoke Detected',
-              x: f.map_position?.[0] ?? f.position?.[0] ?? robotRef.current.x,
-              y: f.map_position?.[1] ?? f.position?.[1] ?? robotRef.current.y
+              x: f.position_map?.[0] ?? f.position?.[0] ?? robotRef.current.x,
+              y: f.position_map?.[1] ?? f.position?.[1] ?? robotRef.current.y
             });
           }
         }
@@ -1233,8 +1248,8 @@
             addEvent('FALL_DETECTION', 'WARNING', {
               trackId: data.track_id,
               subject: 'Worker Fallen',
-              x: data.map_position?.[0] ?? data.position?.[0] ?? robotRef.current.x,
-              y: data.map_position?.[1] ?? data.position?.[1] ?? robotRef.current.y
+              x: data.position_map?.[0] ?? data.position?.[0] ?? robotRef.current.x,
+              y: data.position_map?.[1] ?? data.position?.[1] ?? robotRef.current.y
             });
           }
         }
