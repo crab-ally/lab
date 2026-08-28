@@ -60,6 +60,9 @@ services:
     networks:
       - patrol_network
 
+    profiles:
+      - robot
+
   # ===========================================================================
   # ROBOT CORE
   #   - robot_viewer
@@ -117,6 +120,9 @@ services:
 
     networks:
       - patrol_network
+
+    profiles:
+      - robot
 
   # ===========================================================================
   # RVIZ + SLAM
@@ -498,9 +504,17 @@ services:
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
       - WS_HOST=0.0.0.0
       - WS_PORT=8765
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=patrol_db
+      - DB_USER=admin
+      - DB_PASS=password123
 
     networks:
       - patrol_network
+
+    depends_on:
+      - db
 
 
   # ===========================================================================
