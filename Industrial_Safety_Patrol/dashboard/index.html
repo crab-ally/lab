@@ -772,7 +772,7 @@
     const WS_URL = `ws://${location.hostname}:8765`;
     const MAX_FEED = 80;
     const MAP_W = 20;
-    const MAP_H = 15;
+    const MAP_H = 20;
     const HEAT_DECAY = .997;
 
     function fmtTime(epochMs) {
@@ -813,8 +813,8 @@
       const canvasRef = useRef(null);
       const heatDataRef = useRef(null);
 
-      const SVG_W = 370;
-      const SVG_H = 270;
+      const SVG_W = 400;
+      const SVG_H = 400;
       const PAD = 10;
       const scaleX = x => PAD + ((x + MAP_W / 2) / MAP_W) * (SVG_W - PAD * 2);
       const scaleY = y => PAD + ((MAP_H / 2 - y) / MAP_H) * (SVG_H - PAD * 2);
