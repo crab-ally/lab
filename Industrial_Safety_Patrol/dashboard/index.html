@@ -326,12 +326,14 @@
     }
     function eventIcon(type) {
       const icons = {
-        TTC_ALERT:     '⚠️',
-        PPE_VIOLATION: '🦺',
-        FIRE:          '🔥',
-        FALL:          '🧍',
-        SYSTEM:        '🔌',
-        DEFAULT:       '📡',
+        TTC_ALERT:      '⚠️',
+        PPE_VIOLATION:  '🦺',
+        FIRE_DETECTION: '🔥',
+        FIRE:           '🔥',
+        FALL_DETECTION: '🧍',
+        FALL:           '🧍',
+        SYSTEM:         '🔌',
+        DEFAULT:        '📡',
       };
       return icons[type] || icons.DEFAULT;
     }
@@ -523,6 +525,8 @@
         { label: 'WARNING',   count: warnings, total, color: 'var(--orange)' },
         { label: 'TTC_ALERT', count: byType['TTC_ALERT'] || 0, total, color: 'var(--purple)' },
         { label: 'PPE_VIOL',  count: byType['PPE_VIOLATION'] || 0, total, color: 'var(--cyan)' },
+        { label: 'FIRE',      count: (byType['FIRE_DETECTION'] || 0) + (byType['FIRE'] || 0), total, color: 'var(--red-dk)' },
+        { label: 'FALL',      count: (byType['FALL_DETECTION'] || 0) + (byType['FALL'] || 0), total, color: 'var(--orange)' },
       ];
 
       return (
@@ -586,7 +590,7 @@
           {ttcAlerts.slice(0, 6).map((a, i) => (
             <div key={i} className={`ttc-item ${a.risk_level}`}>
               <div className="ttc-label">TTC</div>
-              <div className={`ttc-value ${a.risk_level}`}>{fmtTtc(a.min_ttc)}</div>
+              <div className={`ttc-value ${a.risk_level}`}>{fmtTtc(a.ttc ?? a.min_ttc)}</div>
               <div className="ttc-subject">{a.target_subject || 'Unknown'}</div>
               <div className="ttc-label" style={{ marginTop: 2 }}>#{a.target_track_id}</div>
             </div>
@@ -620,13 +624,15 @@
       const [msgCount, setMsgCount]     = useState(0);
       const wsRef    = useRef(null);
       const idRef    = useRef(0);
+      const robotRef = useRef({ x: 0, y: 0 });
 
       const addEvent = useCallback((type, severity, extra = {}) => {
         const newEv = {
           id: ++idRef.current,
           type, severity,
-          ts: Date.now(),
-          x: extra.x ?? 0, y: extra.y ?? 0,
+          ts: extra.ts ?? Date.now(),
+          x: extra.x ?? robotRef.current.x,
+          y: extra.y ?? robotRef.current.y,
           trackId: extra.trackId ?? -1,
           subject: extra.subject ?? '',
           ttc: extra.ttc,
@@ -634,7 +640,7 @@
         setEvents(prev => [newEv, ...prev].slice(0, MAX_FEED));
         if (severity === 'EMERGENCY' || severity === 'WARNING') {
           setHeatPoints(prev => [
-            { x: newEv.x, y: newEv.y, severity, ts: Date.now() },
+            { x: newEv.x, y: newEv.y, severity, ts: newEv.ts },
             ...prev.slice(0, 200),
           ]);
         }
@@ -666,31 +672,88 @@
       }, [wsUrl, addEvent]);
 
       const handleMessage = useCallback((msg) => {
+        if (!msg) return;
+
+        // 1. DB Event History 수신
+        if (msg.type === 'event_history' && Array.isArray(msg.data)) {
+          for (const ev of [...msg.data].reverse()) {
+            const meta = ev.metadata || {};
+            addEvent(ev.event_type, ev.severity, {
+              ts: ev.epoch ? ev.epoch * 1000 : Date.now(),
+              x: ev.robot_x ?? 0,
+              y: ev.robot_y ?? 0,
+              trackId: ev.track_id ?? -1,
+              subject: meta.target_subject ?? meta.class_name ?? '',
+              ttc: meta.ttc,
+            });
+          }
+          return;
+        }
+
+        // 2. System Status
+        if (msg.type === 'system' && msg.data) {
+          if (msg.data.status && msg.data.status !== 'connected') {
+            addEvent('SYSTEM', 'INFO', { subject: `${msg.data.server || 'Server'}: ${msg.data.status}` });
+          }
+          return;
+        }
+
+        // 3. Realtime Topics
         const { topic, data } = msg;
         if (!topic || !data) return;
 
         if (topic === 'odom') {
-          setRobot({ x: data.x ?? 0, y: data.y ?? 0, vx: data.vx ?? 0, vy: data.vy ?? 0 });
+          const newPos = { x: data.x ?? 0, y: data.y ?? 0, vx: data.vx ?? 0, vy: data.vy ?? 0 };
+          robotRef.current = { x: newPos.x, y: newPos.y };
+          setRobot(newPos);
         }
         else if (topic === 'ttc_alerts') {
           const rl = (data.risk_level ?? 'SAFE').toUpperCase();
-          if (rl !== 'SAFE') {
+          if (rl === 'EMERGENCY' || rl === 'WARNING') {
             setTtcAlerts([data]);
-            addEvent('TTC_ALERT', rl === 'EMERGENCY' ? 'EMERGENCY' : 'WARNING', {
-              ttc: data.min_ttc,
+            addEvent('TTC_ALERT', rl, {
+              ttc: data.ttc ?? data.min_ttc,
               trackId: data.target_track_id,
               subject: data.target_subject,
+              x: data.position?.[0] ?? robotRef.current.x,
+              y: data.position?.[1] ?? robotRef.current.y,
             });
-          } else {
+          } else if (rl === 'NORMAL' || rl === 'SAFE') {
             setTtcAlerts([]);
           }
         }
-        else if (topic === 'detections_2d') {
-          const dets = Array.isArray(data) ? data : [];
-          for (const d of dets) {
-            if (d.class_name === 'person' && d.ppe_ok === false) {
-              addEvent('PPE_VIOLATION', 'WARNING', { trackId: d.track_id });
+        else if (topic === 'tracks_3d' || topic === 'detections_2d') {
+          const tracks = data.tracks ?? (Array.isArray(data) ? data : []);
+          for (const t of tracks) {
+            if (t.class_name === 'person' && t.ppe_ok === false) {
+              addEvent('PPE_VIOLATION', 'WARNING', {
+                trackId: t.track_id,
+                subject: 'Worker (No Helmet/Vest)',
+                x: t.position?.[0] ?? robotRef.current.x,
+                y: t.position?.[1] ?? robotRef.current.y,
+              });
             }
+          }
+        }
+        else if (topic === 'fire_tracks_3d') {
+          const fires = data.fires ?? (Array.isArray(data) ? data : []);
+          for (const f of fires) {
+            addEvent('FIRE_DETECTION', 'WARNING', {
+              trackId: f.fire_id,
+              subject: 'Fire/Smoke Detected',
+              x: f.position?.[0] ?? robotRef.current.x,
+              y: f.position?.[1] ?? robotRef.current.y,
+            });
+          }
+        }
+        else if (topic === 'fall_alarm') {
+          if (data.isfallen) {
+            addEvent('FALL_DETECTION', 'WARNING', {
+              trackId: data.track_id,
+              subject: 'Worker Fallen',
+              x: data.position?.[0] ?? robotRef.current.x,
+              y: data.position?.[1] ?? robotRef.current.y,
+            });
           }
         }
       }, [addEvent]);
