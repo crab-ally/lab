@@ -923,7 +923,7 @@
             <circle cx={rx} cy={ry} r="10" fill="rgba(0,229,255,.15)" stroke="var(--cyan)" strokeWidth="1.5" className="robot-dot" />
             <circle cx={rx} cy={ry} r="5" fill="var(--cyan)" className="robot-dot" />
 
-            <line x1={rx} y1={ry} x2={rx + 14} y2={ry} stroke="var(--cyan)" strokeWidth="2" strokeLinecap="round" />
+            <line x1={rx} y1={ry} x2={rx} y2={ry - 14} stroke="var(--cyan)" strokeWidth="2" strokeLinecap="round" />
 
             <text x={PAD + 4} y={SVG_H - PAD - 4} fill="var(--map-zone)" fontSize="8" fontFamily="JetBrains Mono">MAP ({robotX.toFixed(2)}, {robotY.toFixed(2)})</text>
           </svg>
@@ -1186,9 +1186,26 @@
         if (!topic || !data) return;
 
         if (topic === 'odom') {
+          const INIT_X = -9;
+          const INIT_Y = -9;
+          let mapX, mapY;
+
+          if (typeof data.map_x === 'number' && typeof data.map_y === 'number' && data.map_x !== data.x && Math.abs(data.map_x) > 3) {
+            mapX = data.map_x;
+            mapY = data.map_y;
+          } else {
+            // Raw odom 좌표 기준 (-9, -9) 초기 위치 반영
+            // 로봇 전진(data.x) -> map +y 방향으로 이동
+            // 로봇 횡이동(data.y) -> map -x 방향으로 이동
+            const odomX = data.x ?? 0;
+            const odomY = data.y ?? 0;
+            mapX = INIT_X - odomY;
+            mapY = INIT_Y + odomX;
+          }
+
           const newPos = {
-            x: data.map_x ?? data.x ?? 0,
-            y: data.map_y ?? data.y ?? 0,
+            x: mapX,
+            y: mapY,
             vx: data.vx ?? 0,
             vy: data.vy ?? 0
           };
