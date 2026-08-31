@@ -1,0 +1,21 @@
+<mujocoinclude>
+  <light name="world_light" pos="0 0 3" dir="0 0 -1" directional="true"/>
+  <geom name="floor" type="plane" size="3 3 0.1" material="groundplane"/>
+
+  <body name="table" pos="0 0.8 0.4">
+    <geom name="table_top" type="box" size="0.6 0.45 0.04" rgba="0.45 0.3 0.18 1"/>
+    <geom name="table_leg1" type="box" pos="0.5 0.35 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
+    <geom name="table_leg2" type="box" pos="-0.5 0.35 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
+    <geom name="table_leg3" type="box" pos="0.5 -0.35 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
+    <geom name="table_leg4" type="box" pos="-0.5 -0.35 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
+
+    <body name="pnp_object" pos="0.2 0.2 0.08">
+      <geom name="pnp_object_geom" type="box" size="0.08 0.06 0.08" rgba="0.1 0.5 0.9 1"/>
+    </body>
+  </body>
+
+  <!-- ================= [천장 카메라] ================= -->
+  <body name="ceiling_camera_link" pos="0 0.8 2.5">
+    <camera name="ceiling_camera" pos="0 0 0" fovy="58"/>
+  </body>
+</mujocoinclude>
