@@ -1,0 +1,5 @@
+numpy
+opencv-python
+scikit-learn
+scipy
+mujoco==3.6.0
