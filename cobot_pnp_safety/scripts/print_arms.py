@@ -3,7 +3,7 @@ import os
 import mujoco
 import numpy as np
 
-MODEL_PATH=os.path.normpath(os.path.join(os.path.dirname(__file__),"../mujoco_menagerie/franka_emika_panda/panda.xml"))
+MODEL_PATH=os.path.normpath(os.path.join(os.path.dirname(__file__),"../model/franka_emika_panda/panda.xml"))
 
 def name(model,obj_type,idx):
     n=mujoco.mj_id2name(model,obj_type,int(idx))
