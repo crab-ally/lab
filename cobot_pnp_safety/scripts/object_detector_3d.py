@@ -335,7 +335,7 @@ class Ransac3DObjectDetector(Node):
         valid_mask=(
             np.isfinite(depth_sampled)&
             (depth_sampled>0.3)&
-            (depth_sampled<3.5)
+            (depth_sampled<2.3)
         )
 
         z=depth_sampled[valid_mask]
@@ -651,7 +651,8 @@ class Ransac3DObjectDetector(Node):
                 valid_cluster_idx+=1
 
             delete_marker=Marker()
-
+            delete_marker.header.frame_id=target_frame
+            delete_marker.header.stamp=stamp
             delete_marker.action=(
                 Marker.DELETEALL
             )
