@@ -1,0 +1,23 @@
+# AI 에이전트 구현 문서
+antigravity_docs/
+
+# pycache
+ros2_ws/src/event_logger_pkg/event_logger_pkg/__pycache__/
+scripts/__pycache__/
+launch/__pycache__/
+
+# 데이터셋
+datasets/fall_dataset/images/
+datasets/fall_dataset/labels/
+datasets/fall_dataset/metadata.json
+
+datasets/ppe_forklift_dataset/images/
+datasets/ppe_forklift_dataset/labels/
+datasets/ppe_forklift_dataset/metadata.json
+
+# pkg
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+ros2_ws/src/perception_safety_pkg/perception_safety_pkg/__pycache__/
+ros2_ws/src/fire_detection_pkg/fire_detection_pkg/__pycache__/
