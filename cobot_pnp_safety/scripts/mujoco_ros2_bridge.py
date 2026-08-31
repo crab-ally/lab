@@ -158,7 +158,7 @@ class MjcfTfPublisher(Node):
             t.transform.translation.y=0.0
             t.transform.translation.z=0.0
 
-            q_optical=np.array([1.0,0.0,0.0,0.0],dtype=np.float64)
+            q_optical=np.array([0.0,1.0,0.0,0.0],dtype=np.float64)
 
             t.transform.rotation.x=float(q_optical[1])
             t.transform.rotation.y=float(q_optical[2])
