@@ -2,43 +2,46 @@
 """
 3D RANSAC + DBSCAN Object Detector for Franka Emika Panda
 
-Subscribed / Used:
-  - MuJoCo camera rendering: ceiling_camera (world: 0, 0.8, 2.5)
-  - TF: ceiling_camera_optical_frame -> link0
+Input:
+  - /camera/depth/image_raw      sensor_msgs/Image (32FC1, meters)
+  - /camera/depth/camera_info    sensor_msgs/CameraInfo
 
-Published:
-  - /object_pointcloud         (sensor_msgs/PointCloud2)    : RANSAC으로 테이블을 분리한 물체 점군 (optical frame)
-  - /target_object_pose        (geometry_msgs/PoseStamped)  : 첫 번째 검출 물체의 중심 위치 (link0 frame)
-  - /detected_objects_markers  (visualization_msgs/MarkerArray) : Bounding Box 및 좌표 텍스트 마커 (link0 frame)
+TF:
+  - ceiling_camera_optical_frame -> link0
+
+Output:
+  - /object_pointcloud
+  - /target_object_pose
+  - /detected_objects_markers
+
+중요:
+  - MuJoCo MjModel/MjData/Renderer를 생성하지 않음
+  - 브릿지가 발행한 Depth 이미지만 사용
+  - cv_bridge를 사용하지 않음
 """
-import math
-import argparse
-from pathlib import Path
+
 import numpy as np
 from sklearn.cluster import DBSCAN
 
 import rclpy
 from rclpy.node import Node
+
+from sensor_msgs.msg import Image, CameraInfo, PointCloud2, PointField
 from geometry_msgs.msg import PoseStamped, PointStamped
 from visualization_msgs.msg import Marker, MarkerArray
-from sensor_msgs.msg import PointCloud2, PointField
+
 from tf2_ros import Buffer, TransformListener
 import tf2_geometry_msgs
 
-import mujoco
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SCENE_XML = PROJECT_ROOT / "scene" / "panda_test.xml"
-MODEL_DIR = PROJECT_ROOT / "model" / "franka_emika_panda"
-
 
 def create_pointcloud2_msg(stamp, frame_id, points):
-    """numpy array (N, 3)를 ROS2 PointCloud2 메시지로 변환"""
+    points = np.asarray(points, dtype=np.float32).reshape(-1, 3)
+
     msg = PointCloud2()
     msg.header.stamp = stamp
     msg.header.frame_id = frame_id
     msg.height = 1
-    msg.width = len(points)
+    msg.width = int(len(points))
     msg.fields = [
         PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
         PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
@@ -46,16 +49,13 @@ def create_pointcloud2_msg(stamp, frame_id, points):
     ]
     msg.is_bigendian = False
     msg.point_step = 12
-    msg.row_step = 12 * len(points)
+    msg.row_step = 12 * int(len(points))
     msg.is_dense = True
-    msg.data = points.astype(np.float32).tobytes()
+    msg.data = points.tobytes()
     return msg
 
 
-def ransac_plane_segmentation(points, distance_threshold=0.015, max_iterations=150):
-    """
-    RANSAC 알고리즘으로 테이블 평면을 추정하고 평면 위의 물체 포인트들을 분리
-    """
+def ransac_plane_segmentation(points, distance_threshold=0.015, max_iterations=120):
     if len(points) < 50:
         return None, None, None
 
@@ -68,6 +68,7 @@ def ransac_plane_segmentation(points, distance_threshold=0.015, max_iterations=1
 
         v1 = p2 - p1
         v2 = p3 - p1
+
         normal = np.cross(v1, v2)
         norm_len = np.linalg.norm(normal)
 
@@ -75,28 +76,28 @@ def ransac_plane_segmentation(points, distance_threshold=0.015, max_iterations=1
             continue
 
         normal = normal / norm_len
-        d = -np.dot(normal, p1)
+        d = -float(np.dot(normal, p1))
 
         distances = np.abs(np.dot(points, normal) + d)
         inliers = np.where(distances < distance_threshold)[0]
 
         if len(inliers) > len(best_inliers):
             best_inliers = inliers
-            best_plane = (normal, d)
+            best_plane = (normal.copy(), d)
 
     if best_plane is None or len(best_inliers) < 50:
         return None, None, None
 
     normal, d = best_plane
 
-    # 카메라가 위에서 아래를 바라보므로 ROS optical Z 정렬
+    # Camera optical frame에서 테이블 위쪽 방향을 향하도록 normal 통일
     if normal[2] > 0:
         normal = -normal
         d = -d
 
     signed_distances = np.dot(points, normal) + d
 
-    # 테이블 상판 위 1.5cm ~ 40cm 사이의 점들을 물체 후보로 추출
+    # 테이블에서 1.5cm ~ 40cm 위에 있는 점만 물체 후보
     object_indices = np.where(
         (signed_distances > distance_threshold) &
         (signed_distances < 0.40)
@@ -104,260 +105,260 @@ def ransac_plane_segmentation(points, distance_threshold=0.015, max_iterations=1
 
     object_points = points[object_indices]
 
-    # (normal, d) 평면 방정식 객체 함께 반환
     return (normal, d), best_inliers, object_points
 
 
-def build_vfs():
-    """VFS 에셋 빌드"""
-    vfs_assets = {}
-
-    world_xml = PROJECT_ROOT / "world" / "test.xml"
-    if world_xml.exists():
-        vfs_assets["../world/test.xml"] = world_xml.read_bytes()
-
-    panda_xml = MODEL_DIR / "panda.xml"
-    if panda_xml.exists():
-        vfs_assets["../model/franka_emika_panda/panda.xml"] = panda_xml.read_bytes()
-
-    assets_dir = MODEL_DIR / "assets"
-    if assets_dir.exists():
-        for file_path in assets_dir.rglob("*"):
-            if not file_path.is_file():
-                continue
-            rel_path = file_path.relative_to(assets_dir)
-            vfs_path = f"assets/{str(rel_path).replace(chr(92),'/')}"
-            if vfs_path not in vfs_assets:
-                vfs_assets[vfs_path] = file_path.read_bytes()
-
-    return vfs_assets
-
-
-def load_mujoco_scene():
-    """MuJoCo 모델 로드"""
-    print(f"[INFO] Loading MJCF Scene: {SCENE_XML}")
-    try:
-        model = mujoco.MjModel.from_xml_path(str(SCENE_XML))
-        print("[INFO] MJCF loaded with from_xml_path.")
-        return model
-    except Exception as e:
-        print(f"[WARN] from_xml_path failed: {e}")
-
-    print("[INFO] Trying VFS fallback...")
-    xml_string = SCENE_XML.read_text(encoding="utf-8")
-    vfs_assets = build_vfs()
-    print(f"[INFO] VFS files: {len(vfs_assets)}")
-
-    try:
-        model = mujoco.MjModel.from_xml_string(xml_string, assets=vfs_assets)
-        print("[INFO] MJCF loaded with VFS.")
-        return model
-    except Exception as e:
-        print(f"[ERROR] MuJoCo VFS scene load failed: {e}")
-        for name in sorted(vfs_assets.keys()):
-            print(f"  - {name}")
-        raise
-
-
 class Ransac3DObjectDetector(Node):
-    def __init__(self, camera_name="ceiling_camera", img_width=640, img_height=480):
+    def __init__(self):
         super().__init__("ransac_3d_object_detector")
 
-        self.camera_name = camera_name
-        self.width = img_width
-        self.height = img_height
+        self.depth_topic = "/camera/depth/image_raw"
+        self.camera_info_topic = "/camera/depth/camera_info"
 
-        # TF 리스너
+        self.camera_optical_frame = "ceiling_camera_optical_frame"
+        self.target_frame = "link0"
+
+        self.width = 640
+        self.height = 480
+
+        self.fx = None
+        self.fy = None
+        self.cx = None
+        self.cy = None
+
+        self.camera_info_received = False
+        self.depth_received = False
+
+        self.latest_depth = None
+        self.latest_depth_stamp = None
+
+        self.stride = 2
+
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        # 토픽 퍼블리셔
-        self.pose_pub = self.create_publisher(PoseStamped, "/target_object_pose", 10)
-        self.marker_pub = self.create_publisher(MarkerArray, "/detected_objects_markers", 10)
-        self.cloud_pub = self.create_publisher(PointCloud2, "/object_pointcloud", 10)
+        self.pose_pub = self.create_publisher(
+            PoseStamped,
+            "/target_object_pose",
+            10
+        )
 
-        # MuJoCo 모델 및 렌더러 초기화
-        self.model = load_mujoco_scene()
-        self.data = mujoco.MjData(self.model)
-        self.renderer = mujoco.Renderer(self.model, height=self.height, width=self.width)
+        self.marker_pub = self.create_publisher(
+            MarkerArray,
+            "/detected_objects_markers",
+            10
+        )
 
-        cam_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, self.camera_name)
-        if cam_id == -1:
-            raise RuntimeError(f"Camera '{self.camera_name}' not found in MJCF scene.")
+        self.cloud_pub = self.create_publisher(
+            PointCloud2,
+            "/object_pointcloud",
+            10
+        )
 
-        self.cam_id = cam_id
-        fovy = float(self.model.cam_fovy[cam_id])
+        self.depth_sub = self.create_subscription(
+            Image,
+            self.depth_topic,
+            self.depth_callback,
+            10
+        )
 
-        # 카메라 내부 파라미터 계산 (Square pixel 모델: fx == fy)
-        self.fy = (self.height / 2.0) / math.tan(math.radians(fovy / 2.0))
-        self.fx = self.fy  # 픽셀 종횡비 1.0
-        self.cx = (self.width - 1) / 2.0
-        self.cy = (self.height - 1) / 2.0
+        self.camera_info_sub = self.create_subscription(
+            CameraInfo,
+            self.camera_info_topic,
+            self.camera_info_callback,
+            10
+        )
+
+        self.timer = self.create_timer(
+            0.1,
+            self.process_detection
+        )
 
         self.get_logger().info(
-            f"[INIT] Camera: '{self.camera_name}', fovy={fovy:.1f}deg, "
-            f"fx={self.fx:.2f}, fy={self.fy:.2f}, cx={self.cx:.2f}, cy={self.cy:.2f}"
+            "[INIT] 3D RANSAC + DBSCAN Object Detector started."
+        )
+        self.get_logger().info(
+            f"[INIT] Depth topic: {self.depth_topic}"
         )
 
-        self.stride = 2
-        u_coords, v_coords = np.meshgrid(
-            np.arange(0, self.width, self.stride),
-            np.arange(0, self.height, self.stride)
+    def camera_info_callback(self, msg):
+        if self.camera_info_received:
+            return
+
+        self.width = int(msg.width)
+        self.height = int(msg.height)
+
+        self.fx = float(msg.k[0])
+        self.fy = float(msg.k[4])
+        self.cx = float(msg.k[2])
+        self.cy = float(msg.k[5])
+
+        if self.fx <= 0.0 or self.fy <= 0.0:
+            self.get_logger().error(
+                "[CAMERA INFO] Invalid camera intrinsics."
+            )
+            return
+
+        self.camera_info_received = True
+
+        self.get_logger().info(
+            f"[CAMERA INFO] width={self.width}, height={self.height}, "
+            f"fx={self.fx:.2f}, fy={self.fy:.2f}, "
+            f"cx={self.cx:.2f}, cy={self.cy:.2f}"
         )
-        self.u_flat = u_coords.flatten().astype(np.float64)
-        self.v_flat = v_coords.flatten().astype(np.float64)
-        self.u_factor = (self.u_flat - self.cx) / self.fx
-        self.v_factor = (self.v_flat - self.cy) / self.fy
 
-        # Panda 로봇(+손목 카메라) geom ID 사전 수집
-        self._build_panda_geom_ids()
-
-        # 10Hz 검출 타이머
-        self.timer = self.create_timer(0.1, self.process_detection)
-        self.get_logger().info("[INIT] 3D RANSAC + DBSCAN Object Detector initialized and running at 10Hz.")
-
-    # ------------------------------------------------------------------
-    # Panda Geom ID 수집 및 Segmentation 마스크 생성
-    # ------------------------------------------------------------------
-
-    # Panda 로봇 본체와 hand에 부착된 손목 카메라 바디까지 포함
-    _PANDA_BODY_NAMES = {
-        "link0", "link1", "link2", "link3", "link4",
-        "link5", "link6", "link7",
-        "hand", "left_finger", "right_finger",
-        "wrist_camera_link",  # 손목 카메라 외형 geom (cam_body, cam_lens)
-    }
-
-    def _build_panda_geom_ids(self):
-        """
-        모델 로드 직후 1회 실행.
-        Panda 로봇에 속하는 모든 geom의 정수 ID를 self.panda_geom_ids 에 수집.
-        body_geomadr / body_geomnum 을 사용하므로 geom에 name 이 없어도 안전.
-        """
-        ids: set[int] = set()
-        for bname in self._PANDA_BODY_NAMES:
-            bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, bname)
-            if bid == -1:
+    def depth_callback(self, msg):
+        try:
+            if msg.encoding != "32FC1":
                 self.get_logger().warn(
-                    f"[INIT] Body '{bname}' not found in model – skipping.",
-                    throttle_duration_sec=5.0
+                    f"[DEPTH] Expected 32FC1 but received {msg.encoding}",
+                    throttle_duration_sec=3.0
                 )
-                continue
-            start = int(self.model.body_geomadr[bid])
-            count = int(self.model.body_geomnum[bid])
-            for gid in range(start, start + count):
-                ids.add(gid)
-        self.panda_geom_ids = ids
-        self.get_logger().info(
-            f"[INIT] Panda geom mask: {len(ids)} geoms collected "
-            f"from {len(self._PANDA_BODY_NAMES)} bodies."
+                return
+
+            if msg.height <= 0 or msg.width <= 0:
+                return
+
+            if msg.step < msg.width * 4:
+                self.get_logger().warn(
+                    "[DEPTH] Invalid step size.",
+                    throttle_duration_sec=3.0
+                )
+                return
+
+            if msg.step == msg.width * 4:
+                depth = np.frombuffer(
+                    msg.data,
+                    dtype=np.float32
+                ).reshape(msg.height, msg.width)
+            else:
+                depth = np.frombuffer(
+                    msg.data,
+                    dtype=np.uint8
+                ).reshape(msg.height, msg.step)
+
+                depth = depth[:, :msg.width * 4].view(np.float32).reshape(
+                    msg.height,
+                    msg.width
+                )
+
+            self.latest_depth = depth.copy()
+            self.latest_depth_stamp = msg.header.stamp
+            self.depth_received = True
+
+        except Exception as e:
+            self.get_logger().error(
+                f"[DEPTH] Failed to parse depth image: {e}",
+                throttle_duration_sec=3.0
+            )
+
+    def generate_point_cloud(self, depth):
+        if self.fx is None or self.fy is None:
+            return np.empty((0, 3), dtype=np.float32)
+
+        sampled = depth[::self.stride, ::self.stride]
+
+        h, w = sampled.shape
+
+        v_coords, u_coords = np.indices(
+            (h, w),
+            dtype=np.float64
         )
 
-    def _get_robot_mask(self) -> np.ndarray:
-        """
-        MuJoCo Segmentation 렌더링으로 Panda geom 픽셀 마스크를 반환.
+        u = u_coords * self.stride
+        v = v_coords * self.stride
 
-        Returns
-        -------
-        mask : np.ndarray, shape (H, W), dtype bool
-            True 인 픽셀 = Panda 로봇(또는 손목 카메라)에 해당하는 depth 픽셀.
-        """
-        if not self.panda_geom_ids:
-            return np.zeros((self.height, self.width), dtype=bool)
+        z = sampled.astype(np.float64)
 
-        # update_scene() 은 이미 호출된 상태 – 동일 프레임에서 재렌더링
-        self.renderer.enable_segmentation_rendering()
-        seg = self.renderer.render()          # (H, W, 2)  int32
-        self.renderer.disable_segmentation_rendering()
-
-        geom_id_map = seg[:, :, 0]           # 채널 0: 픽셀별 geom ID (-1 = 배경)
-
-        # 벡터화: panda_geom_ids 집합에 속하는 픽셀을 한 번에 마스킹
-        panda_ids_arr = np.array(list(self.panda_geom_ids), dtype=np.int32)
-        mask = np.isin(geom_id_map, panda_ids_arr)
-        return mask
-
-    # ------------------------------------------------------------------
-
-    def generate_point_cloud(self, depth_metric):
-        """
-        카메라 metric depth image -> ROS camera optical frame (X:right, Y:down, Z:forward) point cloud
-        """
-        depth_sampled = depth_metric[::self.stride, ::self.stride].flatten()
-
-        # 천장 카메라에서 유효한 거리 범위 (0.2m ~ 3.0m)
         valid_mask = (
-            np.isfinite(depth_sampled) &
-            (depth_sampled > 0.2) &
-            (depth_sampled < 2.3)
+            np.isfinite(z) &
+            (z > 0.20) &
+            (z < 2.30)
         )
 
-        z = depth_sampled[valid_mask]
-        x = self.u_factor[valid_mask] * z
-        y = self.v_factor[valid_mask] * z
+        if not np.any(valid_mask):
+            return np.empty((0, 3), dtype=np.float32)
+
+        z = z[valid_mask]
+        u = u[valid_mask]
+        v = v[valid_mask]
+
+        x = (u - self.cx) / self.fx * z
+        y = (v - self.cy) / self.fy * z
 
         points = np.column_stack((x, y, z))
-        return points
+
+        points = points[np.all(np.isfinite(points), axis=1)]
+
+        return points.astype(np.float32)
 
     def process_detection(self):
         try:
-            # [단계 1~2 생략: Depth 렌더링 및 PointCloud 생성 기존 동일]
-            mujoco.mj_forward(self.model, self.data)
-            self.renderer.update_scene(self.data, camera=self.camera_name)
-
-            self.renderer.enable_depth_rendering()
-            depth_image = self.renderer.render()
-            self.renderer.disable_depth_rendering()
-
-            robot_mask = self._get_robot_mask()
-            depth_metric = depth_image.astype(np.float64)
-            depth_metric[robot_mask] = np.nan
-
-            points = self.generate_point_cloud(depth_metric)
-
-            if len(points) < 100:
+            if not self.camera_info_received:
                 return
 
-            # ----------------------------------------------------
-            # [단계 3/6] RANSAC 평면 추정 (평면 방정식 추출)
-            # ----------------------------------------------------
+            if not self.depth_received:
+                return
+
+            if self.latest_depth is None:
+                return
+
+            depth = self.latest_depth
+
+            points = self.generate_point_cloud(depth)
+
+            if len(points) < 100:
+                self.clear_markers()
+                return
+
             plane_eq, inliers, object_points = ransac_plane_segmentation(
                 points,
                 distance_threshold=0.015,
                 max_iterations=120
             )
 
-            if object_points is None or len(object_points) < 10:
+            if plane_eq is None:
+                self.clear_markers()
                 return
 
-            plane_normal, plane_d = plane_eq  # 테이블 평면 법선(normal) 및 d값
+            if object_points is None or len(object_points) < 10:
+                self.clear_markers()
+                return
 
-            # [단계 4/6 생략: PointCloud2 발행 기존 동일]
-            stamp = self.get_clock().now().to_msg()
-            camera_optical_frame = f"{self.camera_name}_optical_frame"
-            cloud_msg = create_pointcloud2_msg(stamp, camera_optical_frame, object_points)
+            plane_normal, plane_d = plane_eq
+
+            stamp = self.latest_depth_stamp
+            if stamp is None:
+                stamp = self.get_clock().now().to_msg()
+
+            cloud_msg = create_pointcloud2_msg(
+                stamp,
+                self.camera_optical_frame,
+                object_points
+            )
+
             self.cloud_pub.publish(cloud_msg)
 
-            # ----------------------------------------------------
-            # [단계 5/6] DBSCAN 물체 군집화
-            # ----------------------------------------------------
-            clustering = DBSCAN(eps=0.06, min_samples=8).fit(object_points)
+            clustering = DBSCAN(
+                eps=0.06,
+                min_samples=8
+            ).fit(object_points)
+
             labels = clustering.labels_
+
             unique_labels = set(labels)
+
             if -1 in unique_labels:
                 unique_labels.remove(-1)
 
             if not unique_labels:
+                self.clear_markers()
                 return
 
-            # ----------------------------------------------------
-            # [단계 6/6] 물체 높이 추정 및 TF 좌표 변환
-            # ----------------------------------------------------
             marker_array = MarkerArray()
-            target_frame = "link0"
 
             delete_marker = Marker()
-            delete_marker.header.frame_id = target_frame
+            delete_marker.header.frame_id = self.target_frame
             delete_marker.header.stamp = stamp
             delete_marker.action = Marker.DELETEALL
             marker_array.markers.append(delete_marker)
@@ -366,153 +367,226 @@ class Ransac3DObjectDetector(Node):
 
             for label in sorted(unique_labels):
                 cluster_pts = object_points[labels == label]
+
                 if len(cluster_pts) < 8:
                     continue
 
-                # ----------------------------------------------------
-                # 1. 테이블 평면으로부터 점들의 직교 거리 계산 & 높이 추정
-                # ----------------------------------------------------
-                distances_from_plane = np.dot(cluster_pts, plane_normal) + plane_d
-                estimated_height = float(np.max(distances_from_plane))
-                estimated_height = max(estimated_height, 0.01)  # 최소 1cm 보정
+                distances_from_plane = (
+                    np.dot(cluster_pts, plane_normal) + plane_d
+                )
 
-                # 2. Camera Optical Frame 기준 X, Y 바운딩 박스 크기 및 XY 중심점
+                estimated_height = float(
+                    np.max(distances_from_plane)
+                )
+
+                if estimated_height < 0.01:
+                    continue
+
+                if estimated_height > 0.40:
+                    continue
+
                 min_bound = np.min(cluster_pts, axis=0)
                 max_bound = np.max(cluster_pts, axis=0)
-                
+
                 size_x = float(max_bound[0] - min_bound[0])
                 size_y = float(max_bound[1] - min_bound[1])
-                
-                center_x_cam = float(np.mean(cluster_pts[:, 0]))
-                center_y_cam = float(np.mean(cluster_pts[:, 1]))
 
-                # ----------------------------------------------------
-                # 3. Z 중심 좌표 보정 (Table Alignment)
-                # ----------------------------------------------------
-                # (1) 물체 XY 중심 직하단의 테이블 평면 Z 좌표 계산 (nx*x + ny*y + nz*z + d = 0)
+                center_x_cam = float(
+                    np.mean(cluster_pts[:, 0])
+                )
+
+                center_y_cam = float(
+                    np.mean(cluster_pts[:, 1])
+                )
+
                 nx, ny, nz = plane_normal
-                z_table_cam = -(nx * center_x_cam + ny * center_y_cam + plane_d) / nz
 
-                # (2) Bounding Box의 Z 중심 위치 계산
-                # Optical frame 특성상 z축은 전방/아래쪽을 향함 (normal[2] < 0 조정한 상태)
-                # 테이블 상판(z_table_cam)에서 카메라 방향(위쪽, -normal 방향)으로 h/2 만큼 이동
-                # plane_normal은 상단(카메라) 방향을 향하도록 ransac에서 부호 정렬되어 있음
-                z_box_center_cam = z_table_cam + (plane_normal[2] * (estimated_height / 2.0))
-                x_box_center_cam = center_x_cam + (plane_normal[0] * (estimated_height / 2.0))
-                y_box_center_cam = center_y_cam + (plane_normal[1] * (estimated_height / 2.0))
+                if abs(float(nz)) < 1e-6:
+                    continue
 
-                # ----------------------------------------------------
-                # 4. TF 좌표 변환 (Optical Frame -> link0)
-                # ----------------------------------------------------
+                z_table_cam = float(
+                    -(
+                        float(nx) * center_x_cam +
+                        float(ny) * center_y_cam +
+                        float(plane_d)
+                    ) / float(nz)
+                )
+
+                x_box_center_cam = float(
+                    center_x_cam +
+                    float(plane_normal[0]) *
+                    estimated_height / 2.0
+                )
+
+                y_box_center_cam = float(
+                    center_y_cam +
+                    float(plane_normal[1]) *
+                    estimated_height / 2.0
+                )
+
+                z_box_center_cam = float(
+                    z_table_cam +
+                    float(plane_normal[2]) *
+                    estimated_height / 2.0
+                )
+
                 pt_cam = PointStamped()
-                pt_cam.header.stamp = rclpy.time.Time().to_msg()
-                pt_cam.header.frame_id = camera_optical_frame
-                pt_cam.point.x = x_box_center_cam
-                pt_cam.point.y = y_box_center_cam
-                pt_cam.point.z = z_box_center_cam
+                pt_cam.header.stamp = stamp
+                pt_cam.header.frame_id = self.camera_optical_frame
+                pt_cam.point.x = float(x_box_center_cam)
+                pt_cam.point.y = float(y_box_center_cam)
+                pt_cam.point.z = float(z_box_center_cam)
 
-                #self.get_logger().info(f"[CAM DEBUG] table_z={z_table_cam:.4f}, height={estimated_height:.4f}, normal=({nx:.4f},{ny:.4f},{nz:.4f}) -> center=({x_box_center_cam:.4f},{y_box_center_cam:.4f},{z_box_center_cam:.4f})")
-                #self.get_logger().info(f"[TF INPUT] frame={pt_cam.header.frame_id}, X={pt_cam.point.x:.4f}, Y={pt_cam.point.y:.4f}, Z={pt_cam.point.z:.4f}")
-                
                 try:
                     pt_robot = self.tf_buffer.transform(
                         pt_cam,
-                        target_frame,
-                        timeout=rclpy.duration.Duration(seconds=0.05)
+                        self.target_frame,
+                        timeout=rclpy.duration.Duration(
+                            seconds=0.05
+                        )
                     )
+
                 except Exception as e:
-                    self.get_logger().warn(f"[TF ERROR] {e}", throttle_duration_sec=2.0)
+                    self.get_logger().warn(
+                        f"[TF ERROR] {e}",
+                        throttle_duration_sec=2.0
+                    )
                     continue
-                
-                #self.get_logger().info(f"[TF OUTPUT] frame={target_frame}, X={pt_robot.point.x:.4f}, Y={pt_robot.point.y:.4f}, Z={pt_robot.point.z:.4f}")
 
-                target_pose = pt_robot.point
+                target_x = float(pt_robot.point.x)
+                target_y = float(pt_robot.point.y)
+                target_z = float(pt_robot.point.z)
 
-                # ----------------------------------------------------
-                # 5. 첫 번째 물체 Pose 발행 (/target_object_pose)
-                # ----------------------------------------------------
+                if not (
+                    np.isfinite(target_x) and
+                    np.isfinite(target_y) and
+                    np.isfinite(target_z)
+                ):
+                    continue
+
                 if valid_cluster_idx == 0:
                     pose_msg = PoseStamped()
-                    pose_msg.header.frame_id = target_frame
                     pose_msg.header.stamp = stamp
-                    pose_msg.pose.position = target_pose
+                    pose_msg.header.frame_id = self.target_frame
+
+                    pose_msg.pose.position.x = target_x
+                    pose_msg.pose.position.y = target_y
+                    pose_msg.pose.position.z = target_z
                     pose_msg.pose.orientation.w = 1.0
+
                     self.pose_pub.publish(pose_msg)
 
                     self.get_logger().info(
-                        f"[TARGET DETECTED] Center Pos(link0): ({target_pose.x:.3f}, {target_pose.y:.3f}, {target_pose.z:.3f}) | "
-                        f"Height: {estimated_height*100:.1f}cm",
+                        f"[TARGET DETECTED] "
+                        f"Center Pos(link0): "
+                        f"({target_x:.3f}, "
+                        f"{target_y:.3f}, "
+                        f"{target_z:.3f}) | "
+                        f"Height: "
+                        f"{estimated_height * 100:.1f}cm",
                         throttle_duration_sec=2.0
                     )
 
-                # ----------------------------------------------------
-                # 6. Bounding Box 마커 생성 (테이블 상판 밀착 보정 완료)
-                # ----------------------------------------------------
                 box_marker = Marker()
-                box_marker.header.frame_id = target_frame
+                box_marker.header.frame_id = self.target_frame
                 box_marker.header.stamp = stamp
                 box_marker.ns = "object_bbox"
                 box_marker.id = valid_cluster_idx * 2
                 box_marker.type = Marker.CUBE
                 box_marker.action = Marker.ADD
-                box_marker.pose.position = target_pose
+
+                box_marker.pose.position.x = target_x
+                box_marker.pose.position.y = target_y
+                box_marker.pose.position.z = target_z
                 box_marker.pose.orientation.w = 1.0
-                box_marker.scale.x = max(size_x, 0.03)
-                box_marker.scale.y = max(size_y, 0.03)
-                box_marker.scale.z = estimated_height  # 추정된 높이 전체 사용
+
+                box_marker.scale.x = float(max(size_x, 0.03))
+                box_marker.scale.y = float(max(size_y, 0.03))
+                box_marker.scale.z = float(estimated_height)
+
                 box_marker.color.r = 0.1
                 box_marker.color.g = 0.8
                 box_marker.color.b = 0.2
                 box_marker.color.a = 0.6
+
                 marker_array.markers.append(box_marker)
 
-                # ----------------------------------------------------
-                # 7. Text 라벨 마커 생성 (Box 최상단 위에 배치)
-                # ----------------------------------------------------
                 text_marker = Marker()
-                text_marker.header.frame_id = target_frame
+                text_marker.header.frame_id = self.target_frame
                 text_marker.header.stamp = stamp
                 text_marker.ns = "object_label"
                 text_marker.id = valid_cluster_idx * 2 + 1
                 text_marker.type = Marker.TEXT_VIEW_FACING
                 text_marker.action = Marker.ADD
-                text_marker.pose.position.x = target_pose.x
-                text_marker.pose.position.y = target_pose.y
-                # Bounding Box 중심(target_pose.z) 기준 + h/2 지점에 5cm 유격 추가
-                text_marker.pose.position.z = target_pose.z + (estimated_height / 2.0) + 0.05
+
+                text_marker.pose.position.x = target_x
+                text_marker.pose.position.y = target_y
+                text_marker.pose.position.z = float(
+                    target_z +
+                    estimated_height / 2.0 +
+                    0.05
+                )
+
                 text_marker.pose.orientation.w = 1.0
                 text_marker.scale.z = 0.035
+
                 text_marker.color.r = 1.0
                 text_marker.color.g = 1.0
                 text_marker.color.b = 1.0
                 text_marker.color.a = 1.0
-                text_marker.text = f"Obj_{valid_cluster_idx} (H: {estimated_height*100:.1f}cm)"
+
+                text_marker.text = (
+                    f"Obj_{valid_cluster_idx} "
+                    f"(H: {estimated_height * 100:.1f}cm)"
+                )
+
                 marker_array.markers.append(text_marker)
 
                 valid_cluster_idx += 1
 
-            if len(marker_array.markers) > 1:
+            if valid_cluster_idx > 0:
                 self.marker_pub.publish(marker_array)
+            else:
+                self.clear_markers()
 
         except Exception as e:
-            self.get_logger().error(f"Detection processing failed: {e}", throttle_duration_sec=2.0)
+            self.get_logger().error(
+                f"[DETECTION ERROR] {e}",
+                throttle_duration_sec=2.0
+            )
+
+    def clear_markers(self):
+        marker_array = MarkerArray()
+
+        marker = Marker()
+        marker.header.frame_id = self.target_frame
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.action = Marker.DELETEALL
+
+        marker_array.markers.append(marker)
+
+        self.marker_pub.publish(marker_array)
 
 
 def main(args=None):
-    parser = argparse.ArgumentParser(description="3D RANSAC + DBSCAN Object Detector")
-    parser.add_argument("--camera", type=str, default="ceiling_camera", help="MuJoCo camera name")
-    cli_args, ros_args = parser.parse_known_args()
+    rclpy.init(args=args)
 
-    rclpy.init(args=ros_args)
+    node = None
 
     try:
-        node = Ransac3DObjectDetector(camera_name=cli_args.camera)
+        node = Ransac3DObjectDetector()
         rclpy.spin(node)
+
     except KeyboardInterrupt:
         pass
+
     except Exception as e:
         print(f"[FATAL] {e}")
+
     finally:
+        if node is not None:
+            node.destroy_node()
+
         if rclpy.ok():
             rclpy.shutdown()
 
