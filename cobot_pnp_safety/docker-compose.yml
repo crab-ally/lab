@@ -1,14 +1,17 @@
+version: '3.8'
+
 services:
-  ros2:
+  # 1. MuJoCo 브릿지 + Robot State Publisher (TF 발행) 백엔드 컨테이너
+  mujoco_backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: panda_ros2
+    container_name: panda_mujoco_backend
     network_mode: host
     ipc: host
     privileged: true
     environment:
-      - DISPLAY=host.docker.internal:0.0
+      - DISPLAY=${DISPLAY:-host.docker.internal:0.0}
       - ROS_DOMAIN_ID=50
       - QT_X11_NO_MITSHM=1
       - LIBGL_ALWAYS_INDIRECT=0
@@ -17,8 +20,14 @@ services:
     working_dir: /workspace
     stdin_open: true
     tty: true
-    command: bash
+    # Launch 파일로 브릿지 스크립트와 robot_state_publisher를 동시에 실행
+    command: >
+      bash -c "
+      ros2 launch /workspace/launch/panda_display.launch.py &
+      python3 scripts/mujoco_ros2_bridge.py &
+      wait"
 
+  # 2. RViz2 시각화 전용 독립 컨테이너
   rviz:
     profiles: ["rviz"]
     build:
@@ -29,7 +38,7 @@ services:
     ipc: host
     privileged: true
     environment:
-      - DISPLAY=host.docker.internal:0.0
+      - DISPLAY=${DISPLAY:-host.docker.internal:0.0}
       - ROS_DOMAIN_ID=50
       - QT_X11_NO_MITSHM=1
       - LIBGL_ALWAYS_INDIRECT=0
