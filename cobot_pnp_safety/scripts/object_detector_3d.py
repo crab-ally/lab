@@ -211,9 +211,75 @@ class Ransac3DObjectDetector(Node):
         self.u_factor = (self.u_flat - self.cx) / self.fx
         self.v_factor = (self.v_flat - self.cy) / self.fy
 
+        # Panda 로봇(+손목 카메라) geom ID 사전 수집
+        self._build_panda_geom_ids()
+
         # 10Hz 검출 타이머
         self.timer = self.create_timer(0.1, self.process_detection)
         self.get_logger().info("[INIT] 3D RANSAC + DBSCAN Object Detector initialized and running at 10Hz.")
+
+    # ------------------------------------------------------------------
+    # Panda Geom ID 수집 및 Segmentation 마스크 생성
+    # ------------------------------------------------------------------
+
+    # Panda 로봇 본체와 hand에 부착된 손목 카메라 바디까지 포함
+    _PANDA_BODY_NAMES = {
+        "link0", "link1", "link2", "link3", "link4",
+        "link5", "link6", "link7",
+        "hand", "left_finger", "right_finger",
+        "wrist_camera_link",  # 손목 카메라 외형 geom (cam_body, cam_lens)
+    }
+
+    def _build_panda_geom_ids(self):
+        """
+        모델 로드 직후 1회 실행.
+        Panda 로봇에 속하는 모든 geom의 정수 ID를 self.panda_geom_ids 에 수집.
+        body_geomadr / body_geomnum 을 사용하므로 geom에 name 이 없어도 안전.
+        """
+        ids: set[int] = set()
+        for bname in self._PANDA_BODY_NAMES:
+            bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, bname)
+            if bid == -1:
+                self.get_logger().warn(
+                    f"[INIT] Body '{bname}' not found in model – skipping.",
+                    throttle_duration_sec=5.0
+                )
+                continue
+            start = int(self.model.body_geomadr[bid])
+            count = int(self.model.body_geomnum[bid])
+            for gid in range(start, start + count):
+                ids.add(gid)
+        self.panda_geom_ids = ids
+        self.get_logger().info(
+            f"[INIT] Panda geom mask: {len(ids)} geoms collected "
+            f"from {len(self._PANDA_BODY_NAMES)} bodies."
+        )
+
+    def _get_robot_mask(self) -> np.ndarray:
+        """
+        MuJoCo Segmentation 렌더링으로 Panda geom 픽셀 마스크를 반환.
+
+        Returns
+        -------
+        mask : np.ndarray, shape (H, W), dtype bool
+            True 인 픽셀 = Panda 로봇(또는 손목 카메라)에 해당하는 depth 픽셀.
+        """
+        if not self.panda_geom_ids:
+            return np.zeros((self.height, self.width), dtype=bool)
+
+        # update_scene() 은 이미 호출된 상태 – 동일 프레임에서 재렌더링
+        self.renderer.enable_segmentation_rendering()
+        seg = self.renderer.render()          # (H, W, 2)  int32
+        self.renderer.disable_segmentation_rendering()
+
+        geom_id_map = seg[:, :, 0]           # 채널 0: 픽셀별 geom ID (-1 = 배경)
+
+        # 벡터화: panda_geom_ids 집합에 속하는 픽셀을 한 번에 마스킹
+        panda_ids_arr = np.array(list(self.panda_geom_ids), dtype=np.int32)
+        mask = np.isin(geom_id_map, panda_ids_arr)
+        return mask
+
+    # ------------------------------------------------------------------
 
     def generate_point_cloud(self, depth_metric):
         """
@@ -242,11 +308,23 @@ class Ransac3DObjectDetector(Node):
             # ----------------------------------------------------
             mujoco.mj_forward(self.model, self.data)
             self.renderer.update_scene(self.data, camera=self.camera_name)
+
+            # Depth 렌더링
             self.renderer.enable_depth_rendering()
             depth_image = self.renderer.render()
             self.renderer.disable_depth_rendering()
 
+            # Segmentation으로 Panda 로봇(+손목 카메라) 픽셀 마스킹
+            # → 마스킹된 픽셀은 nan 처리되어 generate_point_cloud의
+            #   np.isfinite() 필터에서 자동으로 제외됨
+            robot_mask = self._get_robot_mask()
             depth_metric = depth_image.astype(np.float64)
+            depth_metric[robot_mask] = np.nan
+
+            masked_px = int(robot_mask.sum())
+            self.get_logger().debug(
+                f"[STEP 1/6] Robot mask applied: {masked_px} px removed."
+            )
             d_min, d_max = np.min(depth_metric), np.max(depth_metric)
 
             # ----------------------------------------------------
