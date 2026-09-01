@@ -1,0 +1,345 @@
+<?xml version="1.0" ?>
+<robot name="panda">
+  <!-- Material Definitions -->
+  <material name="white">
+    <color rgba="1.0 1.0 1.0 1.0"/>
+  </material>
+  <material name="off_white">
+    <color rgba="0.901961 0.921569 0.929412 1.0"/>
+  </material>
+  <material name="black">
+    <color rgba="0.25 0.25 0.25 1.0"/>
+  </material>
+
+  <!-- World Frame -->
+  <link name="world"/>
+  <joint name="virtual_joint" type="fixed">
+    <parent link="world"/>
+    <child link="link0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Link 0 -->
+  <link name="link0">
+    <inertial>
+      <origin xyz="-0.041018 -0.00014 0.049974" rpy="0 0 0"/>
+      <mass value="0.629769"/>
+      <inertia ixx="0.00315" ixy="8.2904e-7" ixz="0.00015" iyy="0.00388" iyz="8.2299e-6" izz="0.004285"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link0.stl"/>
+      </geometry>
+      <material name="off_white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link0.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Joint 1 -->
+  <joint name="joint1" type="revolute">
+    <origin xyz="0 0 0.333" rpy="0 0 0"/>
+    <parent link="link0"/>
+    <child link="link1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="87" velocity="2.175"/>
+    <dynamics damping="1.0" friction="0.0"/>
+  </joint>
+
+  <!-- Link 1 -->
+  <link name="link1">
+    <inertial>
+      <origin xyz="0.003875 0.002081 -0.04762" rpy="0 0 0"/>
+      <mass value="4.970684"/>
+      <inertia ixx="0.70337" ixy="-0.000139" ixz="0.006772" iyy="0.70661" iyz="0.019169" izz="0.009117"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link1.stl"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link1.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Joint 2 -->
+  <joint name="joint2" type="revolute">
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 0"/>
+    <parent link="link1"/>
+    <child link="link2"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.7628" upper="1.7628" effort="87" velocity="2.175"/>
+    <dynamics damping="1.0" friction="0.0"/>
+  </joint>
+
+  <!-- Link 2 -->
+  <link name="link2">
+    <inertial>
+      <origin xyz="-0.003141 -0.02872 0.003495" rpy="0 0 0"/>
+      <mass value="0.646926"/>
+      <inertia ixx="0.007962" ixy="-0.003925" ixz="0.010254" iyy="0.028110" iyz="0.000704" izz="0.025995"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link2.stl"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link2.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Joint 3 -->
+  <joint name="joint3" type="revolute">
+    <origin xyz="0 -0.316 0" rpy="1.57079632679 0 0"/>
+    <parent link="link2"/>
+    <child link="link3"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="87" velocity="2.175"/>
+    <dynamics damping="1.0" friction="0.0"/>
+  </joint>
+
+  <!-- Link 3 -->
+  <link name="link3">
+    <inertial>
+      <origin xyz="0.027518 0.039252 -0.066502" rpy="0 0 0"/>
+      <mass value="3.228604"/>
+      <inertia ixx="0.037242" ixy="-0.004761" ixz="-0.011396" iyy="0.036155" iyz="-0.012805" izz="0.010830"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link3.stl"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link3.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Joint 4 -->
+  <joint name="joint4" type="revolute">
+    <origin xyz="0.0825 0 0" rpy="1.57079632679 0 0"/>
+    <parent link="link3"/>
+    <child link="link4"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.0718" upper="-0.0698" effort="87" velocity="2.175"/>
+    <dynamics damping="1.0" friction="0.0"/>
+  </joint>
+
+  <!-- Link 4 -->
+  <link name="link4">
+    <inertial>
+      <origin xyz="-0.05317 0.104419 0.027454" rpy="0 0 0"/>
+      <mass value="3.587895"/>
+      <inertia ixx="0.025853" ixy="0.007796" ixz="-0.001332" iyy="0.019552" iyz="0.008641" izz="0.028323"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link4.stl"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link4.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Joint 5 -->
+  <joint name="joint5" type="revolute">
+    <origin xyz="-0.0825 0.384 0" rpy="-1.57079632679 0 0"/>
+    <parent link="link4"/>
+    <child link="link5"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="12" velocity="2.61"/>
+    <dynamics damping="1.0" friction="0.0"/>
+  </joint>
+
+  <!-- Link 5 -->
+  <link name="link5">
+    <inertial>
+      <origin xyz="-0.011953 0.041065 -0.038437" rpy="0 0 0"/>
+      <mass value="1.225946"/>
+      <inertia ixx="0.035549" ixy="-0.002117" ixz="-0.004037" iyy="0.029474" iyz="0.000229" izz="0.008627"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link5_collision_0.obj"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link5_collision_0.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Joint 6 -->
+  <joint name="joint6" type="revolute">
+    <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+    <parent link="link5"/>
+    <child link="link6"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-0.0175" upper="3.7525" effort="12" velocity="2.61"/>
+    <dynamics damping="1.0" friction="0.0"/>
+  </joint>
+
+  <!-- Link 6 -->
+  <link name="link6">
+    <inertial>
+      <origin xyz="0.060149 -0.014117 -0.010517" rpy="0 0 0"/>
+      <mass value="1.666555"/>
+      <inertia ixx="0.001964" ixy="0.000109" ixz="-0.001158" iyy="0.004354" iyz="0.000341" izz="0.005433"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link6.stl"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link6.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Joint 7 -->
+  <joint name="joint7" type="revolute">
+    <origin xyz="0.088 0 0" rpy="1.57079632679 0 0"/>
+    <parent link="link6"/>
+    <child link="link7"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="12" velocity="2.61"/>
+    <dynamics damping="1.0" friction="0.0"/>
+  </joint>
+
+  <!-- Link 7 -->
+  <link name="link7">
+    <inertial>
+      <origin xyz="0.010517 -0.004252 0.061597" rpy="0 0 0"/>
+      <mass value="0.735522"/>
+      <inertia ixx="0.012516" ixy="-0.000428" ixz="-0.001196" iyy="0.010027" iyz="-0.000741" izz="0.004815"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link7.stl"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/link7.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Hand Joint -->
+  <joint name="hand_joint" type="fixed">
+    <origin xyz="0 0 0.107" rpy="0 0 -0.785398163397"/>
+    <parent link="link7"/>
+    <child link="hand"/>
+  </joint>
+
+  <!-- Hand Link -->
+  <link name="hand">
+    <inertial>
+      <origin xyz="-0.01 0 0.03" rpy="0 0 0"/>
+      <mass value="0.73"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.0025" iyz="0.0" izz="0.0017"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/hand.stl"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/hand.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Finger Joint 1 -->
+  <joint name="finger_joint1" type="prismatic">
+    <origin xyz="0 0 0.0584" rpy="0 0 0"/>
+    <parent link="hand"/>
+    <child link="left_finger"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0.0" upper="0.04" effort="20" velocity="0.2"/>
+  </joint>
+
+  <!-- Left Finger Link -->
+  <link name="left_finger">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.015"/>
+      <inertia ixx="2.375e-6" ixy="0" ixz="0" iyy="2.375e-6" iyz="0" izz="7.5e-7"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/finger_0.obj"/>
+      </geometry>
+      <material name="off_white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/finger_0.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Finger Joint 2 -->
+  <joint name="finger_joint2" type="prismatic">
+    <origin xyz="0 0 0.0584" rpy="0 0 3.14159265359"/>
+    <parent link="hand"/>
+    <child link="right_finger"/>
+    <axis xyz="0 -1 0"/>
+    <limit lower="0.0" upper="0.04" effort="20" velocity="0.2"/>
+    <mimic joint="finger_joint1" multiplier="1" offset="0"/>
+  </joint>
+
+  <!-- Right Finger Link -->
+  <link name="right_finger">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.015"/>
+      <inertia ixx="2.375e-6" ixy="0" ixz="0" iyy="2.375e-6" iyz="0" izz="7.5e-7"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/finger_0.obj"/>
+      </geometry>
+      <material name="off_white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/model/franka_emika_panda/assets/finger_0.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- TCP (End-Effector) Frame (그리퍼 집게 사이 중앙점) -->
+  <joint name="tcp_joint" type="fixed">
+    <origin xyz="0 0 0.1034" rpy="0 0 0"/> <!-- MJCF site pos="0 0 0.12" 반영 -->
+    <parent link="hand"/>
+    <child link="hand_tcp"/>
+  </joint>
+  <link name="hand_tcp"/>
+</robot>
