@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # 1. MuJoCo 브릿지 + Robot State Publisher (TF 발행) 백엔드 컨테이너
+  # 1. MuJoCo 브릿지 + MoveIt 2 (MoveGroup & RSP) 백엔드 컨테이너
   mujoco_backend:
     build:
       context: .
@@ -20,10 +20,10 @@ services:
     working_dir: /workspace
     stdin_open: true
     tty: true
-    # Launch 파일로 브릿지 스크립트와 robot_state_publisher를 동시에 실행
+    # Launch 파일로 MoveIt2 move_group + robot_state_publisher와 MuJoCo bridge를 동시 실행
     command: >
       bash -c "
-      ros2 launch /workspace/launch/panda_display.launch.py &
+      ros2 launch /workspace/launch/panda_moveit.launch.py &
       python3 scripts/mujoco_ros2_bridge.py &
       wait"
 
