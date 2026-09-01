@@ -171,3 +171,29 @@ def main():
 if __name__ == "__main__":
     main()
 ```
+
+---
+
+# 3. MoveIt2 목표 위치 도달 불가에 따른 INVALID_GOAL_CONSTRAINTS 에러
+
+## 파일
+
+`scripts/panda_pick_and_place.py`,
+`world/test.xml`
+
+## 에러코드
+
+```
+[VISION TARGET DETECTED] X=0.195, Y=0.999, Z=0.500
+[PLANNING] Moving TCP to (0.195, 0.999, 0.620)...
+[EXECUTION] Motion failed with error code: -16
+[ERROR] Pre-grasp approach failed!
+```
+
+## 원인
+
+sqrt(0.195² + 0.999²) ≈ 1.02 m. Panda의 최대 도달 범위보다 큰 위치이므로 해당 위치까지 hand_tcp가 도달할 수 있는 유효한 IK 해를 찾을 수 없음.
+
+## 해결
+
+Franka Emika Panda 로봇의 최대 도달 반경인 855mm (약 0.855m / 85.5cm) 이내로 물체 이동
