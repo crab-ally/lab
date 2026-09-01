@@ -411,6 +411,9 @@ class Ransac3DObjectDetector(Node):
                 pt_cam.point.y = y_box_center_cam
                 pt_cam.point.z = z_box_center_cam
 
+                #self.get_logger().info(f"[CAM DEBUG] table_z={z_table_cam:.4f}, height={estimated_height:.4f}, normal=({nx:.4f},{ny:.4f},{nz:.4f}) -> center=({x_box_center_cam:.4f},{y_box_center_cam:.4f},{z_box_center_cam:.4f})")
+                #self.get_logger().info(f"[TF INPUT] frame={pt_cam.header.frame_id}, X={pt_cam.point.x:.4f}, Y={pt_cam.point.y:.4f}, Z={pt_cam.point.z:.4f}")
+                
                 try:
                     pt_robot = self.tf_buffer.transform(
                         pt_cam,
@@ -420,6 +423,8 @@ class Ransac3DObjectDetector(Node):
                 except Exception as e:
                     self.get_logger().warn(f"[TF ERROR] {e}", throttle_duration_sec=2.0)
                     continue
+                
+                #self.get_logger().info(f"[TF OUTPUT] frame={target_frame}, X={pt_robot.point.x:.4f}, Y={pt_robot.point.y:.4f}, Z={pt_robot.point.z:.4f}")
 
                 target_pose = pt_robot.point
 
