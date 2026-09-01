@@ -217,7 +217,7 @@
                       <geom mesh="hand_c" class="collision"/>
 
                       <!-- TCP: 그리퍼 중앙 작업 기준점 -->
-                      <site name="tcp" pos="0 0 0.12" size="0.006" rgba="1 0 0 1"/>
+                      <site name="tcp" pos="0 0 0.11" size="0.006" rgba="1 0 0 1"/>
 
                       <!-- ================= [카메라] ================= -->
                       <body name="wrist_camera_link" pos="0.04 0 0.035" quat="0.7071068 0 0 0.7071068">
