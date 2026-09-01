@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot name="panda">
+  <!-- GROUPS: Representation of a set of joints and links. -->
+  <group name="panda_arm">
+    <chain base_link="link0" tip_link="hand_tcp"/>
+  </group>
+
+  <group name="hand">
+    <link name="hand"/>
+    <link name="left_finger"/>
+    <link name="right_finger"/>
+    <link name="hand_tcp"/>
+    <joint name="finger_joint1"/>
+    <joint name="finger_joint2"/>
+  </group>
+
+  <group name="panda_manipulator">
+    <group name="panda_arm"/>
+    <group name="hand"/>
+  </group>
+
+  <!-- GROUP STATES: Predefined robot configurations -->
+  <group_state name="ready" group="panda_arm">
+    <joint name="joint1" value="0"/>
+    <joint name="joint2" value="-0.785398"/>
+    <joint name="joint3" value="0"/>
+    <joint name="joint4" value="-2.35619"/>
+    <joint name="joint5" value="0"/>
+    <joint name="joint6" value="1.57079"/>
+    <joint name="joint7" value="0.785398"/>
+  </group_state>
+
+  <group_state name="home" group="panda_arm">
+    <joint name="joint1" value="0"/>
+    <joint name="joint2" value="0"/>
+    <joint name="joint3" value="0"/>
+    <joint name="joint4" value="-1.57079"/>
+    <joint name="joint5" value="0"/>
+    <joint name="joint6" value="1.57079"/>
+    <joint name="joint7" value="-0.785398"/>
+  </group_state>
+
+  <group_state name="open" group="hand">
+    <joint name="finger_joint1" value="0.04"/>
+    <joint name="finger_joint2" value="0.04"/>
+  </group_state>
+
+  <group_state name="close" group="hand">
+    <joint name="finger_joint1" value="0.0"/>
+    <joint name="finger_joint2" value="0.0"/>
+  </group_state>
+
+  <!-- END EFFECTOR: Representation of an end effector -->
+  <end_effector name="hand" parent_link="hand_tcp" group="hand" parent_group="panda_arm"/>
+
+  <!-- VIRTUAL JOINT: Connection to world -->
+  <virtual_joint name="virtual_joint" type="fixed" parent_frame="world" child_link="link0"/>
+
+  <!-- DISABLE COLLISIONS: By default it is assumed that any link of the robot could potentially collide with any other link. -->
+  <disable_collisions link1="link0" link2="link1" reason="Adjacent"/>
+  <disable_collisions link1="link0" link2="link2" reason="Never"/>
+  <disable_collisions link1="link0" link2="link3" reason="Never"/>
+  <disable_collisions link1="link0" link2="link4" reason="Never"/>
+  <disable_collisions link1="link1" link2="link2" reason="Adjacent"/>
+  <disable_collisions link1="link1" link2="link3" reason="Never"/>
+  <disable_collisions link1="link1" link2="link4" reason="Never"/>
+  <disable_collisions link1="link2" link2="link3" reason="Adjacent"/>
+  <disable_collisions link1="link2" link2="link4" reason="Never"/>
+  <disable_collisions link1="link2" link2="link6" reason="Never"/>
+  <disable_collisions link1="link3" link2="link4" reason="Adjacent"/>
+  <disable_collisions link1="link3" link2="link5" reason="Never"/>
+  <disable_collisions link1="link3" link2="link6" reason="Never"/>
+  <disable_collisions link1="link3" link2="link7" reason="Never"/>
+  <disable_collisions link1="link3" link2="hand" reason="Never"/>
+  <disable_collisions link1="link4" link2="link5" reason="Adjacent"/>
+  <disable_collisions link1="link4" link2="link6" reason="Never"/>
+  <disable_collisions link1="link4" link2="link7" reason="Never"/>
+  <disable_collisions link1="link4" link2="hand" reason="Never"/>
+  <disable_collisions link1="link5" link2="link6" reason="Adjacent"/>
+  <disable_collisions link1="link5" link2="link7" reason="Never"/>
+  <disable_collisions link1="link6" link2="link7" reason="Adjacent"/>
+  <disable_collisions link1="link6" link2="hand" reason="Never"/>
+  <disable_collisions link1="link7" link2="hand" reason="Adjacent"/>
+  <disable_collisions link1="link7" link2="left_finger" reason="Never"/>
+  <disable_collisions link1="link7" link2="right_finger" reason="Never"/>
+  <disable_collisions link1="hand" link2="left_finger" reason="Adjacent"/>
+  <disable_collisions link1="hand" link2="right_finger" reason="Adjacent"/>
+  <disable_collisions link1="left_finger" link2="right_finger" reason="Default"/>
+</robot>
