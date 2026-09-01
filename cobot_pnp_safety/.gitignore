@@ -1,7 +1,7 @@
 # cache
 scripts/MUJOCO_LOG.TXT
 scripts/__pycache__/
-
+launch/__pycache__/
 
 # AI 에이전트 문서
 antigravity_docs/
