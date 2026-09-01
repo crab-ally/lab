@@ -1,10 +1,31 @@
-1. docker compose up -d
-1-1. docker compose exec ros2 bash
-1-2. python3 scripts/mujoco_ros2_bridge.py
-1-3. python3 scripts/object_detector_3d.py
+# ==========================================
+# Franka Panda MoveIt2 3D Vision Pick & Place
+# ==========================================
 
-2. docker compose --profile rviz up rviz
+# 1. MuJoCo 시뮬레이션 + MoveIt2 (MoveGroup & Robot State Publisher) 실행
+docker compose up mujoco_backend
 
+# 2. RViz2 시각화 실행 (새 터미널)
+docker compose --profile rviz up rviz
 
-# 프레임 명령어
+# 3. 3D 물체 인식 노드 실행 (새 터미널)
+docker compose exec mujoco_backend bash
+python3 scripts/object_detector_3d.py
+
+# 4. MoveIt 2 기반 Pick & Place 제어 노드 실행 (새 터미널)
+docker compose exec mujoco_backend bash
+python3 scripts/panda_pick_and_place.py
+
+# ==========================================
+# 유용한 디버깅 명령어
+# ==========================================
+
+# TF 트리 확인:
 ros2 run tf2_tools view_frames
+
+# MoveGroup Action 서버 상태 확인:
+ros2 action list
+
+# 수동 그리퍼 제어 테스트:
+ros2 topic pub --once /panda_gripper_cmd std_msgs/msg/String "{data: 'close'}"
+ros2 topic pub --once /panda_gripper_cmd std_msgs/msg/String "{data: 'open'}"
