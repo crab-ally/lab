@@ -197,3 +197,50 @@ sqrt(0.195² + 0.999²) ≈ 1.02 m. Panda의 최대 도달 범위보다 큰 위�
 ## 해결
 
 Franka Emika Panda 로봇의 최대 도달 반경인 855mm (약 0.855m / 85.5cm) 이내로 물체 이동
+
+---
+
+# 4. MuJoCo 카메라 렌더링으로 인한 /joint_states 및 /tf 저주파 발행 및 MoveIt2 경로 제어 실패
+
+## 파일
+
+`scripts/mujoco_ros2_bridge.py`
+
+## 문제
+
+publish_camera()가 MuJoCo의 메인 physics/ROS loop 내부에서 실행되고 있어 RGB/Depth 렌더링에 의한 지연이 발생함.
+
+```
+MuJoCo physics step
+        ↓
+publish_joint_states()
+        ↓
+publish_env_tf()
+        ↓
+publish_camera()
+        ↓
+RGB/Depth rendering ← 무거운 작업
+        ↓
+다음 physics step
+
+/joint_states : 약 2.35 Hz
+/tf           : 약 4.8 Hz
+```
+
+MoveIt2는 /joint_states와 TF를 기반으로 로봇의 현재 상태와 좌표 변환을 지속적으로 확인하기 때문에, 이처럼 낮은 주기로 상태가 갱신되면 경로 계획 및 실행 과정에서 최신 로봇 상태를 정상적으로 사용하지 못해 Motion Execution이 실패할 수 있음.
+
+## 해결
+
+카메라 렌더링을 메인 physics/ROS loop에서 완전히 분리하고, 별도의 백그라운드 카메라 워커 스레드에서 처리.
+
+```
+                    ┌─→ /joint_states
+                    │
+MuJoCo physics ─────┼─→ /tf
+                    │
+                    └─→ physics 계속 진행
+                            
+카메라 워커 ───────→ RGB/Depth rendering
+                    ↓
+                 Camera topics
+```
