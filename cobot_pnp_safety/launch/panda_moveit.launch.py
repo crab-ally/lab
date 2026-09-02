@@ -166,23 +166,6 @@ def generate_launch_description():
         trajectory_execution,
         moveit_controller_config,
         planning_scene_monitor_parameters,
-
-        # 명시적으로 OMPL 사용
-        {
-            "planning_plugin": "ompl_interface/OMPLPlanner",
-            "request_adapters": (
-                "default_planner_request_adapters/ResolveConstraintFrames "
-                "default_planner_request_adapters/FixWorkspaceBounds "
-                "default_planner_request_adapters/FixStartStateBounds "
-                "default_planner_request_adapters/FixStartStateCollision "
-                "default_planner_request_adapters/FixStartStatePathConstraints "
-                "default_planner_request_adapters/AddTimeOptimalParameterization"
-            ),
-            "response_adapters": (
-                "default_planner_response_adapters/AddTimeOptimalParameterization"
-            ),
-            "use_sim_time": False,
-        },
     ]
 
     move_group_node = Node(
