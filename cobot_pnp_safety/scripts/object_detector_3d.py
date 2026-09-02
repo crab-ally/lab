@@ -12,12 +12,9 @@ TF:
 Output:
   - /object_pointcloud
   - /target_object_pose
+      X/Y : 물체 Bounding Box 중심
+      Z   : 물체 중심
   - /detected_objects_markers
-
-중요:
-  - MuJoCo MjModel/MjData/Renderer를 생성하지 않음
-  - 브릿지가 발행한 Depth 이미지만 사용
-  - cv_bridge를 사용하지 않음
 """
 
 import numpy as np
@@ -287,7 +284,6 @@ class Ransac3DObjectDetector(Node):
         y = (v - self.cy) / self.fy * z
 
         points = np.column_stack((x, y, z))
-
         points = points[np.all(np.isfinite(points), axis=1)]
 
         return points.astype(np.float32)
@@ -328,6 +324,7 @@ class Ransac3DObjectDetector(Node):
             plane_normal, plane_d = plane_eq
 
             stamp = self.latest_depth_stamp
+
             if stamp is None:
                 stamp = self.get_clock().now().to_msg()
 
@@ -366,10 +363,15 @@ class Ransac3DObjectDetector(Node):
             valid_cluster_idx = 0
 
             for label in sorted(unique_labels):
+
                 cluster_pts = object_points[labels == label]
 
                 if len(cluster_pts) < 8:
                     continue
+
+                # ---------------------------------------------------------
+                # 1. 물체 점들을 테이블 평면 기준으로 변환
+                # ---------------------------------------------------------
 
                 distances_from_plane = (
                     np.dot(cluster_pts, plane_normal) + plane_d
@@ -379,11 +381,12 @@ class Ransac3DObjectDetector(Node):
                     np.max(distances_from_plane)
                 )
 
-                if estimated_height < 0.01:
+                if (estimated_height < 0.01) or (estimated_height > 0.40):
                     continue
 
-                if estimated_height > 0.40:
-                    continue
+                # ---------------------------------------------------------
+                # 2. 물체 XY Bounding Box
+                # ---------------------------------------------------------
 
                 min_bound = np.min(cluster_pts, axis=0)
                 max_bound = np.max(cluster_pts, axis=0)
@@ -391,13 +394,21 @@ class Ransac3DObjectDetector(Node):
                 size_x = float(max_bound[0] - min_bound[0])
                 size_y = float(max_bound[1] - min_bound[1])
 
+                # ---------------------------------------------------------
+                # 3. 물체 XY 중심 [Bounding Box 기준]
+                # ---------------------------------------------------------
+
                 center_x_cam = float(
-                    np.mean(cluster_pts[:, 0])
+                    (min_bound[0] + max_bound[0]) / 2.0
                 )
 
                 center_y_cam = float(
-                    np.mean(cluster_pts[:, 1])
+                    (min_bound[1] + max_bound[1]) / 2.0
                 )
+
+                # ---------------------------------------------------------
+                # 4. 물체 중심 XY 위치에서 테이블 Z 계산
+                # ---------------------------------------------------------
 
                 nx, ny, nz = plane_normal
 
@@ -412,30 +423,46 @@ class Ransac3DObjectDetector(Node):
                     ) / float(nz)
                 )
 
-                x_box_center_cam = float(
-                    center_x_cam +
-                    float(plane_normal[0]) *
-                    estimated_height / 2.0
-                )
+                # ---------------------------------------------------------
+                # 5. 물체 상단면 Z
+                #    - 디버깅/계산용
+                # ---------------------------------------------------------
 
-                y_box_center_cam = float(
-                    center_y_cam +
-                    float(plane_normal[1]) *
-                    estimated_height / 2.0
-                )
-
-                z_box_center_cam = float(
+                z_object_top_cam = float(
                     z_table_cam +
-                    float(plane_normal[2]) *
-                    estimated_height / 2.0
+                    estimated_height / float(nz)
                 )
+
+                # ---------------------------------------------------------
+                # 6. 물체 중심 Z
+                #    - Bounding Box 중심
+                #    - /target_object_pose의 Z로 사용
+                # ---------------------------------------------------------
+
+                z_object_center_cam = float(
+                    z_table_cam +
+                    estimated_height / (2.0 * float(nz))
+                )
+
+                # ---------------------------------------------------------
+                # 7. /target_object_pose
+                #
+                #    X = 물체 중심 X
+                #    Y = 물체 중심 Y
+                #    Z = 물체 중심 Z
+                #
+                #    여기서는 TCP 보정을 하지 않는다.
+                #    TCP/fingertip 보정은 Pick & Place에서 처리한다.
+                # ---------------------------------------------------------
 
                 pt_cam = PointStamped()
+
                 pt_cam.header.stamp = stamp
                 pt_cam.header.frame_id = self.camera_optical_frame
-                pt_cam.point.x = float(x_box_center_cam)
-                pt_cam.point.y = float(y_box_center_cam)
-                pt_cam.point.z = float(z_box_center_cam)
+
+                pt_cam.point.x = float(center_x_cam)
+                pt_cam.point.y = float(center_y_cam)
+                pt_cam.point.z = float(z_object_center_cam)
 
                 try:
                     pt_robot = self.tf_buffer.transform(
@@ -464,14 +491,21 @@ class Ransac3DObjectDetector(Node):
                 ):
                     continue
 
+                # ---------------------------------------------------------
+                # 8. 첫 번째 물체를 Pick Target으로 사용
+                # ---------------------------------------------------------
+
                 if valid_cluster_idx == 0:
+
                     pose_msg = PoseStamped()
+
                     pose_msg.header.stamp = stamp
                     pose_msg.header.frame_id = self.target_frame
 
                     pose_msg.pose.position.x = target_x
                     pose_msg.pose.position.y = target_y
                     pose_msg.pose.position.z = target_z
+
                     pose_msg.pose.orientation.w = 1.0
 
                     self.pose_pub.publish(pose_msg)
@@ -482,27 +516,65 @@ class Ransac3DObjectDetector(Node):
                         f"({target_x:.3f}, "
                         f"{target_y:.3f}, "
                         f"{target_z:.3f}) | "
-                        f"Height: "
+                        f"Object Size: "
+                        f"{size_x * 100:.1f} x "
+                        f"{size_y * 100:.1f} x "
                         f"{estimated_height * 100:.1f}cm",
                         throttle_duration_sec=2.0
                     )
 
+                # ---------------------------------------------------------
+                # 9. Bounding Box Marker
+                # ---------------------------------------------------------
+
+                center_pt_cam = PointStamped()
+
+                center_pt_cam.header.stamp = stamp
+                center_pt_cam.header.frame_id = self.camera_optical_frame
+
+                center_pt_cam.point.x = float(center_x_cam)
+                center_pt_cam.point.y = float(center_y_cam)
+                center_pt_cam.point.z = float(z_object_center_cam)
+
+                try:
+                    center_pt_robot = self.tf_buffer.transform(
+                        center_pt_cam,
+                        self.target_frame,
+                        timeout=rclpy.duration.Duration(
+                            seconds=0.05
+                        )
+                    )
+
+                except Exception as e:
+                    self.get_logger().warn(
+                        f"[TF ERROR] Marker center transform failed: {e}",
+                        throttle_duration_sec=2.0
+                    )
+                    continue
+
+                marker_center_x = float(center_pt_robot.point.x)
+                marker_center_y = float(center_pt_robot.point.y)
+                marker_center_z = float(center_pt_robot.point.z)
+
                 box_marker = Marker()
+
                 box_marker.header.frame_id = self.target_frame
                 box_marker.header.stamp = stamp
+
                 box_marker.ns = "object_bbox"
                 box_marker.id = valid_cluster_idx * 2
+
                 box_marker.type = Marker.CUBE
                 box_marker.action = Marker.ADD
 
-                box_marker.pose.position.x = target_x
-                box_marker.pose.position.y = target_y
-                box_marker.pose.position.z = target_z
+                box_marker.pose.position.x = marker_center_x
+                box_marker.pose.position.y = marker_center_y
+                box_marker.pose.position.z = marker_center_z
                 box_marker.pose.orientation.w = 1.0
 
                 box_marker.scale.x = float(max(size_x, 0.03))
                 box_marker.scale.y = float(max(size_y, 0.03))
-                box_marker.scale.z = float(estimated_height)
+                box_marker.scale.z = float(max(estimated_height, 0.01))
 
                 box_marker.color.r = 0.1
                 box_marker.color.g = 0.8
@@ -511,23 +583,29 @@ class Ransac3DObjectDetector(Node):
 
                 marker_array.markers.append(box_marker)
 
+                # ---------------------------------------------------------
+                # 10. Label Marker
+                # ---------------------------------------------------------
+
                 text_marker = Marker()
+
                 text_marker.header.frame_id = self.target_frame
                 text_marker.header.stamp = stamp
+
                 text_marker.ns = "object_label"
                 text_marker.id = valid_cluster_idx * 2 + 1
+
                 text_marker.type = Marker.TEXT_VIEW_FACING
                 text_marker.action = Marker.ADD
 
-                text_marker.pose.position.x = target_x
-                text_marker.pose.position.y = target_y
+                text_marker.pose.position.x = marker_center_x
+                text_marker.pose.position.y = marker_center_y
                 text_marker.pose.position.z = float(
-                    target_z +
-                    estimated_height / 2.0 +
-                    0.05
+                    target_z + 0.05
                 )
 
                 text_marker.pose.orientation.w = 1.0
+
                 text_marker.scale.z = 0.035
 
                 text_marker.color.r = 1.0
@@ -559,6 +637,7 @@ class Ransac3DObjectDetector(Node):
         marker_array = MarkerArray()
 
         marker = Marker()
+
         marker.header.frame_id = self.target_frame
         marker.header.stamp = self.get_clock().now().to_msg()
         marker.action = Marker.DELETEALL
