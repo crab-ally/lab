@@ -3,11 +3,19 @@
   <geom name="floor" type="plane" size="3 3 0.1" material="groundplane"/>
 
   <body name="table1" pos="0 0.55 0.4">
-    <geom name="table1_top" type="box" size="0.4 0.3 0.04" rgba="0.45 0.3 0.18 1"/>
-    <geom name="table1_leg1" type="box" pos="0.32 0.22 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
-    <geom name="table1_leg2" type="box" pos="-0.32 0.22 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
-    <geom name="table1_leg3" type="box" pos="0.32 -0.22 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
-    <geom name="table1_leg4" type="box" pos="-0.32 -0.22 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
+    <geom name="table1_top" type="box" size="0.3 0.2 0.04" rgba="0.45 0.3 0.18 1"/>
+    <geom name="table1_leg1" type="box" pos="0.22 0.14 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
+    <geom name="table1_leg2" type="box" pos="-0.22 0.14 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
+    <geom name="table1_leg3" type="box" pos="0.22 -0.14 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
+    <geom name="table1_leg4" type="box" pos="-0.22 -0.14 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
+  </body>
+
+  <body name="table2" pos="0 -0.55 0.4">
+    <geom name="table2_top" type="box" size="0.3 0.2 0.04" rgba="0.45 0.3 0.18 1"/>
+    <geom name="table2_leg1" type="box" pos="0.22 0.14 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
+    <geom name="table2_leg2" type="box" pos="-0.22 0.14 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
+    <geom name="table2_leg3" type="box" pos="0.22 -0.14 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
+    <geom name="table2_leg4" type="box" pos="-0.22 -0.14 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
   </body>
 
   <body name="pnp_object" pos="0.15 0.55 0.48">
@@ -15,15 +23,7 @@
     <geom name="pnp_object_geom" type="box" size="0.03 0.02 0.03" mass="0.2" rgba="0.1 0.5 0.9 1"/>
   </body>
 
-  <body name="table2" pos="0 -0.55 0.4">
-    <geom name="table2_top" type="box" size="0.4 0.3 0.04" rgba="0.45 0.3 0.18 1"/>
-    <geom name="table2_leg1" type="box" pos="0.32 0.22 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
-    <geom name="table2_leg2" type="box" pos="-0.32 0.22 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
-    <geom name="table2_leg3" type="box" pos="0.32 -0.22 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
-    <geom name="table2_leg4" type="box" pos="-0.32 -0.22 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
-  </body>
-
-  <body name="ceiling_camera_link" pos="0 0.55 2.5">
+  <body name="ceiling_camera_link" pos="0 0.55 1.5">
     <camera name="ceiling_camera" pos="0 0 0" fovy="58"/>
   </body>
 </mujocoinclude>
