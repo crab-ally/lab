@@ -337,7 +337,7 @@
 
   <!-- TCP (End-Effector) Frame (그리퍼 집게 사이 중앙점) -->
   <joint name="tcp_joint" type="fixed">
-    <origin xyz="0 0 0.1034" rpy="0 0 0"/> <!-- MJCF site pos="0 0 0.12" 반영 -->
+    <origin xyz="0 0 0.11" rpy="0 0 0"/>
     <parent link="hand"/>
     <child link="hand_tcp"/>
   </joint>
