@@ -14,664 +14,721 @@ Publishes:
 
 import argparse
 from pathlib import Path
-import time
+import time, threading
 import numpy as np
-import threading
+
 import rclpy
 from rclpy.node import Node
-from rclpy.action import ActionServer, CancelResponse, GoalResponse
+from rclpy.action import ActionServer, GoalResponse, CancelResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
+
 from sensor_msgs.msg import JointState, Image, CameraInfo
-from std_msgs.msg import String, Float64
 from geometry_msgs.msg import TransformStamped
+from std_msgs.msg import String, Float64
 from tf2_ros import TransformBroadcaster
 from control_msgs.action import FollowJointTrajectory, GripperCommand
+
 import mujoco
 import mujoco.viewer
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SCENE_XML = PROJECT_ROOT / "scene" / "panda_test.xml"
-MODEL_DIR = PROJECT_ROOT / "model" / "franka_emika_panda"
-
-ARM_JOINT_NAMES = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
-FINGER_JOINT_NAMES = ["finger_joint1", "finger_joint2"]
-
-CAMERA_NAME = "ceiling_camera"
-CAMERA_WIDTH = 640
-CAMERA_HEIGHT = 480
-CAMERA_PUBLISH_HZ = 10.0
-
-
-def quat_conjugate(q):
-    q = np.asarray(q, dtype=float)
-    return np.array([q[0], -q[1], -q[2], -q[3]], dtype=float)
-
-
-def quat_multiply(q1, q2):
-    w1, x1, y1, z1 = q1
-    w2, x2, y2, z2 = q2
-    return np.array([
-        w1*w2-x1*x2-y1*y2-z1*z2,
-        w1*x2+x1*w2+y1*z2-z1*y2,
-        w1*y2-x1*z2+y1*w2+z1*x2,
-        w1*z2+x1*y2-y1*x2+z1*w2
-    ], dtype=float)
-
-
-def quat_rotate(q, v):
-    qv = np.array([0.0, v[0], v[1], v[2]], dtype=float)
-    return quat_multiply(quat_multiply(q, qv), quat_conjugate(q))[1:]
 
 
 class MjcfBridgeNode(Node):
     def __init__(self, model, data):
-        super().__init__("mujoco_ros2_bridge")
-        self.model = model
-        self.data = data
+        super().__init__("mujoco_ros_bridge")
+        self.model, self.data = model, data
+        self.lock = threading.Lock()
+        self.running = True
         self.cb_group = ReentrantCallbackGroup()
 
-        self.home_qpos = [0.0, -0.785398, 0.0, -2.35619, 0.0, 1.57079, 0.785398]
-        self._init_robot_pose()
+        # ============================================================
+        # Panda joints
+        # ============================================================
+        self.arm_joints = [f"joint{i}" for i in range(1, 8)]
+        self.finger_joints = ["finger_joint1", "finger_joint2"]
+        self.all_joints = self.arm_joints + self.finger_joints
 
-        self.tf_broadcaster = TransformBroadcaster(self)
-        self.joint_pub = self.create_publisher(JointState, "/joint_states", 10)
-        self.image_pub = self.create_publisher(Image, "/camera/image_raw", 10)
-        self.depth_pub = self.create_publisher(Image, "/camera/depth/image_raw", 10)
-        self.camera_info_pub = self.create_publisher(CameraInfo, "/camera/depth/camera_info", 10)
-        self.segmentation_pub = self.create_publisher(Image, "/camera/segmentation/image_raw", 10)
+        self.joint_ids = {n: mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, n) for n in self.all_joints}
+        self.actuator_ids = {f"joint{i}": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, f"actuator{i}") for i in range(1, 8)}
+        self.GRIPPER_ACTUATOR_ID = 7
 
-        self.camera_name = CAMERA_NAME
-        self.camera_width = CAMERA_WIDTH
-        self.camera_height = CAMERA_HEIGHT
+        # ============================================================
+        # Camera
+        # ============================================================
+        self.camera_name = "ceiling_camera"
+        self.camera_width, self.camera_height = 640, 480
+        self.camera_rate = 10.0
         self.camera_optical_frame = "ceiling_camera_optical_frame"
+        self.camera_link_frame = "ceiling_camera_link"
 
-        cam_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, self.camera_name)
-        if cam_id < 0:
-            raise RuntimeError(f"Camera '{self.camera_name}' not found in MJCF.")
+        # ============================================================
+        # PNP object
+        # ============================================================
+        self.pnp_object_geom = "pnp_object_geom"
+        self.pnp_object_geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, self.pnp_object_geom)
 
-        self.camera_id = cam_id
-        self.renderer = mujoco.Renderer(self.model, height=self.camera_height, width=self.camera_width)
-
-        fovy = float(self.model.cam_fovy[self.camera_id])
-        self.fy = (self.camera_height / 2.0) / np.tan(np.deg2rad(fovy / 2.0))
-        self.fx = self.fy
-        self.cx = (self.camera_width - 1) / 2.0
-        self.cy = (self.camera_height - 1) / 2.0
-
-        self.get_logger().info(
-            f"[CAMERA] {self.camera_name}: {self.camera_width}x{self.camera_height}, "
-            f"fovy={fovy:.2f}, fx={self.fx:.2f}, fy={self.fy:.2f}, "
-            f"cx={self.cx:.2f}, cy={self.cy:.2f}"
-        )
-
+        # ============================================================
+        # Panda geom IDs
+        # ============================================================
+        self.finger_geom_ids = self._collect_finger_geom_ids()
         self.panda_geom_ids = self._collect_panda_geom_ids()
 
-        self.get_logger().info(
-            f"[SEGMENTATION] Panda geom count: {len(self.panda_geom_ids)}"
-        )
+        # ============================================================
+        # ROS publishers
+        # ============================================================
+        self.joint_pub = self.create_publisher(JointState, "/joint_states", 10)
+        self.rgb_pub = self.create_publisher(Image, "/camera/image_raw", 10)
+        self.depth_pub = self.create_publisher(Image, "/camera/depth/image_raw", 10)
+        self.seg_pub = self.create_publisher(Image, "/camera/segmentation/image_raw", 10)
+        self.info_pub = self.create_publisher(CameraInfo, "/camera/depth/camera_info", 10)
+        self.tf_broadcaster = TransformBroadcaster(self)
 
-        self.camera_period = 1.0 / CAMERA_PUBLISH_HZ
-        self.last_camera_publish = 0.0
+        # ============================================================
+        # Gripper topics
+        # ============================================================
+        self.gripper_cmd_pub = self.create_publisher(Float64, "/panda_gripper/command", 10)
+        self.gripper_string_pub = self.create_publisher(String, "/panda_gripper/cmd", 10)
 
-        self.env_bodies = self._collect_env_bodies()
-        self.get_logger().info(
-            f"Auto-tracked environment bodies for TF: {list(self.env_bodies.values())}"
-        )
+        self.create_subscription(String, "/panda_gripper/cmd", self.gripper_string_callback, 10, callback_group=self.cb_group)
+        self.create_subscription(Float64, "/panda_gripper/command", self.gripper_float_callback, 10, callback_group=self.cb_group)
 
-        self._arm_action_server = ActionServer(
-            self,
-            FollowJointTrajectory,
+        # ============================================================
+        # Arm action
+        # ============================================================
+        self.arm_action = ActionServer(
+            self, FollowJointTrajectory,
             "/panda_arm_controller/follow_joint_trajectory",
-            execute_callback=self.execute_arm_trajectory,
-            goal_callback=self.goal_arm_callback,
-            cancel_callback=self.cancel_arm_callback,
+            execute_callback=self.execute_arm,
+            goal_callback=self.arm_goal,
+            cancel_callback=self.cancel_goal,
             callback_group=self.cb_group
         )
 
-        self._gripper_action_server = ActionServer(
-            self,
-            GripperCommand,
+        # ============================================================
+        # Gripper action
+        # ============================================================
+        self.gripper_action = ActionServer(
+            self, GripperCommand,
             "/panda_hand_controller/gripper_action",
-            execute_callback=self.execute_gripper_command,
-            goal_callback=self.goal_gripper_callback,
-            cancel_callback=self.cancel_gripper_callback,
+            execute_callback=self.execute_gripper,
+            goal_callback=self.gripper_goal,
+            cancel_callback=self.cancel_goal,
             callback_group=self.cb_group
         )
 
-        self.gripper_cmd_sub = self.create_subscription(
-            String,
-            "/panda_gripper_cmd",
-            self.gripper_str_callback,
-            10
-        )
+        # ============================================================
+        # Motion parameters
+        # ============================================================
+        self.home_qpos = np.array([0.0, -0.785398, 0.0, -2.35619, 0.0, 1.57079, 0.785398])
+        self.POSITION_TOLERANCE = 0.01
+        self.VELOCITY_TOLERANCE = 0.02
+        self.SETTLE_TIMEOUT = 5.0
+        self.GRIPPER_STABLE_TIME = 0.15
+        self.GRIPPER_TIMEOUT = 2.0
 
-        self.gripper_val_sub = self.create_subscription(
-            Float64,
-            "/panda_gripper_pos",
-            self.gripper_float_callback,
-            10
-        )
+        # ============================================================
+        # Initial pose
+        # ============================================================
+        self._set_initial_pose()
 
-        self.lock = threading.Lock()
-        self.current_arm_goal_handle = None
-        self.active_trajectory = None
-        self.traj_start_time = 0.0
+        # ============================================================
+        # Camera rendering thread
+        # ============================================================
+        self.camera_thread = threading.Thread(target=self._camera_render_loop, daemon=True)
+        self.camera_thread.start()
 
-        self.get_logger().info(
-            "[READY] MuJoCo ROS2 Bridge with MoveIt 2 Controllers initialized."
-        )
+        #self.get_logger().info(f"Panda geom IDs: {sorted(self.panda_geom_ids)}")
+        #self.get_logger().info(f"Finger geom IDs: {sorted(self.finger_geom_ids)}")
+        #self.get_logger().info(f"PNP object geom ID: {self.pnp_object_geom_id}")
+        #if self.pnp_object_geom_id >= 0:
+        #    self.get_logger().info(
+        #        "PNP geom name: " + str(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, self.pnp_object_geom_id))
+        #    )
+        self.get_logger().info("MuJoCo ROS 2 Bridge started.")
 
-    def _init_robot_pose(self):
-        for i, name in enumerate(ARM_JOINT_NAMES):
-            jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
-            if jid >= 0:
-                qpos_adr = self.model.jnt_qposadr[jid]
-                self.data.qpos[qpos_adr] = self.home_qpos[i]
-                if i < len(self.data.ctrl):
-                    self.data.ctrl[i] = self.home_qpos[i]
-
-        if len(self.data.ctrl) >= 8:
-            self.data.ctrl[7] = 255.0
+    # ================================================================
+    # Panda geom collection
+    # ================================================================
 
     def _collect_panda_geom_ids(self):
-        panda_geom_ids = set()
-        robot_root_id = mujoco.mj_name2id(
-            self.model,
-            mujoco.mjtObj.mjOBJ_BODY,
-            "link0"
-        )
-
-        if robot_root_id < 0:
-            raise RuntimeError("Panda root body 'link0' not found.")
-
-        for geom_id in range(self.model.ngeom):
-            body_id = int(self.model.geom_bodyid[geom_id])
-
-            current_id = body_id
-            while current_id != 0:
-                if current_id == robot_root_id:
-                    panda_geom_ids.add(geom_id)
+        # link0을 root로 하는 모든 하위 body의 geom을 Panda로 판정
+        root = self.model.body("link0").id
+        ids = set()
+        for gid in range(self.model.ngeom):
+            body = int(self.model.geom_bodyid[gid])
+            while body > 0:
+                if body == root:
+                    ids.add(gid)
                     break
-                current_id = int(self.model.body_parentid[current_id])
+                body = int(self.model.body_parentid[body])
+        return ids
 
-        return panda_geom_ids
+    def _collect_finger_geom_ids(self):
+        ids = set()
+        for gid in range(self.model.ngeom):
+            body = int(self.model.geom_bodyid[gid])
+            while body > 0:
+                name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, body)
+                if name and ("finger" in name or "hand" in name):
+                    ids.add(gid)
+                    break
+                body = int(self.model.body_parentid[body])
+        return ids
 
-    def _collect_env_bodies(self):
-        env_bodies = {}
-        robot_root_id = mujoco.mj_name2id(
-            self.model,
-            mujoco.mjtObj.mjOBJ_BODY,
-            "link0"
-        )
+    # ================================================================
+    # Initial pose
+    # ================================================================
 
-        for i in range(1, self.model.nbody):
-            body_name = mujoco.mj_id2name(
-                self.model,
-                mujoco.mjtObj.mjOBJ_BODY,
-                i
+    def _set_initial_pose(self):
+        for i, name in enumerate(self.arm_joints):
+            jid = self.joint_ids[name]
+            self.data.qpos[self.model.jnt_qposadr[jid]] = self.home_qpos[i]
+        self.data.ctrl[self.GRIPPER_ACTUATOR_ID] = 255.0
+        mujoco.mj_forward(self.model, self.data)
+
+    # ================================================================
+    # Camera render loop
+    # ================================================================
+
+    def _camera_render_loop(self):
+        renderer = mujoco.Renderer(self.model, height=self.camera_height, width=self.camera_width)
+        depth_renderer = mujoco.Renderer(self.model, height=self.camera_height, width=self.camera_width)
+        seg_renderer = mujoco.Renderer(self.model, height=self.camera_height, width=self.camera_width)
+
+        depth_renderer.enable_depth_rendering()
+        seg_renderer.enable_segmentation_rendering()
+
+        render_data = mujoco.MjData(self.model)
+        period = 1.0 / self.camera_rate
+        next_time = time.monotonic()
+
+        while self.running:
+            next_time += period
+
+            # --------------------------------------------------------
+            # Copy simulation state
+            # --------------------------------------------------------
+            with self.lock:
+                render_data.qpos[:] = self.data.qpos
+                render_data.qvel[:] = self.data.qvel
+                render_data.act[:] = self.data.act
+                if self.model.nmocap:
+                    render_data.mocap_pos[:] = self.data.mocap_pos
+                    render_data.mocap_quat[:] = self.data.mocap_quat
+                mujoco.mj_forward(self.model, render_data)
+
+            # --------------------------------------------------------
+            # RGB
+            # --------------------------------------------------------
+            renderer.update_scene(render_data, camera=self.camera_name)
+            rgb = np.asarray(renderer.render()).copy()
+
+            # --------------------------------------------------------
+            # Depth
+            # --------------------------------------------------------
+            depth_renderer.update_scene(render_data, camera=self.camera_name)
+            depth = np.asarray(depth_renderer.render()).copy()
+
+            # --------------------------------------------------------
+            # Segmentation
+            # --------------------------------------------------------
+            seg_renderer.update_scene(render_data, camera=self.camera_name)
+            seg_raw = np.asarray(seg_renderer.render()).copy()
+
+            # ========================================================
+            # MuJoCo segmentation:
+            #
+            # channel 0 = geom ID
+            # channel 1 = object type
+            #
+            # Panda geom pixel만 제거하고
+            # table / PNP object 등은 유지한다.
+            # ========================================================
+            seg_id = seg_raw[:, :, 0].astype(np.int32)
+            seg_type = seg_raw[:, :, 1].astype(np.int32)
+            geom_type = int(mujoco.mjtObj.mjOBJ_GEOM)
+            geom_mask = seg_type == geom_type
+
+            panda_mask = geom_mask & np.isin(
+                seg_id,
+                np.asarray(list(self.panda_geom_ids), dtype=np.int32)
             )
 
-            if not body_name:
-                continue
+            seg = seg_id.copy()
+            seg[~geom_mask] = 0
+            seg[panda_mask] = 0
 
-            parent_id = int(self.model.body_parentid[i])
-            is_robot = False
-            current_id = i
+            # --------------------------------------------------------
+            # Publish timestamp
+            # --------------------------------------------------------
+            stamp = self.get_clock().now().to_msg()
 
-            while current_id != 0:
-                if current_id == robot_root_id:
-                    is_robot = True
-                    break
-                current_id = int(self.model.body_parentid[current_id])
+            # --------------------------------------------------------
+            # RGB message
+            # --------------------------------------------------------
+            msg = Image()
+            msg.header.stamp, msg.header.frame_id = stamp, self.camera_optical_frame
+            msg.height, msg.width = self.camera_height, self.camera_width
+            msg.encoding, msg.is_bigendian = "rgb8", False
+            msg.step = self.camera_width * 3
+            msg.data = rgb.astype(np.uint8).tobytes()
+            self.rgb_pub.publish(msg)
 
-            if is_robot:
-                continue
+            # --------------------------------------------------------
+            # Depth message
+            # --------------------------------------------------------
+            msg = Image()
+            msg.header.stamp, msg.header.frame_id = stamp, self.camera_optical_frame
+            msg.height, msg.width = self.camera_height, self.camera_width
+            msg.encoding, msg.is_bigendian = "32FC1", False
+            msg.step = self.camera_width * 4
+            msg.data = depth.astype(np.float32).tobytes()
+            self.depth_pub.publish(msg)
 
-            if parent_id == 0:
-                parent_name = "world"
+            # --------------------------------------------------------
+            # Segmentation message
+            # --------------------------------------------------------
+            msg = Image()
+            msg.header.stamp, msg.header.frame_id = stamp, self.camera_optical_frame
+            msg.height, msg.width = self.camera_height, self.camera_width
+            msg.encoding, msg.is_bigendian = "32SC1", False
+            msg.step = self.camera_width * 4
+            msg.data = seg.astype(np.int32).tobytes()
+            self.seg_pub.publish(msg)
+
+            # --------------------------------------------------------
+            # CameraInfo
+            # --------------------------------------------------------
+            self.info_pub.publish(self._camera_info(stamp))
+
+            # --------------------------------------------------------
+            # Maintain camera rate
+            # --------------------------------------------------------
+            sleep_time = next_time - time.monotonic()
+            if sleep_time > 0:
+                time.sleep(sleep_time)
             else:
-                parent_name = mujoco.mj_id2name(
-                    self.model,
-                    mujoco.mjtObj.mjBODY,
-                    parent_id
-                )
-                if not parent_name:
-                    parent_name = "world"
+                next_time = time.monotonic()
 
-            env_bodies[i] = (parent_id, parent_name, body_name)
+        renderer.close()
+        depth_renderer.close()
+        seg_renderer.close()
 
-        return env_bodies
+    # ================================================================
+    # Camera info
+    # ================================================================
 
-    def _get_relative_transform(self, body_id, parent_id):
-        child_pos_world = np.asarray(self.data.xpos[body_id], dtype=float)
-        child_quat_world = np.asarray(self.data.xquat[body_id], dtype=float)
+    def _camera_info(self, stamp):
+        cid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, self.camera_name)
+        fovy = self.model.cam_fovy[cid]
 
-        if parent_id == 0:
-            return child_pos_world, child_quat_world
+        # MuJoCo fovy = vertical FOV
+        fy = (self.camera_height / 2.0) / np.tan(np.deg2rad(fovy) / 2.0)
+        fx = fy * (self.camera_width / self.camera_height)
+        cx = (self.camera_width - 1) / 2.0
+        cy = (self.camera_height - 1) / 2.0
 
-        parent_pos_world = np.asarray(self.data.xpos[parent_id], dtype=float)
-        parent_quat_world = np.asarray(self.data.xquat[parent_id], dtype=float)
-        parent_quat_inv = quat_conjugate(parent_quat_world)
+        msg = CameraInfo()
+        msg.header.stamp, msg.header.frame_id = stamp, self.camera_optical_frame
+        msg.width, msg.height = self.camera_width, self.camera_height
+        msg.k = [fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]
+        msg.p = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
+        msg.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        return msg
 
-        position_delta_world = child_pos_world - parent_pos_world
-        position_parent = quat_rotate(parent_quat_inv, position_delta_world)
-        relative_quat = quat_multiply(parent_quat_inv, child_quat_world)
+    # ================================================================
+    # Joint states
+    # ================================================================
 
-        return position_parent, relative_quat
-
-    def publish_env_tf(self, stamp):
-        transforms = []
-
-        for body_id, (parent_id, parent_name, body_name) in self.env_bodies.items():
-            pos, quat = self._get_relative_transform(body_id, parent_id)
-
-            t = TransformStamped()
-            t.header.stamp = stamp
-            t.header.frame_id = parent_name
-            t.child_frame_id = body_name
-            t.transform.translation.x = float(pos[0])
-            t.transform.translation.y = float(pos[1])
-            t.transform.translation.z = float(pos[2])
-            t.transform.rotation.w = float(quat[0])
-            t.transform.rotation.x = float(quat[1])
-            t.transform.rotation.y = float(quat[2])
-            t.transform.rotation.z = float(quat[3])
-            transforms.append(t)
-
-            if "camera_link" in body_name:
-                optical_tf = TransformStamped()
-                optical_tf.header.stamp = stamp
-                optical_tf.header.frame_id = body_name
-                optical_tf.child_frame_id = body_name.replace(
-                    "_link",
-                    "_optical_frame"
-                )
-                optical_tf.transform.translation.x = 0.0
-                optical_tf.transform.translation.y = 0.0
-                optical_tf.transform.translation.z = 0.0
-                optical_tf.transform.rotation.w = 0.0
-                optical_tf.transform.rotation.x = 1.0
-                optical_tf.transform.rotation.y = 0.0
-                optical_tf.transform.rotation.z = 0.0
-                transforms.append(optical_tf)
-
-        if transforms:
-            self.tf_broadcaster.sendTransform(transforms)
-
-    def publish_joint_states(self, stamp):
+    def publish_joint_states(self):
         msg = JointState()
-        msg.header.stamp = stamp
-        all_joints = ARM_JOINT_NAMES + FINGER_JOINT_NAMES
+        msg.header.stamp = self.get_clock().now().to_msg()
 
-        for jname in all_joints:
-            jid = mujoco.mj_name2id(
-                self.model,
-                mujoco.mjtObj.mjOBJ_JOINT,
-                jname
-            )
-
-            if jid < 0:
-                continue
-
-            qpos_adr = self.model.jnt_qposadr[jid]
-            dof_adr = self.model.jnt_dofadr[jid]
-
-            msg.name.append(jname)
-            msg.position.append(float(self.data.qpos[qpos_adr]))
-            msg.velocity.append(float(self.data.qvel[dof_adr]))
+        for name in self.all_joints:
+            jid = self.joint_ids[name]
+            qadr, vadr = self.model.jnt_qposadr[jid], self.model.jnt_dofadr[jid]
+            msg.name.append(name)
+            msg.position.append(float(self.data.qpos[qadr]))
+            msg.velocity.append(float(self.data.qvel[vadr]))
 
         self.joint_pub.publish(msg)
 
-    def publish_camera(self, stamp):
-        self.renderer.disable_depth_rendering()
-        self.renderer.disable_segmentation_rendering()
-        self.renderer.update_scene(self.data, camera=self.camera_name)
+    # ================================================================
+    # Rotation / quaternion
+    # ================================================================
 
-        rgb = np.asarray(self.renderer.render(), dtype=np.uint8)
+    def _mat_to_quat(self, R):
+        q = np.zeros(4)
+        mujoco.mju_mat2Quat(q, R.reshape(-1))
+        return float(q[1]), float(q[2]), float(q[3]), float(q[0])
 
-        image_msg = Image()
-        image_msg.header.stamp = stamp
-        image_msg.header.frame_id = self.camera_optical_frame
-        image_msg.height = self.camera_height
-        image_msg.width = self.camera_width
-        image_msg.encoding = "rgb8"
-        image_msg.is_bigendian = False
-        image_msg.step = self.camera_width * 3
-        image_msg.data = rgb.tobytes()
-        self.image_pub.publish(image_msg)
+    # ================================================================
+    # Relative transform
+    # ================================================================
 
-        self.renderer.enable_depth_rendering()
-        depth = np.asarray(self.renderer.render(), dtype=np.float32)
+    def _relative_transform(self, body_id, parent_id):
+        p, pp = self.data.xpos[body_id], self.data.xpos[parent_id]
+        R = self.data.xmat[body_id].reshape(3, 3)
+        Rp = self.data.xmat[parent_id].reshape(3, 3)
+        return Rp.T @ (p - pp), Rp.T @ R
 
-        depth_msg = Image()
-        depth_msg.header.stamp = stamp
-        depth_msg.header.frame_id = self.camera_optical_frame
-        depth_msg.height = self.camera_height
-        depth_msg.width = self.camera_width
-        depth_msg.encoding = "32FC1"
-        depth_msg.is_bigendian = False
-        depth_msg.step = self.camera_width * 4
-        depth_msg.data = depth.tobytes()
-        self.depth_pub.publish(depth_msg)
+    # ================================================================
+    # TF
+    # ================================================================
 
-        self.renderer.disable_depth_rendering()
+    def publish_tf(self):
+        stamp = self.get_clock().now().to_msg()
 
-        self.renderer.enable_segmentation_rendering()
-        segmentation = np.asarray(self.renderer.render())
+        # ------------------------------------------------------------
+        # world -> link0
+        # ------------------------------------------------------------
+        root = self.model.body("link0").id
+        t = TransformStamped()
+        t.header.stamp, t.header.frame_id, t.child_frame_id = stamp, "world", "link0"
+        t.transform.translation.x = float(self.data.xpos[root][0])
+        t.transform.translation.y = float(self.data.xpos[root][1])
+        t.transform.translation.z = float(self.data.xpos[root][2])
+        q = self._mat_to_quat(self.data.xmat[root].reshape(3, 3))
+        t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z, t.transform.rotation.w = q
+        self.tf_broadcaster.sendTransform(t)
 
-        if segmentation.ndim == 3 and segmentation.shape[2] >= 2:
-            segmentation_geom = segmentation[:, :, 1].astype(np.int32)
-        else:
-            segmentation_geom = segmentation.astype(np.int32)
+        # ------------------------------------------------------------
+        # world -> ceiling_camera_link
+        # ------------------------------------------------------------
+        cam_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, self.camera_name)
+        cam_body = self.model.cam_bodyid[cam_id]
+        cam_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, cam_body)
 
-        segmentation_msg = Image()
-        segmentation_msg.header.stamp = stamp
-        segmentation_msg.header.frame_id = self.camera_optical_frame
-        segmentation_msg.height = self.camera_height
-        segmentation_msg.width = self.camera_width
-        segmentation_msg.encoding = "32SC1"
-        segmentation_msg.is_bigendian = False
-        segmentation_msg.step = self.camera_width * 4
-        segmentation_msg.data = segmentation_geom.tobytes()
-        self.segmentation_pub.publish(segmentation_msg)
+        if cam_name:
+            t = TransformStamped()
+            t.header.stamp, t.header.frame_id, t.child_frame_id = stamp, "world", self.camera_link_frame
+            t.transform.translation.x = float(self.data.xpos[cam_body][0])
+            t.transform.translation.y = float(self.data.xpos[cam_body][1])
+            t.transform.translation.z = float(self.data.xpos[cam_body][2])
+            q = self._mat_to_quat(self.data.xmat[cam_body].reshape(3, 3))
+            t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z, t.transform.rotation.w = q
+            self.tf_broadcaster.sendTransform(t)
 
-        self.renderer.disable_segmentation_rendering()
+        # ------------------------------------------------------------
+        # ceiling_camera_link -> optical frame
+        #
+        # MuJoCo:
+        #   +X right
+        #   +Y up
+        #   -Z forward
+        #
+        # ROS optical:
+        #   +X right
+        #   +Y down
+        #   +Z forward
+        #
+        # 180 degree rotation around X
+        # ------------------------------------------------------------
+        t = TransformStamped()
+        t.header.stamp, t.header.frame_id, t.child_frame_id = stamp, self.camera_link_frame, self.camera_optical_frame
+        t.transform.rotation.x, t.transform.rotation.y = 1.0, 0.0
+        t.transform.rotation.z, t.transform.rotation.w = 0.0, 0.0
+        self.tf_broadcaster.sendTransform(t)
 
-        info_msg = CameraInfo()
-        info_msg.header.stamp = stamp
-        info_msg.header.frame_id = self.camera_optical_frame
-        info_msg.width = self.camera_width
-        info_msg.height = self.camera_height
-        info_msg.distortion_model = "plumb_bob"
-        info_msg.d = [0.0, 0.0, 0.0, 0.0, 0.0]
-        info_msg.k = [
-            float(self.fx), 0.0, float(self.cx),
-            0.0, float(self.fy), float(self.cy),
-            0.0, 0.0, 1.0
-        ]
-        info_msg.r = [
-            1.0, 0.0, 0.0,
-            0.0, 1.0, 0.0,
-            0.0, 0.0, 1.0
-        ]
-        info_msg.p = [
-            float(self.fx), 0.0, float(self.cx), 0.0,
-            0.0, float(self.fy), float(self.cy), 0.0,
-            0.0, 0.0, 1.0, 0.0
-        ]
-        self.camera_info_pub.publish(info_msg)
+        # ------------------------------------------------------------
+        # Panda body TF
+        # ------------------------------------------------------------
+        for bid in range(1, self.model.nbody):
+            name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, bid)
+            if not name or name in ("link0", self.camera_link_frame):
+                continue
 
-    def goal_arm_callback(self, goal_request):
-        self.get_logger().info(
-            f"[ACTION] Arm trajectory goal received with "
-            f"{len(goal_request.trajectory.points)} points."
-        )
+            parent = self.model.body_parentid[bid]
+            parent_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, parent)
+            if not parent_name or parent == 0:
+                continue
+
+            pos, rot = self._relative_transform(bid, parent)
+            t = TransformStamped()
+            t.header.stamp, t.header.frame_id, t.child_frame_id = stamp, parent_name, name
+            t.transform.translation.x, t.transform.translation.y, t.transform.translation.z = map(float, pos)
+            q = self._mat_to_quat(rot)
+            t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z, t.transform.rotation.w = q
+            self.tf_broadcaster.sendTransform(t)
+
+    # ================================================================
+    # Arm action callbacks
+    # ================================================================
+
+    def arm_goal(self, goal):
+        return GoalResponse.REJECT if not goal.request.trajectory.joint_names else GoalResponse.ACCEPT
+
+    def gripper_goal(self, goal):
         return GoalResponse.ACCEPT
 
-    def cancel_arm_callback(self, goal_handle):
-        self.get_logger().info("[ACTION] Arm trajectory goal cancelled.")
+    def cancel_goal(self, goal):
         return CancelResponse.ACCEPT
 
-    def execute_arm_trajectory(self, goal_handle):
-        trajectory = goal_handle.request.trajectory
-        joint_names = trajectory.joint_names
-        points = trajectory.points
+    async def _sleep(self, sec):
+        await __import__("asyncio").sleep(sec)
 
-        if not points:
-            goal_handle.succeed()
+    # ================================================================
+    # Arm execution
+    # ================================================================
+
+    async def execute_arm(self, goal_handle):
+        traj = goal_handle.request.trajectory
+
+        if not traj.points:
+            goal_handle.abort()
             result = FollowJointTrajectory.Result()
-            result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
+            result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
             return result
 
-        joint_indices = [
-            ARM_JOINT_NAMES.index(name) if name in ARM_JOINT_NAMES else -1
-            for name in joint_names
-        ]
+        name_to_idx = {n: i for i, n in enumerate(traj.joint_names)}
 
-        start_time = time.time()
-        point_idx = 0
-        total_points = len(points)
+        if any(n not in name_to_idx for n in self.arm_joints):
+            goal_handle.abort()
+            result = FollowJointTrajectory.Result()
+            result.error_code = FollowJointTrajectory.Result.INVALID_JOINTS
+            return result
 
-        self.get_logger().info(
-            f"[ACTION] Executing trajectory with {total_points} waypoints..."
-        )
+        with self.lock:
+            current = np.array([self.data.qpos[self.model.jnt_qposadr[self.joint_ids[n]]] for n in self.arm_joints])
 
-        while rclpy.ok():
+        prev_q, prev_t = current, 0.0
+
+        for point in traj.points:
             if goal_handle.is_cancel_requested:
                 goal_handle.canceled()
+                return FollowJointTrajectory.Result()
+
+            t = float(point.time_from_start.sec) + point.time_from_start.nanosec * 1e-9
+            target = np.array([point.positions[name_to_idx[n]] for n in self.arm_joints], dtype=float)
+            dt = max(t - prev_t, 0.001)
+            steps = max(1, int(np.ceil(dt / 0.005)))
+
+            for k in range(1, steps + 1):
+                q = prev_q + (target - prev_q) * (k / steps)
+                with self.lock:
+                    for i, name in enumerate(self.arm_joints):
+                        self.data.ctrl[self.actuator_ids[name]] = q[i]
+                await self._sleep(dt / steps)
+
+            prev_q, prev_t = target, t
+
+        deadline = time.monotonic() + self.SETTLE_TIMEOUT
+
+        while time.monotonic() < deadline:
+            with self.lock:
+                q = np.array([self.data.qpos[self.model.jnt_qposadr[self.joint_ids[n]]] for n in self.arm_joints])
+                v = np.array([self.data.qvel[self.model.jnt_dofadr[self.joint_ids[n]]] for n in self.arm_joints])
+
+            if np.max(np.abs(q - prev_q)) <= self.POSITION_TOLERANCE and np.max(np.abs(v)) <= self.VELOCITY_TOLERANCE:
                 result = FollowJointTrajectory.Result()
                 result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
+                goal_handle.succeed()
                 return result
 
-            now_sec = time.time() - start_time
+            await self._sleep(0.01)
 
-            while point_idx < total_points - 1:
-                pt_time = (
-                    points[point_idx].time_from_start.sec +
-                    points[point_idx].time_from_start.nanosec * 1e-9
-                )
-                next_pt_time = (
-                    points[point_idx + 1].time_from_start.sec +
-                    points[point_idx + 1].time_from_start.nanosec * 1e-9
-                )
-
-                if now_sec < next_pt_time:
-                    break
-
-                point_idx += 1
-
-            if point_idx >= total_points - 1:
-                final_pt = points[-1]
-
-                with self.lock:
-                    for i, j_idx in enumerate(joint_indices):
-                        if 0 <= j_idx < 7 and i < len(final_pt.positions):
-                            self.data.ctrl[j_idx] = float(final_pt.positions[i])
-
-                final_time = (
-                    final_pt.time_from_start.sec +
-                    final_pt.time_from_start.nanosec * 1e-9
-                )
-
-                if now_sec >= final_time + 0.1:
-                    break
-
-            else:
-                p0 = points[point_idx]
-                p1 = points[point_idx + 1]
-
-                t0 = (
-                    p0.time_from_start.sec +
-                    p0.time_from_start.nanosec * 1e-9
-                )
-                t1 = (
-                    p1.time_from_start.sec +
-                    p1.time_from_start.nanosec * 1e-9
-                )
-
-                alpha = max(
-                    0.0,
-                    min(
-                        1.0,
-                        (now_sec - t0) / max(1e-4, t1 - t0)
-                    )
-                )
-
-                with self.lock:
-                    for i, j_idx in enumerate(joint_indices):
-                        if (
-                            0 <= j_idx < 7 and
-                            i < len(p0.positions) and
-                            i < len(p1.positions)
-                        ):
-                            self.data.ctrl[j_idx] = float(
-                                p0.positions[i] +
-                                alpha * (p1.positions[i] - p0.positions[i])
-                            )
-
-            time.sleep(0.005)
-
-        goal_handle.succeed()
-        self.get_logger().info("[ACTION] Arm trajectory completed successfully.")
-
+        goal_handle.abort()
         result = FollowJointTrajectory.Result()
-        result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
+        result.error_code = FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
         return result
 
-    def goal_gripper_callback(self, goal_request):
-        self.get_logger().info(
-            f"[ACTION] Gripper command received: pos={goal_request.command.position}"
-        )
-        return GoalResponse.ACCEPT
+    # ================================================================
+    # Gripper
+    # ================================================================
 
-    def cancel_gripper_callback(self, goal_handle):
-        return CancelResponse.ACCEPT
-
-    def execute_gripper_command(self, goal_handle):
-        pos = goal_handle.request.command.position
-        ctrl_val = float(np.clip(pos / 0.04 * 255.0, 0.0, 255.0))
+    def _gripper_position(self):
+        if not self.finger_joints:
+            return 0.0
 
         with self.lock:
-            if len(self.data.ctrl) >= 8:
-                self.data.ctrl[7] = ctrl_val
+            values = [self.data.qpos[self.model.jnt_qposadr[self.joint_ids[n]]] for n in self.finger_joints]
 
-        time.sleep(0.4)
+        return float(np.mean(values))
 
-        goal_handle.succeed()
+    def _gripper_contact(self):
+        if self.pnp_object_geom_id < 0:
+            return False
+
+        with self.lock:
+            for i in range(self.data.ncon):
+                contact = self.data.contact[i]
+                a, b = int(contact.geom1), int(contact.geom2)
+
+                if ((a == self.pnp_object_geom_id and b in self.finger_geom_ids) or
+                    (b == self.pnp_object_geom_id and a in self.finger_geom_ids)):
+                    return True
+
+        return False
+
+    async def execute_gripper(self, goal_handle):
+        target = float(np.clip(goal_handle.request.command.position, 0.0, 0.04))
+        ctrl = float(np.clip(target / 0.04 * 255.0, 0.0, 255.0))
+
+        with self.lock:
+            self.data.ctrl[self.GRIPPER_ACTUATOR_ID] = ctrl
+
+        start, stable_start = time.monotonic(), None
+
+        while time.monotonic() - start < self.GRIPPER_TIMEOUT:
+            if goal_handle.is_cancel_requested:
+                goal_handle.canceled()
+                return GripperCommand.Result()
+
+            pos = self._gripper_position()
+
+            if target > 0.02:
+                reached = pos >= 0.035 and self._gripper_velocity_ok()
+            else:
+                reached = self._gripper_velocity_ok() and self._gripper_contact()
+
+            if reached:
+                if stable_start is None:
+                    stable_start = time.monotonic()
+                elif time.monotonic() - stable_start >= self.GRIPPER_STABLE_TIME:
+                    result = GripperCommand.Result()
+                    result.position, result.reached_goal, result.stalled = pos, True, False
+                    goal_handle.succeed()
+                    return result
+            else:
+                stable_start = None
+
+            await self._sleep(0.01)
 
         result = GripperCommand.Result()
-        result.position = pos
-        result.reached_goal = True
+        result.position, result.reached_goal, result.stalled = self._gripper_position(), False, True
+        goal_handle.abort()
         return result
 
-    def set_gripper_state(self, open_state: bool):
+    def _gripper_velocity_ok(self):
         with self.lock:
-            if len(self.data.ctrl) >= 8:
-                self.data.ctrl[7] = 255.0 if open_state else 0.0
+            v = [abs(self.data.qvel[self.model.jnt_dofadr[self.joint_ids[n]]]) for n in self.finger_joints]
+        return max(v, default=0.0) <= self.VELOCITY_TOLERANCE
 
-    def gripper_str_callback(self, msg: String):
-        cmd = msg.data.strip().lower()
+    # ================================================================
+    # Gripper topic callbacks
+    # ================================================================
 
-        if cmd in ["open", "release"]:
-            self.set_gripper_state(True)
-            self.get_logger().info("[GRIPPER] Opened (ctrl=255)")
+    def gripper_string_callback(self, msg):
+        cmd = msg.data.lower().strip()
 
-        elif cmd in ["close", "grasp"]:
-            self.set_gripper_state(False)
-            self.get_logger().info("[GRIPPER] Closed (ctrl=0)")
-
-    def gripper_float_callback(self, msg: Float64):
-        val = max(0.0, min(255.0, msg.data))
+        if cmd in ("open", "release"):
+            value = 255.0
+        elif cmd in ("close", "grasp"):
+            value = 0.0
+        else:
+            return
 
         with self.lock:
-            if len(self.data.ctrl) >= 8:
-                self.data.ctrl[7] = val
+            self.data.ctrl[self.GRIPPER_ACTUATOR_ID] = value
 
-    def step_and_publish(self):
-        stamp = self.get_clock().now().to_msg()
-        self.publish_joint_states(stamp)
-        self.publish_env_tf(stamp)
+    def gripper_float_callback(self, msg):
+        with self.lock:
+            self.data.ctrl[self.GRIPPER_ACTUATOR_ID] = float(np.clip(msg.data, 0.0, 255.0))
 
-        now = time.monotonic()
+    # ================================================================
+    # Destroy
+    # ================================================================
 
-        if now - self.last_camera_publish >= self.camera_period:
-            self.publish_camera(stamp)
-            self.last_camera_publish = now
+    def destroy_node(self):
+        self.running = False
 
+        if hasattr(self, "camera_thread") and self.camera_thread.is_alive():
+            self.camera_thread.join(timeout=2.0)
 
-def build_vfs():
-    vfs_assets = {}
-
-    world_xml = PROJECT_ROOT / "world" / "test.xml"
-    if world_xml.exists():
-        vfs_assets["../world/test.xml"] = world_xml.read_bytes()
-
-    panda_xml = MODEL_DIR / "panda.xml"
-    if panda_xml.exists():
-        vfs_assets["../model/franka_emika_panda/panda.xml"] = panda_xml.read_bytes()
-
-    assets_dir = MODEL_DIR / "assets"
-
-    if assets_dir.exists():
-        for file_path in assets_dir.rglob("*"):
-            if file_path.is_file():
-                rel_path = file_path.relative_to(assets_dir)
-                vfs_path = f"assets/{str(rel_path).replace(chr(92), '/')}"
-                vfs_assets[vfs_path] = file_path.read_bytes()
-
-    return vfs_assets
+        super().destroy_node()
 
 
-def main(args=None):
-    parser = argparse.ArgumentParser(
-        description="MuJoCo ROS2 MoveIt2 Auto Bridge"
-    )
-    parser.add_argument(
-        "--headless",
-        action="store_true",
-        help="Run without viewer"
-    )
+# ====================================================================
+# MuJoCo model loading
+# ====================================================================
 
-    cli_args, ros_args = parser.parse_known_args()
-
-    rclpy.init(args=ros_args)
-
-    xml_string = SCENE_XML.read_text(encoding="utf-8")
-    vfs_assets = build_vfs()
+def load_model(xml_path):
+    xml_path = Path(xml_path)
 
     try:
-        model = mujoco.MjModel.from_xml_string(
-            xml_string,
-            assets=vfs_assets
-        )
+        return mujoco.MjModel.from_xml_path(str(xml_path))
     except Exception as e:
-        print(f"[ERROR] Failed to load MJCF: {e}")
-        rclpy.shutdown()
-        return
+        print(f"[WARN] from_xml_path failed: {e}")
+        print("[INFO] Trying VFS fallback...")
 
+    root, vfs = Path("/workspace"), {}
+
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in {".xml", ".stl", ".obj", ".png", ".jpg", ".jpeg"}:
+            continue
+        try:
+            vfs[path.relative_to(root).as_posix()] = path.read_bytes()
+        except Exception:
+            pass
+
+    print(f"[INFO] VFS files: {len(vfs)}")
+    return mujoco.MjModel.from_xml_string(xml_path.read_text(), assets=vfs)
+
+
+# ====================================================================
+# Main
+# ====================================================================
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default="/workspace/scene/panda_test.xml")
+    parser.add_argument("--headless", action="store_true")
+    args = parser.parse_args()
+
+    rclpy.init()
+    model = load_model(args.model)
     data = mujoco.MjData(model)
     node = MjcfBridgeNode(model, data)
 
-    executor = rclpy.executors.MultiThreadedExecutor()
+    executor = rclpy.executors.MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
 
-    spin_thread = threading.Thread(
-        target=executor.spin,
-        daemon=True
-    )
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
 
     try:
-        if not cli_args.headless:
+        if args.headless:
+            print("[INFO] Running in headless mode (no viewer)...", flush=True)
+
+            while rclpy.ok():
+                with node.lock:
+                    mujoco.mj_step(model, data)
+                    node.publish_joint_states()
+                    node.publish_tf()
+                time.sleep(0.002)
+
+        else:
+            print("[INFO] Launching MuJoCo passive viewer...", flush=True)
+
             with mujoco.viewer.launch_passive(model, data) as viewer:
-                viewer.cam.lookat[:] = [0, 0, 0]
-                viewer.cam.distance = 4
-                viewer.cam.azimuth = 0
-                viewer.cam.elevation = -45
+                print("[INFO] MuJoCo passive viewer launched successfully.", flush=True)
 
                 while viewer.is_running() and rclpy.ok():
                     with node.lock:
                         mujoco.mj_step(model, data)
-                        node.step_and_publish()
+                        node.publish_joint_states()
+                        node.publish_tf()
 
                     viewer.sync()
                     time.sleep(0.002)
 
-        else:
-            while rclpy.ok():
-                with node.lock:
-                    mujoco.mj_step(model, data)
-                    node.step_and_publish()
-
-                time.sleep(0.002)
+                print("[INFO] Viewer closed or loop finished.", flush=True)
 
     except KeyboardInterrupt:
-        pass
+        print("[INFO] KeyboardInterrupt received.", flush=True)
+
+    except Exception as e:
+        import traceback
+        print(f"[ERROR] Exception in simulation loop: {e}", flush=True)
+        traceback.print_exc()
 
     finally:
+        print("[INFO] Shutting down bridge node...", flush=True)
+
+        node.running = False
+        executor.shutdown()
         node.destroy_node()
         rclpy.shutdown()
-        spin_thread.join(timeout=1.0)
+        spin_thread.join(timeout=2.0)
 
 
 if __name__ == "__main__":
