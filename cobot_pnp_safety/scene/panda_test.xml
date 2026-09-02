@@ -1,5 +1,5 @@
 <mujoco model="panda_scene">
-  <compiler angle="radian"/>
+  <compiler angle="radian" meshdir="../model/franka_emika_panda/assets"/>
 
   <visual>
     <headlight diffuse="0.8 0.8 0.8" ambient="0.5 0.5 0.5" specular="0.2 0.2 0.2"/>
