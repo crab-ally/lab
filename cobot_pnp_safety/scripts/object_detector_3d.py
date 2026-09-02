@@ -12,8 +12,10 @@ TF:
 Output:
   - /object_pointcloud
   - /target_object_pose
-      X/Y : 물체 Bounding Box 중심
-      Z   : 물체 중심
+      pose  : 물체 중심 PoseStamped
+      height: 물체 높이
+      size_x: 물체 X 크기
+      size_y: 물체 Y 크기
   - /detected_objects_markers
 """
 
@@ -29,6 +31,8 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 from tf2_ros import Buffer, TransformListener
 import tf2_geometry_msgs
+
+from perception_safety_pkg.msg import TargetObjectPose
 
 
 def create_pointcloud2_msg(stamp, frame_id, points):
@@ -95,10 +99,7 @@ def ransac_plane_segmentation(points, distance_threshold=0.015, max_iterations=1
     signed_distances = np.dot(points, normal) + d
 
     # 테이블에서 1.5cm ~ 40cm 위에 있는 점만 물체 후보
-    object_indices = np.where(
-        (signed_distances > distance_threshold) &
-        (signed_distances < 0.40)
-    )[0]
+    object_indices = np.where((signed_distances > distance_threshold) & (signed_distances < 0.40))[0]
 
     object_points = points[object_indices]
 
@@ -134,49 +135,17 @@ class Ransac3DObjectDetector(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        self.pose_pub = self.create_publisher(
-            PoseStamped,
-            "/target_object_pose",
-            10
-        )
+        self.pose_pub = self.create_publisher(TargetObjectPose, "/target_object_pose", 10)
+        self.marker_pub = self.create_publisher(MarkerArray, "/detected_objects_markers", 10)
+        self.cloud_pub = self.create_publisher(PointCloud2, "/object_pointcloud", 10)
 
-        self.marker_pub = self.create_publisher(
-            MarkerArray,
-            "/detected_objects_markers",
-            10
-        )
+        self.depth_sub = self.create_subscription(Image, self.depth_topic, self.depth_callback, 10)
+        self.camera_info_sub = self.create_subscription(CameraInfo, self.camera_info_topic, self.camera_info_callback, 10)
 
-        self.cloud_pub = self.create_publisher(
-            PointCloud2,
-            "/object_pointcloud",
-            10
-        )
+        self.timer = self.create_timer(0.1, self.process_detection)
 
-        self.depth_sub = self.create_subscription(
-            Image,
-            self.depth_topic,
-            self.depth_callback,
-            10
-        )
-
-        self.camera_info_sub = self.create_subscription(
-            CameraInfo,
-            self.camera_info_topic,
-            self.camera_info_callback,
-            10
-        )
-
-        self.timer = self.create_timer(
-            0.1,
-            self.process_detection
-        )
-
-        self.get_logger().info(
-            "[INIT] 3D RANSAC + DBSCAN Object Detector started."
-        )
-        self.get_logger().info(
-            f"[INIT] Depth topic: {self.depth_topic}"
-        )
+        self.get_logger().info("[INIT] 3D RANSAC + DBSCAN Object Detector started.")
+        self.get_logger().info(f"[INIT] Depth topic: {self.depth_topic}")
 
     def camera_info_callback(self, msg):
         if self.camera_info_received:
@@ -191,9 +160,7 @@ class Ransac3DObjectDetector(Node):
         self.cy = float(msg.k[5])
 
         if self.fx <= 0.0 or self.fy <= 0.0:
-            self.get_logger().error(
-                "[CAMERA INFO] Invalid camera intrinsics."
-            )
+            self.get_logger().error("[CAMERA INFO] Invalid camera intrinsics.")
             return
 
         self.camera_info_received = True
@@ -217,61 +184,36 @@ class Ransac3DObjectDetector(Node):
                 return
 
             if msg.step < msg.width * 4:
-                self.get_logger().warn(
-                    "[DEPTH] Invalid step size.",
-                    throttle_duration_sec=3.0
-                )
+                self.get_logger().warn("[DEPTH] Invalid step size.", throttle_duration_sec=3.0)
                 return
 
             if msg.step == msg.width * 4:
-                depth = np.frombuffer(
-                    msg.data,
-                    dtype=np.float32
-                ).reshape(msg.height, msg.width)
+                depth = np.frombuffer(msg.data, dtype=np.float32).reshape(msg.height, msg.width)
             else:
-                depth = np.frombuffer(
-                    msg.data,
-                    dtype=np.uint8
-                ).reshape(msg.height, msg.step)
-
-                depth = depth[:, :msg.width * 4].view(np.float32).reshape(
-                    msg.height,
-                    msg.width
-                )
+                depth = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.step)
+                depth = depth[:, :msg.width * 4].view(np.float32).reshape(msg.height, msg.width)
 
             self.latest_depth = depth.copy()
             self.latest_depth_stamp = msg.header.stamp
             self.depth_received = True
 
         except Exception as e:
-            self.get_logger().error(
-                f"[DEPTH] Failed to parse depth image: {e}",
-                throttle_duration_sec=3.0
-            )
+            self.get_logger().error(f"[DEPTH] Failed to parse depth image: {e}", throttle_duration_sec=3.0)
 
     def generate_point_cloud(self, depth):
         if self.fx is None or self.fy is None:
             return np.empty((0, 3), dtype=np.float32)
 
         sampled = depth[::self.stride, ::self.stride]
-
         h, w = sampled.shape
 
-        v_coords, u_coords = np.indices(
-            (h, w),
-            dtype=np.float64
-        )
+        v_coords, u_coords = np.indices((h, w), dtype=np.float64)
 
         u = u_coords * self.stride
         v = v_coords * self.stride
-
         z = sampled.astype(np.float64)
 
-        valid_mask = (
-            np.isfinite(z) &
-            (z > 0.20) &
-            (z < 2.30)
-        )
+        valid_mask = np.isfinite(z) & (z > 0.20) & (z < 2.30)
 
         if not np.any(valid_mask):
             return np.empty((0, 3), dtype=np.float32)
@@ -290,28 +232,17 @@ class Ransac3DObjectDetector(Node):
 
     def process_detection(self):
         try:
-            if not self.camera_info_received:
-                return
-
-            if not self.depth_received:
-                return
-
-            if self.latest_depth is None:
+            if not self.camera_info_received or not self.depth_received or self.latest_depth is None:
                 return
 
             depth = self.latest_depth
-
             points = self.generate_point_cloud(depth)
 
             if len(points) < 100:
                 self.clear_markers()
                 return
 
-            plane_eq, inliers, object_points = ransac_plane_segmentation(
-                points,
-                distance_threshold=0.015,
-                max_iterations=120
-            )
+            plane_eq, inliers, object_points = ransac_plane_segmentation(points, distance_threshold=0.015, max_iterations=120)
 
             if plane_eq is None:
                 self.clear_markers()
@@ -324,23 +255,13 @@ class Ransac3DObjectDetector(Node):
             plane_normal, plane_d = plane_eq
 
             stamp = self.latest_depth_stamp
-
             if stamp is None:
                 stamp = self.get_clock().now().to_msg()
 
-            cloud_msg = create_pointcloud2_msg(
-                stamp,
-                self.camera_optical_frame,
-                object_points
-            )
-
+            cloud_msg = create_pointcloud2_msg(stamp, self.camera_optical_frame, object_points)
             self.cloud_pub.publish(cloud_msg)
 
-            clustering = DBSCAN(
-                eps=0.06,
-                min_samples=8
-            ).fit(object_points)
-
+            clustering = DBSCAN(eps=0.06, min_samples=8).fit(object_points)
             labels = clustering.labels_
 
             unique_labels = set(labels)
@@ -370,18 +291,13 @@ class Ransac3DObjectDetector(Node):
                     continue
 
                 # ---------------------------------------------------------
-                # 1. 물체 점들을 테이블 평면 기준으로 변환
+                # 1. 물체 높이
                 # ---------------------------------------------------------
 
-                distances_from_plane = (
-                    np.dot(cluster_pts, plane_normal) + plane_d
-                )
+                distances_from_plane = np.dot(cluster_pts, plane_normal) + plane_d
+                estimated_height = float(np.max(distances_from_plane))
 
-                estimated_height = float(
-                    np.max(distances_from_plane)
-                )
-
-                if (estimated_height < 0.01) or (estimated_height > 0.40):
+                if estimated_height < 0.01 or estimated_height > 0.40:
                     continue
 
                 # ---------------------------------------------------------
@@ -395,16 +311,11 @@ class Ransac3DObjectDetector(Node):
                 size_y = float(max_bound[1] - min_bound[1])
 
                 # ---------------------------------------------------------
-                # 3. 물체 XY 중심 [Bounding Box 기준]
+                # 3. 물체 XY 중심
                 # ---------------------------------------------------------
 
-                center_x_cam = float(
-                    (min_bound[0] + max_bound[0]) / 2.0
-                )
-
-                center_y_cam = float(
-                    (min_bound[1] + max_bound[1]) / 2.0
-                )
+                center_x_cam = float((min_bound[0] + max_bound[0]) / 2.0)
+                center_y_cam = float((min_bound[1] + max_bound[1]) / 2.0)
 
                 # ---------------------------------------------------------
                 # 4. 물체 중심 XY 위치에서 테이블 Z 계산
@@ -415,51 +326,27 @@ class Ransac3DObjectDetector(Node):
                 if abs(float(nz)) < 1e-6:
                     continue
 
-                z_table_cam = float(
-                    -(
-                        float(nx) * center_x_cam +
-                        float(ny) * center_y_cam +
-                        float(plane_d)
-                    ) / float(nz)
-                )
+                z_table_cam = float(-(float(nx) * center_x_cam + float(ny) * center_y_cam + float(plane_d)) / float(nz))
 
                 # ---------------------------------------------------------
-                # 5. 물체 상단면 Z
-                #    - 디버깅/계산용
+                # 5. 물체 상단 Z
                 # ---------------------------------------------------------
 
-                z_object_top_cam = float(
-                    z_table_cam +
-                    estimated_height / float(nz)
-                )
+                z_object_top_cam = float(z_table_cam + estimated_height / float(nz))
 
                 # ---------------------------------------------------------
                 # 6. 물체 중심 Z
-                #    - Bounding Box 중심
-                #    - /target_object_pose의 Z로 사용
                 # ---------------------------------------------------------
 
-                z_object_center_cam = float(
-                    z_table_cam +
-                    estimated_height / (2.0 * float(nz))
-                )
+                z_object_center_cam = float(z_table_cam + estimated_height / (2.0 * float(nz)))
 
                 # ---------------------------------------------------------
-                # 7. /target_object_pose
-                #
-                #    X = 물체 중심 X
-                #    Y = 물체 중심 Y
-                #    Z = 물체 중심 Z
-                #
-                #    여기서는 TCP 보정을 하지 않는다.
-                #    TCP/fingertip 보정은 Pick & Place에서 처리한다.
+                # 7. 물체 중심을 link0으로 변환
                 # ---------------------------------------------------------
 
                 pt_cam = PointStamped()
-
                 pt_cam.header.stamp = stamp
                 pt_cam.header.frame_id = self.camera_optical_frame
-
                 pt_cam.point.x = float(center_x_cam)
                 pt_cam.point.y = float(center_y_cam)
                 pt_cam.point.z = float(z_object_center_cam)
@@ -468,27 +355,17 @@ class Ransac3DObjectDetector(Node):
                     pt_robot = self.tf_buffer.transform(
                         pt_cam,
                         self.target_frame,
-                        timeout=rclpy.duration.Duration(
-                            seconds=0.05
-                        )
+                        timeout=rclpy.duration.Duration(seconds=0.05)
                     )
-
                 except Exception as e:
-                    self.get_logger().warn(
-                        f"[TF ERROR] {e}",
-                        throttle_duration_sec=2.0
-                    )
+                    self.get_logger().warn(f"[TF ERROR] {e}", throttle_duration_sec=2.0)
                     continue
 
                 target_x = float(pt_robot.point.x)
                 target_y = float(pt_robot.point.y)
                 target_z = float(pt_robot.point.z)
 
-                if not (
-                    np.isfinite(target_x) and
-                    np.isfinite(target_y) and
-                    np.isfinite(target_z)
-                ):
+                if not np.isfinite([target_x, target_y, target_z]).all():
                     continue
 
                 # ---------------------------------------------------------
@@ -497,25 +374,24 @@ class Ransac3DObjectDetector(Node):
 
                 if valid_cluster_idx == 0:
 
-                    pose_msg = PoseStamped()
+                    target_msg = TargetObjectPose()
 
-                    pose_msg.header.stamp = stamp
-                    pose_msg.header.frame_id = self.target_frame
+                    target_msg.pose.header.stamp = stamp
+                    target_msg.pose.header.frame_id = self.target_frame
+                    target_msg.pose.pose.position.x = target_x
+                    target_msg.pose.pose.position.y = target_y
+                    target_msg.pose.pose.position.z = target_z
+                    target_msg.pose.pose.orientation.w = 1.0
 
-                    pose_msg.pose.position.x = target_x
-                    pose_msg.pose.position.y = target_y
-                    pose_msg.pose.position.z = target_z
+                    target_msg.height = float(estimated_height)
+                    target_msg.size_x = float(size_x)
+                    target_msg.size_y = float(size_y)
 
-                    pose_msg.pose.orientation.w = 1.0
-
-                    self.pose_pub.publish(pose_msg)
+                    self.pose_pub.publish(target_msg)
 
                     self.get_logger().info(
-                        f"[TARGET DETECTED] "
-                        f"Center Pos(link0): "
-                        f"({target_x:.3f}, "
-                        f"{target_y:.3f}, "
-                        f"{target_z:.3f}) | "
+                        f"[TARGET DETECTED] Center Pos(link0): "
+                        f"({target_x:.3f}, {target_y:.3f}, {target_z:.3f}) | "
                         f"Object Size: "
                         f"{size_x * 100:.1f} x "
                         f"{size_y * 100:.1f} x "
@@ -528,10 +404,8 @@ class Ransac3DObjectDetector(Node):
                 # ---------------------------------------------------------
 
                 center_pt_cam = PointStamped()
-
                 center_pt_cam.header.stamp = stamp
                 center_pt_cam.header.frame_id = self.camera_optical_frame
-
                 center_pt_cam.point.x = float(center_x_cam)
                 center_pt_cam.point.y = float(center_y_cam)
                 center_pt_cam.point.z = float(z_object_center_cam)
@@ -540,11 +414,8 @@ class Ransac3DObjectDetector(Node):
                     center_pt_robot = self.tf_buffer.transform(
                         center_pt_cam,
                         self.target_frame,
-                        timeout=rclpy.duration.Duration(
-                            seconds=0.05
-                        )
+                        timeout=rclpy.duration.Duration(seconds=0.05)
                     )
-
                 except Exception as e:
                     self.get_logger().warn(
                         f"[TF ERROR] Marker center transform failed: {e}",
@@ -557,13 +428,10 @@ class Ransac3DObjectDetector(Node):
                 marker_center_z = float(center_pt_robot.point.z)
 
                 box_marker = Marker()
-
                 box_marker.header.frame_id = self.target_frame
                 box_marker.header.stamp = stamp
-
                 box_marker.ns = "object_bbox"
                 box_marker.id = valid_cluster_idx * 2
-
                 box_marker.type = Marker.CUBE
                 box_marker.action = Marker.ADD
 
@@ -588,22 +456,16 @@ class Ransac3DObjectDetector(Node):
                 # ---------------------------------------------------------
 
                 text_marker = Marker()
-
                 text_marker.header.frame_id = self.target_frame
                 text_marker.header.stamp = stamp
-
                 text_marker.ns = "object_label"
                 text_marker.id = valid_cluster_idx * 2 + 1
-
                 text_marker.type = Marker.TEXT_VIEW_FACING
                 text_marker.action = Marker.ADD
 
                 text_marker.pose.position.x = marker_center_x
                 text_marker.pose.position.y = marker_center_y
-                text_marker.pose.position.z = float(
-                    target_z + 0.05
-                )
-
+                text_marker.pose.position.z = float(target_z + 0.05)
                 text_marker.pose.orientation.w = 1.0
 
                 text_marker.scale.z = 0.035
@@ -637,13 +499,11 @@ class Ransac3DObjectDetector(Node):
         marker_array = MarkerArray()
 
         marker = Marker()
-
         marker.header.frame_id = self.target_frame
         marker.header.stamp = self.get_clock().now().to_msg()
         marker.action = Marker.DELETEALL
 
         marker_array.markers.append(marker)
-
         self.marker_pub.publish(marker_array)
 
 
