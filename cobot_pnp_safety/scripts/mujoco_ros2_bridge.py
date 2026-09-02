@@ -63,6 +63,11 @@ class MjcfBridgeNode(Node):
         self.data = data
         self.cb_group = ReentrantCallbackGroup()
 
+        self.lock = threading.Lock()
+        self.current_arm_goal_handle = None
+        self.active_trajectory = None
+        self.traj_start_time = 0.0
+
         self.home_qpos = [0.0, -0.785398, 0.0, -2.35619, 0.0, 1.57079, 0.785398]
         self._init_robot_pose()
 
@@ -82,7 +87,6 @@ class MjcfBridgeNode(Node):
             raise RuntimeError(f"Camera '{self.camera_name}' not found in MJCF.")
 
         self.camera_id = cam_id
-        self.renderer = mujoco.Renderer(self.model, height=self.camera_height, width=self.camera_width)
 
         fovy = float(self.model.cam_fovy[self.camera_id])
         self.fy = (self.camera_height / 2.0) / np.tan(np.deg2rad(fovy / 2.0))
@@ -93,7 +97,7 @@ class MjcfBridgeNode(Node):
         self.get_logger().info(f"[CAMERA] {self.camera_name}: {self.camera_width}x{self.camera_height}, fovy={fovy:.2f}, fx={self.fx:.2f}, fy={self.fy:.2f}, cx={self.cx:.2f}, cy={self.cy:.2f}")
 
         self.camera_period = 1.0 / CAMERA_PUBLISH_HZ
-        self.last_camera_publish = 0.0
+        self.camera_running = True
 
         self.env_bodies = self._collect_env_bodies()
         self.get_logger().info(f"Auto-tracked environment bodies for TF: {list(self.env_bodies.values())}")
@@ -105,12 +109,11 @@ class MjcfBridgeNode(Node):
         self.gripper_cmd_sub = self.create_subscription(String, "/panda_gripper_cmd", self.gripper_str_callback, 10)
         self.gripper_val_sub = self.create_subscription(Float64, "/panda_gripper_pos", self.gripper_float_callback, 10)
 
-        self.lock = threading.Lock()
-        self.current_arm_goal_handle = None
-        self.active_trajectory = None
-        self.traj_start_time = 0.0
+        # Start camera worker thread
+        self.camera_thread = threading.Thread(target=self._camera_render_loop, daemon=True)
+        self.camera_thread.start()
 
-        self.get_logger().info("[READY] MuJoCo ROS2 Bridge with MoveIt 2 Controllers initialized.")
+        self.get_logger().info("[READY] MuJoCo ROS2 Bridge with MoveIt 2 Controllers initialized (Camera decoupled in separate thread).")
 
     def _init_robot_pose(self):
         for i, name in enumerate(ARM_JOINT_NAMES):
@@ -209,48 +212,81 @@ class MjcfBridgeNode(Node):
             msg.velocity.append(float(self.data.qvel[dof_adr]))
         self.joint_pub.publish(msg)
 
-    def publish_camera(self, stamp):
-        self.renderer.disable_depth_rendering()
-        self.renderer.disable_segmentation_rendering()
-        self.renderer.update_scene(self.data, camera=self.camera_name)
+    def _camera_render_loop(self):
+        """Worker thread loop dedicated to rendering and publishing camera topics."""
+        renderer = mujoco.Renderer(self.model, height=self.camera_height, width=self.camera_width)
+        render_data = mujoco.MjData(self.model)
+        rate_interval = self.camera_period
 
-        rgb = np.asarray(self.renderer.render(), dtype=np.uint8)
-        image_msg = Image()
-        image_msg.header.stamp = stamp
-        image_msg.header.frame_id = self.camera_optical_frame
-        image_msg.height = self.camera_height
-        image_msg.width = self.camera_width
-        image_msg.encoding = "rgb8"
-        image_msg.is_bigendian = False
-        image_msg.step = self.camera_width * 3
-        image_msg.data = rgb.tobytes()
-        self.image_pub.publish(image_msg)
+        while self.camera_running and rclpy.ok():
+            start_time = time.monotonic()
 
-        self.renderer.enable_depth_rendering()
-        depth = np.asarray(self.renderer.render(), dtype=np.float32)
-        depth_msg = Image()
-        depth_msg.header.stamp = stamp
-        depth_msg.header.frame_id = self.camera_optical_frame
-        depth_msg.height = self.camera_height
-        depth_msg.width = self.camera_width
-        depth_msg.encoding = "32FC1"
-        depth_msg.is_bigendian = False
-        depth_msg.step = self.camera_width * 4
-        depth_msg.data = depth.tobytes()
-        self.depth_pub.publish(depth_msg)
-        self.renderer.disable_depth_rendering()
+            # Snapshot the state with minimal lock holding time (<0.1ms)
+            with self.lock:
+                render_data.qpos[:] = self.data.qpos[:]
+                render_data.qvel[:] = self.data.qvel[:]
+                if self.model.nmocap > 0:
+                    render_data.mocap_pos[:] = self.data.mocap_pos[:]
+                    render_data.mocap_quat[:] = self.data.mocap_quat[:]
 
-        info_msg = CameraInfo()
-        info_msg.header.stamp = stamp
-        info_msg.header.frame_id = self.camera_optical_frame
-        info_msg.width = self.camera_width
-        info_msg.height = self.camera_height
-        info_msg.distortion_model = "plumb_bob"
-        info_msg.d = [0.0, 0.0, 0.0, 0.0, 0.0]
-        info_msg.k = [float(self.fx), 0.0, float(self.cx), 0.0, float(self.fy), float(self.cy), 0.0, 0.0, 1.0]
-        info_msg.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-        info_msg.p = [float(self.fx), 0.0, float(self.cx), 0.0, 0.0, float(self.fy), float(self.cy), 0.0, 0.0, 0.0, 1.0, 0.0]
-        self.camera_info_pub.publish(info_msg)
+            mujoco.mj_forward(self.model, render_data)
+            stamp = self.get_clock().now().to_msg()
+
+            # 1. RGB Image
+            renderer.disable_depth_rendering()
+            renderer.disable_segmentation_rendering()
+            renderer.update_scene(render_data, camera=self.camera_name)
+
+            rgb = np.asarray(renderer.render(), dtype=np.uint8)
+            image_msg = Image()
+            image_msg.header.stamp = stamp
+            image_msg.header.frame_id = self.camera_optical_frame
+            image_msg.height = self.camera_height
+            image_msg.width = self.camera_width
+            image_msg.encoding = "rgb8"
+            image_msg.is_bigendian = False
+            image_msg.step = self.camera_width * 3
+            image_msg.data = rgb.tobytes()
+            self.image_pub.publish(image_msg)
+
+            # 2. Depth Image
+            renderer.enable_depth_rendering()
+            depth = np.asarray(renderer.render(), dtype=np.float32)
+            depth_msg = Image()
+            depth_msg.header.stamp = stamp
+            depth_msg.header.frame_id = self.camera_optical_frame
+            depth_msg.height = self.camera_height
+            depth_msg.width = self.camera_width
+            depth_msg.encoding = "32FC1"
+            depth_msg.is_bigendian = False
+            depth_msg.step = self.camera_width * 4
+            depth_msg.data = depth.tobytes()
+            self.depth_pub.publish(depth_msg)
+            renderer.disable_depth_rendering()
+
+            # 3. Camera Info
+            info_msg = CameraInfo()
+            info_msg.header.stamp = stamp
+            info_msg.header.frame_id = self.camera_optical_frame
+            info_msg.width = self.camera_width
+            info_msg.height = self.camera_height
+            info_msg.distortion_model = "plumb_bob"
+            info_msg.d = [0.0, 0.0, 0.0, 0.0, 0.0]
+            info_msg.k = [float(self.fx), 0.0, float(self.cx), 0.0, float(self.fy), float(self.cy), 0.0, 0.0, 1.0]
+            info_msg.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+            info_msg.p = [float(self.fx), 0.0, float(self.cx), 0.0, 0.0, float(self.fy), float(self.cy), 0.0, 0.0, 0.0, 1.0, 0.0]
+            self.camera_info_pub.publish(info_msg)
+
+            elapsed = time.monotonic() - start_time
+            sleep_time = rate_interval - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+    def destroy_node(self):
+        self.camera_running = False
+        if hasattr(self, "camera_thread") and self.camera_thread.is_alive():
+            self.camera_thread.join(timeout=1.0)
+        super().destroy_node()
 
     def goal_arm_callback(self, goal_request):
         self.get_logger().info(f"[ACTION] Arm trajectory goal received with {len(goal_request.trajectory.points)} points.")
@@ -366,10 +402,6 @@ class MjcfBridgeNode(Node):
         stamp = self.get_clock().now().to_msg()
         self.publish_joint_states(stamp)
         self.publish_env_tf(stamp)
-        now = time.monotonic()
-        if now - self.last_camera_publish >= self.camera_period:
-            self.publish_camera(stamp)
-            self.last_camera_publish = now
 
 
 def build_vfs():
