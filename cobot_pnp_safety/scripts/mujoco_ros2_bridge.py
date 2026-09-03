@@ -121,7 +121,7 @@ class MjcfBridgeNode(Node):
         # ============================================================
         self.home_qpos=np.array([0.0,-0.785398,0.0,-2.35619,0.0,1.57079,0.785398])
         self.POSITION_TOLERANCE=0.01
-        self.VELOCITY_TOLERANCE=0.02
+        self.VELOCITY_TOLERANCE=0.1
         self.SETTLE_TIMEOUT=5.0
         self.GRIPPER_STABLE_TIME=0.15
         self.GRIPPER_TIMEOUT=2.0
@@ -490,16 +490,25 @@ class MjcfBridgeNode(Node):
         # Settle
         # ------------------------------------------------------------
         deadline=time.monotonic()+self.SETTLE_TIMEOUT
+
         while time.monotonic()<deadline:
             if goal_handle.is_cancel_requested:
                 goal_handle.canceled()
                 return FollowJointTrajectory.Result()
 
             with self.lock:
-                q=np.array([self.data.qpos[self.model.jnt_qposadr[self.joint_ids[n]]] for n in self.arm_joints])
-                v=np.array([self.data.qvel[self.model.jnt_dofadr[self.joint_ids[n]]] for n in self.arm_joints])
+                q=np.array([
+                    self.data.qpos[self.model.jnt_qposadr[self.joint_ids[n]]]
+                    for n in self.arm_joints
+                ])
+                v=np.array([
+                    self.data.qvel[self.model.jnt_dofadr[self.joint_ids[n]]]
+                    for n in self.arm_joints
+                ])
 
-            if np.max(np.abs(q-prev_q))<=self.POSITION_TOLERANCE and np.max(np.abs(v))<=self.VELOCITY_TOLERANCE:
+            err=q-prev_q
+
+            if np.max(np.abs(err))<=self.POSITION_TOLERANCE and np.max(np.abs(v))<=self.VELOCITY_TOLERANCE:
                 result=FollowJointTrajectory.Result()
                 result.error_code=FollowJointTrajectory.Result.SUCCESSFUL
                 goal_handle.succeed()
@@ -542,16 +551,18 @@ class MjcfBridgeNode(Node):
     # Gripper action
     # ================================================================
     def execute_gripper(self,goal_handle):
-        target=float(np.clip(goal_handle.request.command.position,0.0,0.04))
-        ctrl=float(np.clip(target/0.04*255.0,0.0,255.0))
 
+        # 그리퍼 개방 0.04 * 2 → Ctrl 0~255
+        target=float(np.clip(goal_handle.request.command.position, 0.0, 0.04))
+        ctrl=float(np.clip(target/0.04 * 255.0, 0.0, 255.0))
         with self.lock:
             self.data.ctrl[self.GRIPPER_ACTUATOR_ID]=ctrl
 
         start=time.monotonic()
         stable_start=None
 
-        while time.monotonic()-start<self.GRIPPER_TIMEOUT:
+        # 최대 2초 기다림
+        while time.monotonic() - start < self.GRIPPER_TIMEOUT:
             if goal_handle.is_cancel_requested:
                 goal_handle.canceled()
                 return GripperCommand.Result()
@@ -578,7 +589,7 @@ class MjcfBridgeNode(Node):
             if reached:
                 if stable_start is None:
                     stable_start=time.monotonic()
-                elif time.monotonic()-stable_start>=self.GRIPPER_STABLE_TIME:
+                elif time.monotonic() - stable_start >= self.GRIPPER_STABLE_TIME:
                     result=GripperCommand.Result()
                     result.position=pos
                     result.reached_goal=True
@@ -588,7 +599,7 @@ class MjcfBridgeNode(Node):
             else:
                 stable_start=None
 
-            # asyncio 사용하지 않는다.
+            # 10ms 기다린 후 다시 pos 확인
             time.sleep(0.01)
 
         result=GripperCommand.Result()
