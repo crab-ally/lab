@@ -300,23 +300,19 @@ class PandaMoveItPickAndPlace(Node):
         qz=0.0,
         qw=0.0
     ):
-        if not self.move_group_client.wait_for_server(
-            timeout_sec=3.0
-        ):
-            self.get_logger().error(
-                "[PLANNING] MoveGroup Action Server not available."
-            )
+        if not self.move_group_client.wait_for_server(timeout_sec=3.0):
+            self.get_logger().error("[PLANNING] MoveGroup Action Server not available.")
             return False
 
         goal=MoveGroup.Goal()
         req=MotionPlanRequest()
 
         req.group_name="panda_arm"
-        req.num_planning_attempts=10
-        req.allowed_planning_time=5.0
-        req.max_velocity_scaling_factor=0.5
-        req.max_acceleration_scaling_factor=0.5
-        req.start_state.is_diff=True
+        req.num_planning_attempts=10              # planning 시도 횟수
+        req.allowed_planning_time=5.0             # 최대 planning 시간
+        req.max_velocity_scaling_factor=0.5       # 속도 제한
+        req.max_acceleration_scaling_factor=0.5   # 가속도 제한
+        req.start_state.is_diff=True              # 현재 관절 위치를 시작 상태로 사용
 
         constraints=Constraints()
 
@@ -327,7 +323,7 @@ class PandaMoveItPickAndPlace(Node):
         pos=PositionConstraint()
 
         pos.header.frame_id="link0"
-        pos.link_name="hand_tcp"
+        pos.link_name="hand_tcp"    # 좌표를 맞출 link
 
         pos.target_point_offset.x=0.0
         pos.target_point_offset.y=0.0
@@ -335,7 +331,7 @@ class PandaMoveItPickAndPlace(Node):
 
         sphere=SolidPrimitive()
         sphere.type=SolidPrimitive.SPHERE
-        sphere.dimensions=[0.02]
+        sphere.dimensions=[0.01]
 
         bv=BoundingVolume()
         bv.primitives.append(sphere)
@@ -361,7 +357,7 @@ class PandaMoveItPickAndPlace(Node):
         ori=OrientationConstraint()
 
         ori.header.frame_id="link0"
-        ori.link_name="hand_tcp"
+        ori.link_name="hand_tcp"        # 방향을 맞출 link
 
         ori.orientation.x=float(qx)
         ori.orientation.y=float(qy)
@@ -370,7 +366,7 @@ class PandaMoveItPickAndPlace(Node):
 
         ori.absolute_x_axis_tolerance=0.05
         ori.absolute_y_axis_tolerance=0.05
-        ori.absolute_z_axis_tolerance=3.14
+        ori.absolute_z_axis_tolerance=0.05
         ori.weight=1.0
 
         constraints.orientation_constraints.append(ori)
@@ -388,11 +384,9 @@ class PandaMoveItPickAndPlace(Node):
         goal.planning_options.plan_only=False
         goal.planning_options.look_around=False
         goal.planning_options.replan=True
-        goal.planning_options.replan_attempts=5
+        goal.planning_options.replan_attempts=5 # 재계획 회수
 
-        self.get_logger().info(
-            f"[PLANNING] TCP -> ({x:.3f},{y:.3f},{z:.3f})"
-        )
+        self.get_logger().info(f"[PLANNING] TCP -> ({x:.3f},{y:.3f},{z:.3f})")
 
         # ============================================================
         # Send
@@ -407,9 +401,7 @@ class PandaMoveItPickAndPlace(Node):
             return False
 
         if not goal_handle.accepted:
-            self.get_logger().warn(
-                "[PLANNING] Goal rejected."
-            )
+            self.get_logger().warn("[PLANNING] Goal rejected.")
             return False
 
         # ============================================================
@@ -867,25 +859,19 @@ class PandaMoveItPickAndPlace(Node):
                 # 1. Open
                 # ====================================================
 
-                self.get_logger().info(
-                    "[1/8] Opening gripper."
-                )
+                self.get_logger().info("[1/8] Opening gripper.")
 
                 if not self.control_gripper("OPEN"):
-                    self.reset_after_failure(
-                        "Gripper OPEN failed."
-                    )
+                    self.reset_after_failure("Gripper OPEN failed.")
                     continue
 
                 # ====================================================
                 # 2. Pre-grasp
                 # ====================================================
 
-                pre_grasp_z=tz+self.pre_grasp_z_offset
+                pre_grasp_z = tz + self.pre_grasp_z_offset
 
-                self.get_logger().info(
-                    f"[2/8] Pre-grasp Z={pre_grasp_z:.3f}"
-                )
+                self.get_logger().info(f"[2/8] Pre-grasp Z={pre_grasp_z:.3f}")
 
                 if not self.plan_and_execute_pose(
                     tx,
@@ -896,9 +882,7 @@ class PandaMoveItPickAndPlace(Node):
                     qz,
                     qw
                 ):
-                    self.reset_after_failure(
-                        "Pre-grasp motion failed."
-                    )
+                    self.reset_after_failure("Pre-grasp motion failed.")
                     continue
 
                 # ====================================================
