@@ -148,6 +148,7 @@ class MjcfBridgeNode(Node):
         self.SETTLE_TIMEOUT=5.0
         self.GRIPPER_STABLE_TIME=0.15
         self.GRIPPER_TIMEOUT=2.0
+        self.GRIPPER_CONTACT_STABLE_TIME=0.15
 
         # ============================================================
         # Initial pose
@@ -622,8 +623,6 @@ class MjcfBridgeNode(Node):
     # Gripper action
     # ================================================================
     def execute_gripper(self,goal_handle):
-
-        # 그리퍼 개방 0.04 * 2 → Ctrl 0~255
         target=float(np.clip(goal_handle.request.command.position,0.0,0.04))
         ctrl=float(np.clip(target/0.04*255.0,0.0,255.0))
 
@@ -633,7 +632,6 @@ class MjcfBridgeNode(Node):
         start=time.monotonic()
         stable_start=None
 
-        # 최대 2초 기다림
         while time.monotonic()-start<self.GRIPPER_TIMEOUT:
             if goal_handle.is_cancel_requested:
                 goal_handle.canceled()
@@ -641,27 +639,19 @@ class MjcfBridgeNode(Node):
 
             pos=self._gripper_position()
 
-            # --------------------------------------------------------
-            # OPEN
-            # --------------------------------------------------------
             if target>0.02:
                 reached=pos>=0.035 and self._gripper_velocity_ok()
-
-            # --------------------------------------------------------
-            # CLOSE
-            # --------------------------------------------------------
+                stable_time=self.GRIPPER_STABLE_TIME
             else:
-                reached=self._gripper_velocity_ok() and self._gripper_contact()
-
-                # 물체가 없는 상태에서 CLOSE할 경우
-                # 완전 폐쇄도 성공으로 인정
-                if not reached and pos<=0.002:
-                    reached=True
+                contact=self._gripper_contact()
+                velocity_ok=self._gripper_velocity_ok()
+                reached=contact and velocity_ok
+                stable_time=self.GRIPPER_CONTACT_STABLE_TIME
 
             if reached:
                 if stable_start is None:
                     stable_start=time.monotonic()
-                elif time.monotonic()-stable_start>=self.GRIPPER_STABLE_TIME:
+                elif time.monotonic()-stable_start>=stable_time:
                     result=GripperCommand.Result()
                     result.position=pos
                     result.reached_goal=True
@@ -671,7 +661,6 @@ class MjcfBridgeNode(Node):
             else:
                 stable_start=None
 
-            # 10ms 기다린 후 다시 pos 확인
             time.sleep(0.01)
 
         result=GripperCommand.Result()
