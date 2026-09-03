@@ -781,6 +781,10 @@ def main():
             print("[INFO] Launching MuJoCo passive viewer...",flush=True)
 
             with mujoco.viewer.launch_passive(model,data) as viewer:
+                viewer.cam.distance=1.5
+                viewer.cam.azimuth=180
+                viewer.cam.elevation=-20
+                viewer.cam.lookat[:]=[0,0.5,0.5]
                 print(
                     "[INFO] MuJoCo passive viewer launched successfully.",
                     flush=True
