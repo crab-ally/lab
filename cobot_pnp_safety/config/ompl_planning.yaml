@@ -19,7 +19,7 @@ planner_configs:
     max_nearest_neighbors: 10
 
 panda_arm:
-  default_planner_config: RRTstarkConfigDefault
+  default_planner_config: RRTConnectkConfigDefault
   planner_configs:
     - RRTConnectkConfigDefault
     - RRTstarkConfigDefault
