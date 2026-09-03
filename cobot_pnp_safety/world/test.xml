@@ -18,7 +18,7 @@
     <geom name="table2_leg4" type="box" pos="-0.22 -0.14 -0.4" size="0.04 0.04 0.4" rgba="0.3 0.2 0.1 1"/>
   </body>
 
-  <body name="pnp_object" pos="0.15 0.55 0.48">
+  <body name="pnp_object" pos="0.15 0.55 0.47">
     <freejoint/>
     <geom name="pnp_object_geom" type="box" size="0.03 0.02 0.03" mass="0.2" rgba="0.1 0.5 0.9 1"/>
   </body>
