@@ -4,21 +4,38 @@ MoveIt 2 기반 Franka Emika Panda 3D Vision Pick & Place Controller Node
 
 Subscribes:
   - /target_object_pose (geometry_msgs/PoseStamped)
+  - /object_height (std_msgs/Float32)
 
 Actions:
   - /move_action
   - /panda_hand_controller/gripper_action
+
+Gripper:
+  - OPEN  : position=0.04
+  - CLOSE : position=0.0
+  - CLOSE 성공 후 MuJoCo Bridge가 gripper force를 유지
+
+Motion:
+  - Pre-grasp
+  - Cartesian vertical grasp descent
+  - Gripper CLOSE
+  - Cartesian segmented vertical lift
+  - Cartesian XY pre-place movement with fixed orientation
+  - XY Cartesian 실패 시 orientation-constrained joint-space fallback
+  - Cartesian vertical place descent
+  - Gripper OPEN
+  - Cartesian retract
+  - Ready/Home
 """
 
 import time,math,threading
 import numpy as np
-
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
-
 from geometry_msgs.msg import PoseStamped,Pose
+from std_msgs.msg import Float32
 from moveit_msgs.action import MoveGroup,ExecuteTrajectory
 from moveit_msgs.msg import MotionPlanRequest,Constraints,PositionConstraint,OrientationConstraint,BoundingVolume,PlanningOptions,JointConstraint
 from moveit_msgs.srv import GetCartesianPath
@@ -27,13 +44,14 @@ from control_msgs.action import GripperCommand
 
 
 class PandaMoveItPickAndPlace(Node):
+
     def __init__(self):
         super().__init__("panda_moveit_pnp_node")
-        self.cb_group=ReentrantCallbackGroup()
 
+        self.cb_group=ReentrantCallbackGroup()
         self.state="IDLE"
         self.target_pose=None
-        self.target_height=None
+        self.object_height=None
         self.target_yaw=0.0
         self.is_busy=False
         self.shutdown_requested=False
@@ -52,6 +70,10 @@ class PandaMoveItPickAndPlace(Node):
             0.785398
         ]
 
+        self.arm_joints=[
+            f"joint{i}" for i in range(1,8)
+        ]
+
         # ============================================================
         # Place position
         # ============================================================
@@ -64,10 +86,44 @@ class PandaMoveItPickAndPlace(Node):
         # Motion offsets
         # ============================================================
 
-        self.pre_grasp_z_offset=0.12
-        self.post_place_z_offset=0.12
-        self.lift_z_offset=0.17
-        self.lift_clearance=0.10
+        self.pre_grasp_z_offset=0.2
+        self.post_place_z_offset=0.2
+        self.lift_z_offset=0.2
+
+        # ============================================================
+        # Segmented Cartesian Lift
+        # ============================================================
+
+        self.lift_segment_step=0.05
+
+        # ============================================================
+        # Cartesian XY pre-place
+        # ============================================================
+
+        self.pre_place_xy_step=0.05
+
+        # ============================================================
+        # XY joint-space fallback
+        # ============================================================
+
+        self.xy_fallback_planning_attempts=10
+        self.xy_fallback_planning_time=5.0
+        self.xy_fallback_velocity_scale=0.20
+        self.xy_fallback_acceleration_scale=0.20
+
+        # 강한 orientation 유지
+        self.xy_fallback_orientation_tolerance=0.05
+
+        # ============================================================
+        # Gripper
+        # ============================================================
+
+        self.gripper_open_position=0.04
+        self.gripper_close_position=0.0
+
+        # Bridge에서는 max_effort를 실제 힘 제어에 사용하지 않음
+        self.gripper_open_effort=20.0
+        self.gripper_close_effort=30.0
 
         # ============================================================
         # Gripper geometry
@@ -75,10 +131,15 @@ class PandaMoveItPickAndPlace(Node):
 
         self.gripper_clearance=0.100
         self.grasp_margin=0.010
-        self.max_grasp_depth=self.gripper_clearance-self.grasp_margin
+        self.max_grasp_depth=(
+            self.gripper_clearance-
+            self.grasp_margin
+        )
 
-        # TCP -> fingertip
-        self.tcp_to_fingertip=0.1100-(0.0584+0.0445)
+        self.tcp_to_fingertip=(
+            0.1100-
+            (0.0584+0.0445)
+        )
 
         # ============================================================
         # Object validation
@@ -86,6 +147,21 @@ class PandaMoveItPickAndPlace(Node):
 
         self.min_object_height=0.005
         self.max_object_height=0.40
+
+        # ============================================================
+        # Cartesian
+        # ============================================================
+
+        self.cartesian_fraction_threshold=0.99
+
+        # ============================================================
+        # Lift fallback
+        # ============================================================
+
+        self.lift_fallback_planning_attempts=10
+        self.lift_fallback_planning_time=5.0
+        self.lift_fallback_velocity_scale=0.35
+        self.lift_fallback_acceleration_scale=0.35
 
         # ============================================================
         # MoveIt clients
@@ -119,7 +195,7 @@ class PandaMoveItPickAndPlace(Node):
         )
 
         # ============================================================
-        # Target subscriber
+        # Target subscribers
         # ============================================================
 
         self.target_sub=self.create_subscription(
@@ -130,165 +206,201 @@ class PandaMoveItPickAndPlace(Node):
             callback_group=self.cb_group
         )
 
+        self.height_sub=self.create_subscription(
+            Float32,
+            "/object_height",
+            self.object_height_callback,
+            10,
+            callback_group=self.cb_group
+        )
+
+        # ============================================================
+        # Init logs
+        # ============================================================
+
         self.get_logger().info(
             "[PnP INIT] Franka Panda MoveIt2 Pick and Place Controller Ready."
         )
 
         self.get_logger().info(
-            f"[PnP INIT] Table Z: {self.table_top_z:.3f} m"
+            f"[PnP INIT] Table Z={self.table_top_z:.3f}, "
+            f"Place XY=({self.place_x:.3f},{self.place_y:.3f}), "
+            f"Max grasp depth={self.max_grasp_depth:.3f}, "
+            f"Lift step={self.lift_segment_step:.3f}"
         )
 
         self.get_logger().info(
-            f"[PnP INIT] Place XY: ({self.place_x:.3f}, {self.place_y:.3f})"
+            f"[PnP INIT] Lift Cartesian fraction threshold="
+            f"{self.cartesian_fraction_threshold:.2f}"
         )
 
         self.get_logger().info(
-            f"[PnP INIT] Max grasp depth: {self.max_grasp_depth*1000:.1f} mm"
+            f"[PnP INIT] Pre-place XY Cartesian step="
+            f"{self.pre_place_xy_step:.3f} m"
+        )
+
+        self.get_logger().info(
+            "[PnP INIT] Lift Cartesian failure -> "
+            "joint-space pose fallback enabled."
+        )
+
+        self.get_logger().info(
+            "[PnP INIT] Pre-place XY Cartesian failure -> "
+            "orientation-constrained joint-space fallback enabled."
+        )
+
+        self.get_logger().info(
+            f"[PnP INIT] XY fallback orientation tolerance="
+            f"{self.xy_fallback_orientation_tolerance:.3f} rad"
+        )
+
+        self.get_logger().info(
+            "[PnP INIT] Gripper CLOSE uses Bridge contact/stall detection."
         )
 
         # ============================================================
         # Worker
         # ============================================================
 
-        self.worker_thread=threading.Thread(
+        self.worker=threading.Thread(
             target=self.pnp_worker_loop,
             daemon=True
         )
 
-        self.worker_thread.start()
+        self.worker.start()
 
-    # ================================================================
-    # Target
-    # ================================================================
+    # ============================================================
+    # Subscribers
+    # ============================================================
+
+    def object_height_callback(self,msg):
+
+        if self.is_busy:
+            return
+
+        height=float(msg.data)
+
+        if not np.isfinite(height):
+            self.get_logger().warn(
+                f"[PnP] Invalid object height: {height}"
+            )
+            return
+
+        self.object_height=height
 
     def target_pose_callback(self,msg):
+
         if self.is_busy or self.state!="IDLE":
             return
 
         if msg.header.frame_id!="link0":
             self.get_logger().warn(
-                f"[VISION] Expected frame 'link0', got '{msg.header.frame_id}'"
+                f"[PnP] Invalid target frame: {msg.header.frame_id}"
             )
             return
 
-        x=float(msg.pose.position.x)
-        y=float(msg.pose.position.y)
-        z=float(msg.pose.position.z)
-
-        if not np.isfinite([x,y,z]).all():
-            self.get_logger().warn(
-                "[VISION] Invalid target position."
-            )
-            return
-
-        # Detector는 물체 중심을 publish하므로 table 기준으로 높이 계산
-        estimated_height=2.0*(z-self.table_top_z)
-
-        if not np.isfinite(estimated_height):
-            return
-
-        if estimated_height<self.min_object_height:
-            self.get_logger().warn(
-                f"[VISION] Object too low: height={estimated_height:.3f} m"
-            )
-            return
-
-        if estimated_height>self.max_object_height:
-            self.get_logger().warn(
-                f"[VISION] Object too high: height={estimated_height:.3f} m"
-            )
-            return
-
-        # ============================================================
-        # Quaternion -> yaw
-        # ============================================================
-
+        p=msg.pose.position
         q=msg.pose.orientation
 
-        yaw=math.atan2(
-            2.0*(q.w*q.z+q.x*q.y),
-            1.0-2.0*(q.y*q.y+q.z*q.z)
-        )
+        x=float(p.x)
+        y=float(p.y)
+        z=float(p.z)
+
+        if not all(np.isfinite(v) for v in (x,y,z)):
+            self.get_logger().warn(
+                "[PnP] Invalid target position."
+            )
+            return
+
+        if (
+            self.object_height is None
+            or not np.isfinite(self.object_height)
+        ):
+            self.get_logger().warn(
+                "[PnP] Object height is not available."
+            )
+            return
+
+        h=float(self.object_height)
+
+        if not self.min_object_height<=h<=self.max_object_height:
+            self.get_logger().warn(
+                f"[PnP] Invalid object height: {h:.4f} m"
+            )
+            return
+
+        r11=1.0-2.0*(q.y*q.y+q.z*q.z)
+        r21=2.0*(q.x*q.y+q.w*q.z)
+
+        yaw=math.atan2(r21,r11)
 
         self.target_pose=np.array(
             [x,y,z],
             dtype=np.float64
         )
 
-        self.target_height=float(estimated_height)
-        self.target_yaw=float(yaw)
-
+        self.target_yaw=yaw
         self.is_busy=True
         self.state="TRIGGER_PICK"
 
         self.get_logger().info(
-            f"[VISION TARGET DETECTED] "
-            f"Center(link0)=({x:.3f},{y:.3f},{z:.3f}) "
-            f"Height={estimated_height:.3f} m "
-            f"Yaw={math.degrees(yaw):.1f} deg"
+            f"[PnP] Target received: "
+            f"xyz=({x:.3f},{y:.3f},{z:.3f}), "
+            f"h={h:.3f}, "
+            f"yaw={math.degrees(yaw):.1f} deg"
         )
 
-    # ================================================================
+    # ============================================================
     # Future helper
-    # ================================================================
+    # ============================================================
 
-    def wait_future(self,future,timeout_sec):
+    def wait_future(self,future,timeout,description):
+
         event=threading.Event()
-        result_holder={
-            "result":None,
-            "exception":None
-        }
+        result=[None]
 
-        def done_callback(done_future):
-            try:
-                result_holder["result"]=done_future.result()
-            except Exception as e:
-                result_holder["exception"]=e
-            finally:
-                event.set()
+        def done_callback(f):
+            result[0]=f
+            event.set()
 
         future.add_done_callback(done_callback)
 
-        if not event.wait(timeout=timeout_sec):
-            self.get_logger().warn(
-                "[ACTION] Future timeout."
-            )
-            return None
-
-        if result_holder["exception"] is not None:
+        if not event.wait(timeout):
             self.get_logger().error(
-                f"[ACTION] Future exception: {result_holder['exception']}"
+                f"[PnP] Timeout waiting for {description}"
             )
             return None
 
-        return result_holder["result"]
+        try:
+            return result[0].result()
 
-    # ================================================================
-    # Quaternion
-    # ================================================================
+        except Exception as e:
+            self.get_logger().error(
+                f"[PnP] {description} failed: {e}"
+            )
+            return None
+
+    # ============================================================
+    # Grasp orientation
+    # ============================================================
 
     def yaw_to_grasp_quaternion(self,yaw):
-        # q = q_z(yaw) * q_x(pi)
-        #
-        # TCP Z axis -> downward
-        # TCP yaw -> object yaw
-        #
-        # ROS quaternion order:
-        # (x,y,z,w)
 
-        cy=math.cos(yaw*0.5)
-        sy=math.sin(yaw*0.5)
+        while yaw>math.pi/2:
+            yaw-=math.pi
 
-        return (
-            cy,
-            sy,
-            0.0,
-            0.0
-        )
+        while yaw<-math.pi/2:
+            yaw+=math.pi
 
-    # ================================================================
-    # MoveGroup pose
-    # ================================================================
+        cy=math.cos(yaw/2.0)
+        sy=math.sin(yaw/2.0)
+
+        # Preserve existing Panda grasp orientation convention
+        return cy,sy,0.0,0.0
+
+    # ============================================================
+    # MoveIt Pose Planning
+    # ============================================================
 
     def plan_and_execute_pose(
         self,
@@ -300,142 +412,147 @@ class PandaMoveItPickAndPlace(Node):
         qz=0.0,
         qw=0.0
     ):
-        if not self.move_group_client.wait_for_server(timeout_sec=3.0):
-            self.get_logger().error("[PLANNING] MoveGroup Action Server not available.")
+
+        if not self.move_group_client.wait_for_server(
+            timeout_sec=3.0
+        ):
+            self.get_logger().error(
+                "[PnP] MoveGroup server unavailable."
+            )
             return False
 
         goal=MoveGroup.Goal()
+
         req=MotionPlanRequest()
 
         req.group_name="panda_arm"
-        req.num_planning_attempts=10              # planning 시도 횟수
-        req.allowed_planning_time=5.0             # 최대 planning 시간
-        req.max_velocity_scaling_factor=0.5       # 속도 제한
-        req.max_acceleration_scaling_factor=0.5   # 가속도 제한
-        req.start_state.is_diff=True              # 현재 관절 위치를 시작 상태로 사용
+        req.num_planning_attempts=10
+        req.allowed_planning_time=5.0
+
+        req.max_velocity_scaling_factor=0.25
+        req.max_acceleration_scaling_factor=0.25
+
+        req.start_state.is_diff=True
+
+        # --------------------------------------------------------
+        # Position constraint
+        # --------------------------------------------------------
+
+        pc=PositionConstraint()
+
+        pc.header.frame_id="link0"
+        pc.link_name="hand_tcp"
+
+        pc.target_point_offset.x=0.0
+        pc.target_point_offset.y=0.0
+        pc.target_point_offset.z=0.0
+
+        primitive=SolidPrimitive()
+
+        primitive.type=SolidPrimitive.SPHERE
+        primitive.dimensions=[0.015]
+
+        pc.constraint_region=BoundingVolume()
+        pc.constraint_region.primitives.append(
+            primitive
+        )
+
+        pose=Pose()
+
+        pose.position.x=x
+        pose.position.y=y
+        pose.position.z=z
+
+        pose.orientation.w=1.0
+
+        pc.constraint_region.primitive_poses.append(
+            pose
+        )
+
+        pc.weight=1.0
+
+        # --------------------------------------------------------
+        # Orientation constraint
+        # --------------------------------------------------------
+
+        oc=OrientationConstraint()
+
+        oc.header.frame_id="link0"
+        oc.link_name="hand_tcp"
+
+        oc.orientation.x=qx
+        oc.orientation.y=qy
+        oc.orientation.z=qz
+        oc.orientation.w=qw
+
+        oc.absolute_x_axis_tolerance=0.25
+        oc.absolute_y_axis_tolerance=0.25
+        oc.absolute_z_axis_tolerance=0.35
+        oc.weight=1.0
 
         constraints=Constraints()
 
-        # ============================================================
-        # Position constraint
-        # ============================================================
+        constraints.position_constraints.append(pc)
+        constraints.orientation_constraints.append(oc)
 
-        pos=PositionConstraint()
+        req.goal_constraints.append(
+            constraints
+        )
 
-        pos.header.frame_id="link0"
-        pos.link_name="hand_tcp"    # 좌표를 맞출 link
+        # --------------------------------------------------------
+        # Planning options
+        # --------------------------------------------------------
 
-        pos.target_point_offset.x=0.0
-        pos.target_point_offset.y=0.0
-        pos.target_point_offset.z=0.0
+        options=PlanningOptions()
 
-        sphere=SolidPrimitive()
-        sphere.type=SolidPrimitive.SPHERE
-        sphere.dimensions=[0.01]
-
-        bv=BoundingVolume()
-        bv.primitives.append(sphere)
-
-        target=Pose()
-
-        target.position.x=float(x)
-        target.position.y=float(y)
-        target.position.z=float(z)
-        target.orientation.w=1.0
-
-        bv.primitive_poses.append(target)
-
-        pos.constraint_region=bv
-        pos.weight=1.0
-
-        constraints.position_constraints.append(pos)
-
-        # ============================================================
-        # Orientation constraint
-        # ============================================================
-
-        ori=OrientationConstraint()
-
-        ori.header.frame_id="link0"
-        ori.link_name="hand_tcp"        # 방향을 맞출 link
-
-        ori.orientation.x=float(qx)
-        ori.orientation.y=float(qy)
-        ori.orientation.z=float(qz)
-        ori.orientation.w=float(qw)
-
-        ori.absolute_x_axis_tolerance=0.05
-        ori.absolute_y_axis_tolerance=0.05
-        ori.absolute_z_axis_tolerance=0.05
-        ori.weight=1.0
-
-        constraints.orientation_constraints.append(ori)
-
-        req.goal_constraints.append(constraints)
+        options.plan_only=False
+        options.look_around=False
+        options.replan=True
+        options.replan_attempts=5
 
         goal.request=req
+        goal.planning_options=options
 
-        # ============================================================
-        # Planning options
-        # ============================================================
+        # --------------------------------------------------------
+        # Send goal
+        # --------------------------------------------------------
 
-        goal.planning_options=PlanningOptions()
+        future=self.move_group_client.send_goal_async(goal)
 
-        goal.planning_options.plan_only=False
-        goal.planning_options.look_around=False
-        goal.planning_options.replan=True
-        goal.planning_options.replan_attempts=5 # 재계획 회수
-
-        self.get_logger().info(f"[PLANNING] TCP -> ({x:.3f},{y:.3f},{z:.3f})")
-
-        # ============================================================
-        # Send
-        # ============================================================
-
-        goal_handle=self.wait_future(
-            self.move_group_client.send_goal_async(goal),
-            10.0
+        handle=self.wait_future(
+            future,
+            10.0,
+            "MoveGroup goal"
         )
 
-        if goal_handle is None:
-            return False
-
-        if not goal_handle.accepted:
-            self.get_logger().warn("[PLANNING] Goal rejected.")
-            return False
-
-        # ============================================================
-        # Result
-        # ============================================================
-
-        result_wrapper=self.wait_future(
-            goal_handle.get_result_async(),
-            30.0
-        )
-
-        if result_wrapper is None:
-            self.get_logger().warn(
-                "[EXECUTION] MoveGroup result timeout."
+        if handle is None or not handle.accepted:
+            self.get_logger().error(
+                "[PnP] MoveGroup goal rejected."
             )
             return False
 
-        code=result_wrapper.result.error_code.val
-
-        if code==1:
-            self.get_logger().info(
-                "[EXECUTION] Motion completed successfully."
-            )
-            return True
-
-        self.get_logger().warn(
-            f"[EXECUTION] Motion failed: error_code={code}"
+        result=self.wait_future(
+            handle.get_result_async(),
+            30.0,
+            "MoveGroup result"
         )
 
-        return False
+        if result is None:
+            return False
 
-    # ================================================================
-    # Cartesian Z
-    # ================================================================
+        ok=result.result.error_code.val==1
+
+        if not ok:
+            self.get_logger().error(
+                f"[PnP] MoveGroup failed: "
+                f"error_code={result.result.error_code.val}"
+            )
+
+        return ok
+
+    # ============================================================
+    # Cartesian Z Move
+    # ============================================================
 
     def cartesian_z_move(
         self,
@@ -448,6 +565,7 @@ class PandaMoveItPickAndPlace(Node):
         qz,
         qw
     ):
+
         if abs(end_z-start_z)<0.001:
             return True
 
@@ -455,302 +573,1160 @@ class PandaMoveItPickAndPlace(Node):
             timeout_sec=3.0
         ):
             self.get_logger().error(
-                "[CARTESIAN] /compute_cartesian_path unavailable."
+                "[PnP] /compute_cartesian_path unavailable."
             )
             return False
 
-        start=Pose()
+        req=GetCartesianPath.Request()
 
-        start.position.x=float(x)
-        start.position.y=float(y)
-        start.position.z=float(start_z)
+        req.header.frame_id="link0"
+        req.group_name="panda_arm"
+        req.link_name="hand_tcp"
 
-        start.orientation.x=float(qx)
-        start.orientation.y=float(qy)
-        start.orientation.z=float(qz)
-        start.orientation.w=float(qw)
+        req.max_step=0.005
+        req.jump_threshold=0.0
+        req.avoid_collisions=True
 
-        end=Pose()
+        req.start_state.is_diff=True
 
-        end.position.x=float(x)
-        end.position.y=float(y)
-        end.position.z=float(end_z)
+        waypoint=Pose()
 
-        end.orientation.x=float(qx)
-        end.orientation.y=float(qy)
-        end.orientation.z=float(qz)
-        end.orientation.w=float(qw)
+        waypoint.position.x=x
+        waypoint.position.y=y
+        waypoint.position.z=end_z
 
-        request=GetCartesianPath.Request()
+        waypoint.orientation.x=qx
+        waypoint.orientation.y=qy
+        waypoint.orientation.z=qz
+        waypoint.orientation.w=qw
 
-        request.header.frame_id="link0"
-        request.group_name="panda_arm"
-        request.link_name="hand_tcp"
+        req.waypoints=[waypoint]
 
-        request.waypoints=[
-            start,
-            end
-        ]
-
-        request.max_step=0.005
-        request.jump_threshold=0.0
-        request.avoid_collisions=True
-
-        self.get_logger().info(
-            f"[CARTESIAN] Z: {start_z:.3f} -> {end_z:.3f}"
-        )
+        future=self.cartesian_client.call_async(req)
 
         response=self.wait_future(
-            self.cartesian_client.call_async(request),
-            20.0
+            future,
+            20.0,
+            "Cartesian path computation"
         )
 
         if response is None:
             return False
 
         self.get_logger().info(
-            f"[CARTESIAN] Path fraction={response.fraction:.3f}"
+            f"[Cartesian] z {start_z:.3f} -> {end_z:.3f}, "
+            f"fraction={response.fraction:.3f}"
         )
 
-        if response.fraction<0.99:
+        if (
+            response.fraction
+            <self.cartesian_fraction_threshold
+        ):
+
             self.get_logger().error(
-                "[CARTESIAN] Path planning incomplete."
+                f"[Cartesian] Path fraction too low: "
+                f"{response.fraction:.3f}"
             )
+
+            if response.solution.joint_trajectory.points:
+
+                last=response.solution.joint_trajectory.points[-1]
+
+                self.get_logger().error(
+                    f"[Cartesian] points="
+                    f"{len(response.solution.joint_trajectory.points)}, "
+                    f"joints={len(last.positions)}, "
+                    f"last_positions={list(last.positions)}"
+                )
+
             return False
 
-        # ============================================================
+        # --------------------------------------------------------
         # Execute trajectory
-        # ============================================================
+        # --------------------------------------------------------
 
         if not self.execute_client.wait_for_server(
             timeout_sec=3.0
         ):
             self.get_logger().error(
-                "[CARTESIAN] ExecuteTrajectory unavailable."
+                "[PnP] ExecuteTrajectory server unavailable."
             )
             return False
 
         goal=ExecuteTrajectory.Goal()
         goal.trajectory=response.solution
 
-        goal_handle=self.wait_future(
-            self.execute_client.send_goal_async(goal),
-            10.0
+        future=self.execute_client.send_goal_async(goal)
+
+        handle=self.wait_future(
+            future,
+            10.0,
+            "ExecuteTrajectory goal"
         )
 
-        if goal_handle is None:
-            return False
-
-        if not goal_handle.accepted:
+        if handle is None or not handle.accepted:
             self.get_logger().error(
-                "[CARTESIAN] Trajectory rejected."
+                "[PnP] ExecuteTrajectory goal rejected."
             )
             return False
 
         result=self.wait_future(
-            goal_handle.get_result_async(),
-            30.0
+            handle.get_result_async(),
+            30.0,
+            "ExecuteTrajectory result"
         )
 
         if result is None:
-            self.get_logger().error(
-                "[CARTESIAN] Trajectory result timeout."
-            )
             return False
 
-        code=result.result.error_code.val
+        ok=result.result.error_code.val==1
 
-        if code==1:
+        if not ok:
+            self.get_logger().error(
+                f"[PnP] ExecuteTrajectory failed: "
+                f"error_code={result.result.error_code.val}"
+            )
+
+        return ok
+
+    # ============================================================
+    # Cartesian XY Move
+    #
+    # Z 고정
+    # Orientation 고정
+    # XY만 이동
+    #
+    # 먼저 작은 waypoint 구간으로 Cartesian path를 계산한다.
+    # Cartesian fraction이 충분하지 않으면 호출자가
+    # orientation-constrained joint-space fallback을 수행한다.
+    # ============================================================
+
+    def cartesian_xy_move(
+        self,
+        start_x,
+        start_y,
+        end_x,
+        end_y,
+        z,
+        qx,
+        qy,
+        qz,
+        qw
+    ):
+
+        dx=end_x-start_x
+        dy=end_y-start_y
+
+        distance=math.sqrt(
+            dx*dx+
+            dy*dy
+        )
+
+        if distance<0.001:
             self.get_logger().info(
-                "[CARTESIAN] Vertical motion completed."
+                "[Cartesian XY] Start and target XY are already equal."
             )
             return True
 
-        self.get_logger().error(
-            f"[CARTESIAN] Execution failed: {code}"
-        )
-
-        return False
-
-    # ================================================================
-    # Ready / Home
-    # ================================================================
-
-    def plan_and_execute_named_state(self,named_state):
-        if named_state not in ("ready","home"):
+        if not self.cartesian_client.wait_for_service(
+            timeout_sec=3.0
+        ):
             self.get_logger().error(
-                f"[PLANNING] Unknown named state: {named_state}"
+                "[Cartesian XY] /compute_cartesian_path unavailable."
             )
             return False
+
+        # --------------------------------------------------------
+        # Waypoint 생성
+        #
+        # 약 5 cm 간격
+        # Z 고정
+        # Orientation 고정
+        # --------------------------------------------------------
+
+        step=max(
+            0.005,
+            float(self.pre_place_xy_step)
+        )
+
+        segments=int(
+            math.ceil(distance/step)
+        )
+
+        waypoints=[]
+
+        for i in range(1,segments+1):
+
+            ratio=float(i)/float(segments)
+
+            waypoint=Pose()
+
+            waypoint.position.x=(
+                start_x+
+                dx*ratio
+            )
+
+            waypoint.position.y=(
+                start_y+
+                dy*ratio
+            )
+
+            waypoint.position.z=z
+
+            waypoint.orientation.x=qx
+            waypoint.orientation.y=qy
+            waypoint.orientation.z=qz
+            waypoint.orientation.w=qw
+
+            waypoints.append(
+                waypoint
+            )
+
+        self.get_logger().info(
+            f"[Cartesian XY] "
+            f"({start_x:.3f},{start_y:.3f},{z:.3f}) -> "
+            f"({end_x:.3f},{end_y:.3f},{z:.3f}), "
+            f"distance={distance:.3f} m, "
+            f"segments={segments}, "
+            f"orientation fixed"
+        )
+
+        # --------------------------------------------------------
+        # GetCartesianPath
+        # --------------------------------------------------------
+
+        req=GetCartesianPath.Request()
+
+        req.header.frame_id="link0"
+        req.group_name="panda_arm"
+        req.link_name="hand_tcp"
+
+        req.max_step=0.005
+        req.jump_threshold=0.0
+        req.avoid_collisions=True
+
+        req.start_state.is_diff=True
+
+        req.waypoints=waypoints
+
+        future=self.cartesian_client.call_async(req)
+
+        response=self.wait_future(
+            future,
+            30.0,
+            "Cartesian XY path computation"
+        )
+
+        if response is None:
+            return False
+
+        self.get_logger().info(
+            f"[Cartesian XY] "
+            f"fraction={response.fraction:.3f}"
+        )
+
+        # --------------------------------------------------------
+        # Cartesian fraction 검사
+        # --------------------------------------------------------
+
+        if (
+            response.fraction
+            <self.cartesian_fraction_threshold
+        ):
+
+            self.get_logger().warn(
+                f"[Cartesian XY] Path fraction too low: "
+                f"{response.fraction:.3f}"
+            )
+
+            if response.solution.joint_trajectory.points:
+
+                last=(
+                    response
+                    .solution
+                    .joint_trajectory
+                    .points[-1]
+                )
+
+                self.get_logger().warn(
+                    f"[Cartesian XY] partial points="
+                    f"{len(response.solution.joint_trajectory.points)}, "
+                    f"joints={len(last.positions)}, "
+                    f"last_positions={list(last.positions)}"
+                )
+
+            self.get_logger().warn(
+                "[Cartesian XY] Cartesian failed. "
+                "Caller will try orientation-constrained "
+                "joint-space fallback."
+            )
+
+            return False
+
+        # --------------------------------------------------------
+        # Execute
+        # --------------------------------------------------------
+
+        if not self.execute_client.wait_for_server(
+            timeout_sec=3.0
+        ):
+            self.get_logger().error(
+                "[Cartesian XY] ExecuteTrajectory server unavailable."
+            )
+            return False
+
+        goal=ExecuteTrajectory.Goal()
+        goal.trajectory=response.solution
+
+        future=self.execute_client.send_goal_async(goal)
+
+        handle=self.wait_future(
+            future,
+            10.0,
+            "Cartesian XY ExecuteTrajectory goal"
+        )
+
+        if handle is None or not handle.accepted:
+            self.get_logger().error(
+                "[Cartesian XY] ExecuteTrajectory goal rejected."
+            )
+            return False
+
+        result=self.wait_future(
+            handle.get_result_async(),
+            30.0,
+            "Cartesian XY ExecuteTrajectory result"
+        )
+
+        if result is None:
+            return False
+
+        ok=result.result.error_code.val==1
+
+        if not ok:
+            self.get_logger().error(
+                f"[Cartesian XY] ExecuteTrajectory failed: "
+                f"error_code={result.result.error_code.val}"
+            )
+            return False
+
+        self.get_logger().info(
+            "[Cartesian XY] Movement completed successfully."
+        )
+
+        return True
+
+    # ============================================================
+    # XY Joint-space Fallback with Strong Orientation Constraint
+    #
+    # Cartesian XY가 fraction 부족으로 실패했을 때 사용.
+    #
+    # 핵심:
+    #   - Z는 lift_z 그대로 유지
+    #   - 목표 XY만 변경
+    #   - grasp quaternion 그대로 유지
+    #   - OrientationConstraint를 강하게 적용
+    #   - 일반 plan_and_execute_pose()를 사용하지 않음
+    #   - Gripper CLOSE 상태는 변경하지 않음
+    #
+    # 이 fallback은 물체를 잡은 상태에서 손목이 불필요하게
+    # 회전하는 것을 방지하기 위한 전용 함수이다.
+    # ============================================================
+
+    def xy_joint_space_fallback(
+        self,
+        start_x,
+        start_y,
+        target_x,
+        target_y,
+        z,
+        qx,
+        qy,
+        qz,
+        qw
+    ):
+
+        distance=math.sqrt(
+            (target_x-start_x)*(target_x-start_x)+
+            (target_y-start_y)*(target_y-start_y)
+        )
+
+        self.get_logger().warn(
+            "[XY FALLBACK] Cartesian XY failed."
+        )
+
+        self.get_logger().warn(
+            f"[XY FALLBACK] "
+            f"Joint-space planning: "
+            f"({start_x:.3f},{start_y:.3f},{z:.3f}) -> "
+            f"({target_x:.3f},{target_y:.3f},{z:.3f}), "
+            f"distance={distance:.3f} m"
+        )
+
+        self.get_logger().warn(
+            "[XY FALLBACK] "
+            "Grasp orientation will be strongly constrained."
+        )
+
+        self.get_logger().warn(
+            f"[XY FALLBACK] Orientation tolerance="
+            f"{self.xy_fallback_orientation_tolerance:.3f} rad"
+        )
 
         if not self.move_group_client.wait_for_server(
             timeout_sec=3.0
         ):
             self.get_logger().error(
-                "[PLANNING] MoveGroup Action Server unavailable."
+                "[XY FALLBACK] MoveGroup server unavailable."
             )
             return False
 
         goal=MoveGroup.Goal()
+
+        req=MotionPlanRequest()
+
+        req.group_name="panda_arm"
+
+        req.num_planning_attempts=(
+            self.xy_fallback_planning_attempts
+        )
+
+        req.allowed_planning_time=(
+            self.xy_fallback_planning_time
+        )
+
+        req.max_velocity_scaling_factor=(
+            self.xy_fallback_velocity_scale
+        )
+
+        req.max_acceleration_scaling_factor=(
+            self.xy_fallback_acceleration_scale
+        )
+
+        req.start_state.is_diff=True
+
+        # --------------------------------------------------------
+        # Position constraint
+        # --------------------------------------------------------
+
+        pc=PositionConstraint()
+
+        pc.header.frame_id="link0"
+        pc.link_name="hand_tcp"
+
+        pc.target_point_offset.x=0.0
+        pc.target_point_offset.y=0.0
+        pc.target_point_offset.z=0.0
+
+        primitive=SolidPrimitive()
+
+        primitive.type=SolidPrimitive.SPHERE
+        primitive.dimensions=[0.015]
+
+        pc.constraint_region=BoundingVolume()
+
+        pc.constraint_region.primitives.append(
+            primitive
+        )
+
+        target_pose=Pose()
+
+        target_pose.position.x=target_x
+        target_pose.position.y=target_y
+        target_pose.position.z=z
+
+        # Position constraint의 pose orientation은 실제 orientation
+        # constraint와 별개이므로 identity로 둔다.
+        target_pose.orientation.w=1.0
+
+        pc.constraint_region.primitive_poses.append(
+            target_pose
+        )
+
+        pc.weight=1.0
+
+        # --------------------------------------------------------
+        # Strong Orientation Constraint
+        # --------------------------------------------------------
+
+        oc=OrientationConstraint()
+
+        oc.header.frame_id="link0"
+        oc.link_name="hand_tcp"
+
+        oc.orientation.x=qx
+        oc.orientation.y=qy
+        oc.orientation.z=qz
+        oc.orientation.w=qw
+
+        tolerance=(
+            self.xy_fallback_orientation_tolerance
+        )
+
+        oc.absolute_x_axis_tolerance=tolerance
+        oc.absolute_y_axis_tolerance=tolerance
+        oc.absolute_z_axis_tolerance=tolerance
+        oc.weight=1.0
+
+        constraints=Constraints()
+
+        constraints.position_constraints.append(
+            pc
+        )
+
+        constraints.orientation_constraints.append(
+            oc
+        )
+
+        req.goal_constraints.append(
+            constraints
+        )
+
+        # --------------------------------------------------------
+        # Planning options
+        # --------------------------------------------------------
+
+        options=PlanningOptions()
+
+        options.plan_only=False
+        options.look_around=False
+        options.replan=True
+        options.replan_attempts=5
+
+        goal.request=req
+        goal.planning_options=options
+
+        # --------------------------------------------------------
+        # Send MoveGroup goal
+        # --------------------------------------------------------
+
+        future=self.move_group_client.send_goal_async(
+            goal
+        )
+
+        handle=self.wait_future(
+            future,
+            10.0,
+            "XY fallback MoveGroup goal"
+        )
+
+        if handle is None or not handle.accepted:
+            self.get_logger().error(
+                "[XY FALLBACK] MoveGroup goal rejected."
+            )
+            return False
+
+        result=self.wait_future(
+            handle.get_result_async(),
+            30.0,
+            "XY fallback MoveGroup result"
+        )
+
+        if result is None:
+            return False
+
+        error_code=result.result.error_code.val
+
+        if error_code!=1:
+
+            self.get_logger().error(
+                f"[XY FALLBACK] "
+                f"Planning/execution failed: "
+                f"error_code={error_code}"
+            )
+
+            return False
+
+        # --------------------------------------------------------
+        # Success
+        # --------------------------------------------------------
+
+        self.get_logger().info(
+            "[XY FALLBACK] "
+            "Joint-space XY movement completed successfully."
+        )
+
+        self.get_logger().info(
+            "[XY FALLBACK] "
+            "Grasp orientation constraint was applied."
+        )
+
+        self.get_logger().info(
+            "[XY FALLBACK] "
+            "Gripper CLOSE remains held."
+        )
+
+        return True
+
+    # ============================================================
+    # LIFT Joint-space Fallback
+    # ============================================================
+
+    def lift_joint_space_fallback(
+        self,
+        x,
+        y,
+        target_z,
+        qx,
+        qy,
+        qz,
+        qw
+    ):
+
+        self.get_logger().warn(
+            f"[LIFT FALLBACK] Cartesian failed. "
+            f"Joint-space planning to z={target_z:.3f}"
+        )
+
+        if not self.move_group_client.wait_for_server(
+            timeout_sec=3.0
+        ):
+            self.get_logger().error(
+                "[LIFT FALLBACK] MoveGroup server unavailable."
+            )
+            return False
+
+        goal=MoveGroup.Goal()
+
+        req=MotionPlanRequest()
+
+        req.group_name="panda_arm"
+
+        req.num_planning_attempts=(
+            self.lift_fallback_planning_attempts
+        )
+
+        req.allowed_planning_time=(
+            self.lift_fallback_planning_time
+        )
+
+        req.max_velocity_scaling_factor=(
+            self.lift_fallback_velocity_scale
+        )
+
+        req.max_acceleration_scaling_factor=(
+            self.lift_fallback_acceleration_scale
+        )
+
+        req.start_state.is_diff=True
+
+        # --------------------------------------------------------
+        # Position constraint
+        # --------------------------------------------------------
+
+        pc=PositionConstraint()
+
+        pc.header.frame_id="link0"
+        pc.link_name="hand_tcp"
+
+        pc.target_point_offset.x=0.0
+        pc.target_point_offset.y=0.0
+        pc.target_point_offset.z=0.0
+
+        primitive=SolidPrimitive()
+
+        primitive.type=SolidPrimitive.SPHERE
+        primitive.dimensions=[0.015]
+
+        pc.constraint_region=BoundingVolume()
+
+        pc.constraint_region.primitives.append(
+            primitive
+        )
+
+        target_pose=Pose()
+
+        target_pose.position.x=x
+        target_pose.position.y=y
+        target_pose.position.z=target_z
+
+        target_pose.orientation.x=qx
+        target_pose.orientation.y=qy
+        target_pose.orientation.z=qz
+        target_pose.orientation.w=qw
+
+        pc.constraint_region.primitive_poses.append(
+            target_pose
+        )
+
+        pc.weight=1.0
+
+        # --------------------------------------------------------
+        # Orientation constraint
+        # --------------------------------------------------------
+
+        oc=OrientationConstraint()
+
+        oc.header.frame_id="link0"
+        oc.link_name="hand_tcp"
+
+        oc.orientation.x=qx
+        oc.orientation.y=qy
+        oc.orientation.z=qz
+        oc.orientation.w=qw
+
+        oc.absolute_x_axis_tolerance=0.25
+        oc.absolute_y_axis_tolerance=0.25
+        oc.absolute_z_axis_tolerance=0.35
+        oc.weight=1.0
+
+        constraints=Constraints()
+
+        constraints.position_constraints.append(
+            pc
+        )
+
+        constraints.orientation_constraints.append(
+            oc
+        )
+
+        req.goal_constraints.append(
+            constraints
+        )
+
+        # --------------------------------------------------------
+        # Planning options
+        # --------------------------------------------------------
+
+        options=PlanningOptions()
+
+        options.plan_only=False
+        options.look_around=False
+        options.replan=True
+        options.replan_attempts=5
+
+        goal.request=req
+        goal.planning_options=options
+
+        # --------------------------------------------------------
+        # Send MoveGroup goal
+        # --------------------------------------------------------
+
+        future=self.move_group_client.send_goal_async(
+            goal
+        )
+
+        handle=self.wait_future(
+            future,
+            10.0,
+            "LIFT fallback MoveGroup goal"
+        )
+
+        if handle is None or not handle.accepted:
+            self.get_logger().error(
+                "[LIFT FALLBACK] MoveGroup goal rejected."
+            )
+            return False
+
+        result=self.wait_future(
+            handle.get_result_async(),
+            30.0,
+            "LIFT fallback MoveGroup result"
+        )
+
+        if result is None:
+            return False
+
+        error_code=result.result.error_code.val
+
+        if error_code!=1:
+            self.get_logger().error(
+                f"[LIFT FALLBACK] Planning/execution failed: "
+                f"error_code={error_code}"
+            )
+            return False
+
+        # --------------------------------------------------------
+        # Actual execution success
+        # --------------------------------------------------------
+
+        self.get_logger().info(
+            "[LIFT FALLBACK] MoveGroup execution successful."
+        )
+
+        time.sleep(0.1)
+
+        self.get_logger().info(
+            f"[LIFT FALLBACK] Target pose: "
+            f"x={x:.3f}, "
+            f"y={y:.3f}, "
+            f"z={target_z:.3f}"
+        )
+
+        self.get_logger().info(
+            "[LIFT FALLBACK] Gripper CLOSE remains held. "
+            "No OPEN/CLOSE command sent during fallback."
+        )
+
+        return True
+
+    # ============================================================
+    # Segmented Cartesian Lift + Joint-space Fallback
+    # ============================================================
+
+    def cartesian_z_move_segmented(
+        self,
+        x,
+        y,
+        start_z,
+        end_z,
+        qx,
+        qy,
+        qz,
+        qw,
+        step=0.05
+    ):
+
+        delta=end_z-start_z
+
+        if abs(delta)<0.001:
+            return True
+
+        if step<=0.0:
+            self.get_logger().error(
+                "[LIFT] Invalid lift segment step."
+            )
+            return False
+
+        direction=1.0 if delta>0.0 else -1.0
+
+        total_segments=int(
+            math.ceil(abs(delta)/step)
+        )
+
+        current_z=float(start_z)
+
+        self.get_logger().info(
+            f"[LIFT] Start segmented lift: "
+            f"z={start_z:.3f}->{end_z:.3f}, "
+            f"step={step:.3f}, "
+            f"segments={total_segments}"
+        )
+
+        # ========================================================
+        # Gripper 상태 유지
+        # ========================================================
+
+        for segment_index in range(
+            1,
+            total_segments+1
+        ):
+
+            remaining=abs(
+                end_z-current_z
+            )
+
+            move=min(
+                step,
+                remaining
+            )
+
+            next_z=(
+                current_z+
+                direction*move
+            )
+
+            self.get_logger().info(
+                f"[LIFT] Segment "
+                f"[{segment_index}/{total_segments}] "
+                f"z={current_z:.3f}->{next_z:.3f}"
+            )
+
+            # ====================================================
+            # 1. Cartesian 시도
+            # ====================================================
+
+            cartesian_success=self.cartesian_z_move(
+                x,
+                y,
+                current_z,
+                next_z,
+                qx,
+                qy,
+                qz,
+                qw
+            )
+
+            if cartesian_success:
+
+                current_z=next_z
+
+                self.get_logger().info(
+                    f"[LIFT] Segment {segment_index} "
+                    f"Cartesian success."
+                )
+
+                continue
+
+            # ====================================================
+            # 2. Cartesian 실패
+            # ====================================================
+
+            self.get_logger().warn(
+                f"[LIFT] Segment {segment_index} "
+                f"Cartesian failed. "
+                f"Trying joint-space fallback."
+            )
+
+            # ====================================================
+            # 3. Joint-space fallback
+            # ====================================================
+
+            fallback_success=self.lift_joint_space_fallback(
+                x,
+                y,
+                next_z,
+                qx,
+                qy,
+                qz,
+                qw
+            )
+
+            if not fallback_success:
+
+                self.get_logger().error(
+                    f"[LIFT] Segment {segment_index} failed. "
+                    f"Both Cartesian and joint-space "
+                    f"fallback failed."
+                )
+
+                return False
+
+            # ====================================================
+            # 4. Fallback 성공
+            # ====================================================
+
+            current_z=next_z
+
+            self.get_logger().info(
+                f"[LIFT] Segment {segment_index} "
+                f"joint-space fallback success."
+            )
+
+        self.get_logger().info(
+            f"[LIFT] Completed: "
+            f"z={start_z:.3f}->{end_z:.3f}"
+        )
+
+        self.get_logger().info(
+            "[LIFT] Gripper CLOSE remains held by MuJoCo Bridge."
+        )
+
+        return True
+
+    # ============================================================
+    # Named State / Home
+    # ============================================================
+
+    def plan_and_execute_named_state(
+        self,
+        named_state
+    ):
+
+        if named_state not in (
+            "ready",
+            "home"
+        ):
+
+            self.get_logger().error(
+                f"[PnP] Unsupported named state: {named_state}"
+            )
+
+            return False
+
+        if not self.move_group_client.wait_for_server(
+            timeout_sec=3.0
+        ):
+
+            self.get_logger().error(
+                "[PnP] MoveGroup server unavailable."
+            )
+
+            return False
+
+        self.get_logger().info(
+            f"[PnP] Returning to named state: {named_state}"
+        )
+
+        goal=MoveGroup.Goal()
+
         req=MotionPlanRequest()
 
         req.group_name="panda_arm"
         req.num_planning_attempts=5
         req.allowed_planning_time=3.0
+
         req.max_velocity_scaling_factor=0.5
         req.max_acceleration_scaling_factor=0.5
 
+        req.start_state.is_diff=True
+
         constraints=Constraints()
 
-        joints=[
-            "joint1",
-            "joint2",
-            "joint3",
-            "joint4",
-            "joint5",
-            "joint6",
-            "joint7"
-        ]
-
-        for name,value in zip(
-            joints,
+        for joint,value in zip(
+            self.arm_joints,
             self.home_qpos
         ):
+
             jc=JointConstraint()
 
-            jc.joint_name=name
-            jc.position=float(value)
+            jc.joint_name=joint
+            jc.position=value
+
             jc.tolerance_above=0.02
             jc.tolerance_below=0.02
             jc.weight=1.0
 
-            constraints.joint_constraints.append(jc)
+            constraints.joint_constraints.append(
+                jc
+            )
 
-        req.goal_constraints.append(constraints)
+        req.goal_constraints.append(
+            constraints
+        )
+
+        options=PlanningOptions()
+
+        options.plan_only=False
+        options.replan=True
+        options.replan_attempts=3
 
         goal.request=req
+        goal.planning_options=options
 
-        goal.planning_options=PlanningOptions()
-        goal.planning_options.plan_only=False
-        goal.planning_options.replan=True
-        goal.planning_options.replan_attempts=3
-
-        self.get_logger().info(
-            f"[PLANNING] Returning to '{named_state}'..."
+        future=self.move_group_client.send_goal_async(
+            goal
         )
 
-        goal_handle=self.wait_future(
-            self.move_group_client.send_goal_async(goal),
-            10.0
+        handle=self.wait_future(
+            future,
+            10.0,
+            "Named-state MoveGroup goal"
         )
 
-        if goal_handle is None:
-            return False
+        if handle is None or not handle.accepted:
 
-        if not goal_handle.accepted:
-            self.get_logger().warn(
-                "[PLANNING] Ready goal rejected."
+            self.get_logger().error(
+                "[PnP] Named-state goal rejected."
             )
+
             return False
 
-        result_wrapper=self.wait_future(
-            goal_handle.get_result_async(),
-            20.0
+        result=self.wait_future(
+            handle.get_result_async(),
+            20.0,
+            "Named-state MoveGroup result"
         )
 
-        if result_wrapper is None:
+        if result is None:
             return False
 
-        code=result_wrapper.result.error_code.val
+        ok=result.result.error_code.val==1
 
-        if code==1:
+        if ok:
+
             self.get_logger().info(
-                "[EXECUTION] Returned to MuJoCo initial pose."
+                "[PnP] Returned to MuJoCo initial pose."
             )
-            return True
 
-        self.get_logger().warn(
-            f"[EXECUTION] Ready motion failed: {code}"
-        )
+        else:
 
-        return False
+            self.get_logger().error(
+                f"[PnP] Failed to return home: "
+                f"error_code={result.result.error_code.val}"
+            )
 
-    # ================================================================
+        return ok
+
+    # ============================================================
     # Gripper
-    # ================================================================
+    # ============================================================
 
-    def control_gripper(self,action):
+    def control_gripper(
+        self,
+        action
+    ):
+
         action=action.upper()
 
-        if action not in ("OPEN","CLOSE"):
+        if action not in (
+            "OPEN",
+            "CLOSE"
+        ):
+
             self.get_logger().error(
-                f"[GRIPPER] Unknown action: {action}"
+                f"[GRIPPER] Invalid action: {action}"
             )
+
             return False
 
         if not self.gripper_client.wait_for_server(
             timeout_sec=3.0
         ):
+
             self.get_logger().error(
                 "[GRIPPER] Action server unavailable."
             )
+
             return False
 
         goal=GripperCommand.Goal()
 
         if action=="OPEN":
-            goal.command.position=0.04
-        else:
-            goal.command.position=0.0
 
-        goal.command.max_effort=20.0
+            goal.command.position=(
+                self.gripper_open_position
+            )
+
+            goal.command.max_effort=(
+                self.gripper_open_effort
+            )
+
+        else:
+
+            goal.command.position=(
+                self.gripper_close_position
+            )
+
+            goal.command.max_effort=(
+                self.gripper_close_effort
+            )
 
         self.get_logger().info(
-            f"[GRIPPER] Sending {action} command..."
+            f"[GRIPPER] Sending {action}: "
+            f"position={goal.command.position:.3f}"
         )
 
         try:
-            # ========================================================
-            # Send goal
-            # ========================================================
 
-            goal_handle=self.wait_future(
-                self.gripper_client.send_goal_async(goal),
-                5.0
+            future=self.gripper_client.send_goal_async(
+                goal
             )
 
-            if goal_handle is None:
-                self.get_logger().error(
-                    "[GRIPPER] Goal future timeout."
-                )
-                return False
+            handle=self.wait_future(
+                future,
+                5.0,
+                f"Gripper {action} goal"
+            )
 
-            if not goal_handle.accepted:
+            if handle is None or not handle.accepted:
+
                 self.get_logger().error(
                     f"[GRIPPER] {action} goal rejected."
                 )
+
                 return False
 
-            self.get_logger().info(
-                f"[GRIPPER] {action} goal accepted."
+            result=self.wait_future(
+                handle.get_result_async(),
+                10.0,
+                f"Gripper {action} result"
             )
 
-            # ========================================================
-            # Wait result
-            # ========================================================
-
-            result_wrapper=self.wait_future(
-                goal_handle.get_result_async(),
-                10.0
-            )
-
-            if result_wrapper is None:
-                self.get_logger().error(
-                    f"[GRIPPER] {action} result timeout."
-                )
+            if result is None:
                 return False
 
-            result=result_wrapper.result
+            result=result.result
 
             self.get_logger().info(
                 f"[GRIPPER] {action}: "
@@ -760,9 +1736,11 @@ class PandaMoveItPickAndPlace(Node):
             )
 
             if not result.reached_goal:
+
                 self.get_logger().error(
-                    f"[GRIPPER] {action} did not reach target."
+                    f"[GRIPPER] {action} failed."
                 )
+
                 return False
 
             time.sleep(0.2)
@@ -770,33 +1748,27 @@ class PandaMoveItPickAndPlace(Node):
             return True
 
         except Exception as e:
+
             self.get_logger().error(
-                f"[GRIPPER] Action exception: {e}"
+                f"[GRIPPER] {action} exception: {e}"
             )
+
             return False
 
-    # ================================================================
-    # Place calculation
-    # ================================================================
+    # ============================================================
+    # Place Pose
+    # ============================================================
 
     def calculate_place_pose(self):
-        if self.target_height is None:
-            return None
 
         object_center_z=(
             self.table_top_z+
-            self.target_height/2.0
+            self.object_height/2.0
         )
 
         place_tcp_z=(
             object_center_z-
             self.tcp_to_fingertip
-        )
-
-        self.get_logger().info(
-            f"[PLACE CALC] "
-            f"Object center Z={object_center_z:.4f}, "
-            f"TCP Z={place_tcp_z:.4f}"
         )
 
         return (
@@ -805,338 +1777,556 @@ class PandaMoveItPickAndPlace(Node):
             place_tcp_z
         )
 
-    # ================================================================
-    # Failure
-    # ================================================================
+    # ============================================================
+    # Failure Reset
+    # ============================================================
 
-    def reset_after_failure(self,reason):
+    def reset_after_failure(
+        self,
+        reason
+    ):
+
         self.get_logger().error(
-            f"[PnP FAILED] {reason}"
+            f"[PnP] Pick & Place failed: {reason}"
         )
 
-        # 현재 로봇을 ready로 복귀
-        self.plan_and_execute_named_state("ready")
+        try:
+
+            self.plan_and_execute_named_state(
+                "ready"
+            )
+
+        except Exception as e:
+
+            self.get_logger().error(
+                f"[PnP] Recovery failed: {e}"
+            )
 
         self.target_pose=None
-        self.target_height=None
+        self.object_height=None
         self.target_yaw=0.0
         self.is_busy=False
         self.state="IDLE"
 
-        self.get_logger().info(
-            "[PnP] Reset to IDLE."
-        )
-
-    # ================================================================
-    # PnP
-    # ================================================================
+    # ============================================================
+    # Pick & Place Worker
+    # ============================================================
 
     def pnp_worker_loop(self):
-        while rclpy.ok() and not self.shutdown_requested:
 
-            if self.state=="TRIGGER_PICK" and self.target_pose is not None:
+        while (
+            rclpy.ok()
+            and not self.shutdown_requested
+        ):
 
-                self.state="PICKING"
+            try:
 
-                tx,ty,tz=self.target_pose
-
-                qx,qy,qz,qw=self.yaw_to_grasp_quaternion(
-                    self.target_yaw
-                )
-
-                self.get_logger().info(
-                    "========== [START PICK & PLACE] =========="
-                )
-
-                self.get_logger().info(
-                    f"[TARGET] "
-                    f"XYZ=({tx:.3f},{ty:.3f},{tz:.3f}) "
-                    f"Height={self.target_height:.3f} "
-                    f"Yaw={math.degrees(self.target_yaw):.1f} deg"
-                )
-
-                # ====================================================
-                # 1. Open
-                # ====================================================
-
-                self.get_logger().info("[1/8] Opening gripper.")
-
-                if not self.control_gripper("OPEN"):
-                    self.reset_after_failure("Gripper OPEN failed.")
-                    continue
-
-                # ====================================================
-                # 2. Pre-grasp
-                # ====================================================
-
-                pre_grasp_z = tz + self.pre_grasp_z_offset
-
-                self.get_logger().info(f"[2/8] Pre-grasp Z={pre_grasp_z:.3f}")
-
-                if not self.plan_and_execute_pose(
-                    tx,
-                    ty,
-                    pre_grasp_z,
-                    qx,
-                    qy,
-                    qz,
-                    qw
+                if (
+                    self.state=="TRIGGER_PICK"
+                    and self.target_pose is not None
                 ):
-                    self.reset_after_failure("Pre-grasp motion failed.")
-                    continue
 
-                # ====================================================
-                # 3. Calculate grasp
-                # ====================================================
+                    self.state="PICKING"
 
-                half_height=self.target_height/2.0
+                    tx,ty,tz=self.target_pose
 
-                if half_height<=self.max_grasp_depth:
-                    grasp_z=tz
-                    grasp_mode="CENTER"
-                else:
-                    object_top_z=tz+half_height
-                    grasp_z=object_top_z-self.max_grasp_depth
-                    grasp_mode="TOP-LIMITED"
-
-                if grasp_z>=pre_grasp_z:
-                    self.reset_after_failure(
-                        "Calculated grasp Z is invalid."
-                    )
-                    continue
-
-                self.get_logger().info(
-                    f"[3/8] "
-                    f"Mode={grasp_mode}, "
-                    f"Grasp Z={grasp_z:.4f}"
-                )
-
-                # ====================================================
-                # 3-1. XY / orientation alignment
-                # ====================================================
-
-                if not self.plan_and_execute_pose(
-                    tx,
-                    ty,
-                    pre_grasp_z,
-                    qx,
-                    qy,
-                    qz,
-                    qw
-                ):
-                    self.reset_after_failure(
-                        "Object alignment failed."
-                    )
-                    continue
-
-                # ====================================================
-                # 3-2. Descend
-                # ====================================================
-
-                self.get_logger().info(
-                    "[3-2/8] Cartesian grasp descent."
-                )
-
-                if not self.cartesian_z_move(
-                    tx,
-                    ty,
-                    pre_grasp_z,
-                    grasp_z,
-                    qx,
-                    qy,
-                    qz,
-                    qw
-                ):
-                    self.reset_after_failure(
-                        "Grasp descent failed."
-                    )
-                    continue
-
-                # ====================================================
-                # 4. Close
-                # ====================================================
-
-                self.get_logger().info(
-                    "[4/8] Closing gripper."
-                )
-
-                if not self.control_gripper("CLOSE"):
-                    self.reset_after_failure(
-                        "Gripper CLOSE failed."
-                    )
-                    continue
-
-                # ====================================================
-                # 5. Lift
-                # ====================================================
-
-                lift_z=max(
-                    tz+self.lift_z_offset,
-                    grasp_z+self.lift_clearance
-                )
-
-                self.get_logger().info(
-                    f"[5/8] Lift Z={grasp_z:.3f}->{lift_z:.3f}"
-                )
-
-                if not self.cartesian_z_move(
-                    tx,
-                    ty,
-                    grasp_z,
-                    lift_z,
-                    qx,
-                    qy,
-                    qz,
-                    qw
-                ):
-                    self.reset_after_failure(
-                        "Lift failed."
-                    )
-                    continue
-
-                # ====================================================
-                # 6. Move to place
-                # ====================================================
-
-                place_pose=self.calculate_place_pose()
-
-                if place_pose is None:
-                    self.reset_after_failure(
-                        "Place pose calculation failed."
-                    )
-                    continue
-
-                px,py,pz=place_pose
-
-                pre_place_z=pz+self.post_place_z_offset
-
-                self.get_logger().info(
-                    f"[6/8] "
-                    f"Pre-place=({px:.3f},{py:.3f},{pre_place_z:.3f})"
-                )
-
-                if not self.plan_and_execute_pose(
-                    px,
-                    py,
-                    pre_place_z,
-                    qx,
-                    qy,
-                    qz,
-                    qw
-                ):
-                    self.reset_after_failure(
-                        "Pre-place motion failed."
-                    )
-                    continue
-
-                # ====================================================
-                # 7. Place
-                # ====================================================
-
-                self.get_logger().info(
-                    f"[7/8] Place Z={pz:.3f}"
-                )
-
-                if not self.cartesian_z_move(
-                    px,
-                    py,
-                    pre_place_z,
-                    pz,
-                    qx,
-                    qy,
-                    qz,
-                    qw
-                ):
-                    self.reset_after_failure(
-                        "Place descent failed."
-                    )
-                    continue
-
-                # Open gripper
-                if not self.control_gripper("OPEN"):
-                    self.reset_after_failure(
-                        "Place gripper OPEN failed."
-                    )
-                    continue
-
-                time.sleep(0.6)
-
-                # ====================================================
-                # 8. Retract
-                # ====================================================
-
-                self.get_logger().info(
-                    "[8/8] Retracting."
-                )
-
-                if not self.cartesian_z_move(
-                    px,
-                    py,
-                    pz,
-                    pre_place_z,
-                    qx,
-                    qy,
-                    qz,
-                    qw
-                ):
-                    self.get_logger().warn(
-                        "[PnP] Retract failed. Continuing to ready."
+                    half_height=(
+                        self.object_height/2.0
                     )
 
-                # Ready
-                self.plan_and_execute_named_state(
-                    "ready"
+                    qx,qy,qz,qw=(
+                        self.yaw_to_grasp_quaternion(
+                            self.target_yaw
+                        )
+                    )
+
+                    self.get_logger().info(
+                        "================================================"
+                    )
+
+                    self.get_logger().info(
+                        "[PnP] Pick & Place sequence started."
+                    )
+
+                    self.get_logger().info(
+                        f"[PnP] Target: "
+                        f"({tx:.3f},{ty:.3f},{tz:.3f}), "
+                        f"h={self.object_height:.3f}"
+                    )
+
+                    self.get_logger().info(
+                        "================================================"
+                    )
+
+                    # ====================================================
+                    # [1/8] Open Gripper
+                    # ====================================================
+
+                    self.get_logger().info(
+                        "[1/8] Opening gripper."
+                    )
+
+                    if not self.control_gripper(
+                        "OPEN"
+                    ):
+
+                        self.reset_after_failure(
+                            "Gripper OPEN failed."
+                        )
+
+                        continue
+
+                    # ====================================================
+                    # [2/8] Move to Pre-Grasp
+                    # ====================================================
+
+                    pre_grasp_z=(
+                        tz+
+                        half_height+
+                        self.pre_grasp_z_offset
+                    )
+
+                    self.get_logger().info(
+                        f"[2/8] Moving to pre-grasp: "
+                        f"z={pre_grasp_z:.3f}"
+                    )
+
+                    if not self.plan_and_execute_pose(
+                        tx,
+                        ty,
+                        pre_grasp_z,
+                        qx,
+                        qy,
+                        qz,
+                        qw
+                    ):
+
+                        self.reset_after_failure(
+                            "Pre-grasp planning/execution failed."
+                        )
+
+                        continue
+
+                    # ====================================================
+                    # [3/8] Cartesian Descend to Grasp
+                    # ====================================================
+
+                    if (
+                        half_height
+                        <=self.max_grasp_depth
+                    ):
+
+                        grasp_z=tz
+                        grasp_mode="CENTER"
+
+                    else:
+
+                        object_top_z=(
+                            tz+
+                            half_height
+                        )
+
+                        grasp_z=(
+                            object_top_z-
+                            self.max_grasp_depth
+                        )
+
+                        grasp_mode="TOP-LIMITED"
+
+                    self.get_logger().info(
+                        f"[3/8] Grasp position: "
+                        f"z={grasp_z:.3f}, "
+                        f"mode={grasp_mode}"
+                    )
+
+                    if grasp_z>=pre_grasp_z:
+
+                        self.reset_after_failure(
+                            "Invalid grasp Z."
+                        )
+
+                        continue
+
+                    if not self.cartesian_z_move(
+                        tx,
+                        ty,
+                        pre_grasp_z,
+                        grasp_z,
+                        qx,
+                        qy,
+                        qz,
+                        qw
+                    ):
+
+                        self.reset_after_failure(
+                            "Cartesian grasp descent failed."
+                        )
+
+                        continue
+
+                    # ====================================================
+                    # [4/8] Close Gripper
+                    # ====================================================
+
+                    self.get_logger().info(
+                        "[4/8] Closing gripper and "
+                        "detecting object contact."
+                    )
+
+                    if not self.control_gripper(
+                        "CLOSE"
+                    ):
+
+                        self.reset_after_failure(
+                            "Gripper CLOSE/contact detection failed."
+                        )
+
+                        continue
+
+                    self.get_logger().info(
+                        "[4/8] Gripper CLOSE successful. "
+                        "Bridge grasp force remains active during LIFT "
+                        "and PRE-PLACE."
+                    )
+
+                    # ====================================================
+                    # [5/8] Vertical Lift
+                    # ====================================================
+
+                    lift_z=(
+                        tz+
+                        half_height+
+                        self.lift_z_offset
+                    )
+
+                    self.get_logger().info(
+                        f"[5/8] Lifting vertically: "
+                        f"z={grasp_z:.3f}->{lift_z:.3f}"
+                    )
+
+                    if not self.cartesian_z_move_segmented(
+                        tx,
+                        ty,
+                        grasp_z,
+                        lift_z,
+                        qx,
+                        qy,
+                        qz,
+                        qw,
+                        self.lift_segment_step
+                    ):
+
+                        self.reset_after_failure(
+                            "Segmented Cartesian lift failed."
+                        )
+
+                        continue
+
+                    self.get_logger().info(
+                        f"[LIFT] Completed: "
+                        f"z={grasp_z:.3f}->{lift_z:.3f}"
+                    )
+
+                    self.get_logger().info(
+                        "[LIFT] Gripper CLOSE remains held."
+                    )
+
+                    # ====================================================
+                    # [6/8] Cartesian XY PRE-PLACE
+                    #
+                    # 1차:
+                    #   5 cm waypoint Cartesian XY
+                    #
+                    # 실패:
+                    #   orientation-constrained joint-space fallback
+                    #
+                    # Z:
+                    #   lift_z 고정
+                    #
+                    # Orientation:
+                    #   grasp quaternion 고정
+                    #
+                    # Gripper:
+                    #   CLOSE 유지
+                    # ====================================================
+
+                    px,py,pz=(
+                        self.calculate_place_pose()
+                    )
+
+                    pre_place_z=(
+                        pz+
+                        self.post_place_z_offset
+                    )
+
+                    # XY 이동은 실제 lift 높이에서 수행
+                    xy_move_z=lift_z
+
+                    self.get_logger().info(
+                        "[6/8] Cartesian XY pre-place:"
+                    )
+
+                    self.get_logger().info(
+                        f"[6/8] "
+                        f"({tx:.3f},{ty:.3f},{xy_move_z:.3f}) -> "
+                        f"({px:.3f},{py:.3f},{xy_move_z:.3f})"
+                    )
+
+                    self.get_logger().info(
+                        "[6/8] Z fixed. "
+                        "Grasp orientation fixed. "
+                        "Gripper CLOSE remains held."
+                    )
+
+                    # ----------------------------------------------------
+                    # 1차: Cartesian XY
+                    # ----------------------------------------------------
+
+                    xy_cartesian_success=self.cartesian_xy_move(
+                        tx,
+                        ty,
+                        px,
+                        py,
+                        xy_move_z,
+                        qx,
+                        qy,
+                        qz,
+                        qw
+                    )
+
+                    # ----------------------------------------------------
+                    # 2차: Orientation-constrained joint-space fallback
+                    # ----------------------------------------------------
+
+                    if not xy_cartesian_success:
+
+                        self.get_logger().warn(
+                            "[6/8] Cartesian XY failed."
+                        )
+
+                        self.get_logger().warn(
+                            "[6/8] Starting orientation-constrained "
+                            "joint-space fallback."
+                        )
+
+                        xy_fallback_success=(
+                            self.xy_joint_space_fallback(
+                                tx,
+                                ty,
+                                px,
+                                py,
+                                xy_move_z,
+                                qx,
+                                qy,
+                                qz,
+                                qw
+                            )
+                        )
+
+                        if not xy_fallback_success:
+
+                            self.reset_after_failure(
+                                "Cartesian XY failed and "
+                                "orientation-constrained "
+                                "joint-space fallback failed."
+                            )
+
+                            continue
+
+                        self.get_logger().info(
+                            "[6/8] XY joint-space fallback completed."
+                        )
+
+                    else:
+
+                        self.get_logger().info(
+                            "[6/8] Cartesian XY pre-place completed."
+                        )
+
+                    # ====================================================
+                    # [6.5/8] Vertical adjustment to pre-place Z
+                    #
+                    # Lift Z와 pre-place Z가 다를 수 있으므로
+                    # 여기서 수직 이동.
+                    #
+                    # Orientation 계속 고정.
+                    # ====================================================
+
+                    if abs(
+                        xy_move_z-
+                        pre_place_z
+                    )>=0.001:
+
+                        self.get_logger().info(
+                            f"[6.5/8] Vertical move to pre-place height: "
+                            f"z={xy_move_z:.3f}->{pre_place_z:.3f}"
+                        )
+
+                        if not self.cartesian_z_move(
+                            px,
+                            py,
+                            xy_move_z,
+                            pre_place_z,
+                            qx,
+                            qy,
+                            qz,
+                            qw
+                        ):
+
+                            self.reset_after_failure(
+                                "Vertical move to pre-place height failed."
+                            )
+
+                            continue
+
+                    # ====================================================
+                    # [7/8] Vertical Place + Open
+                    # ====================================================
+
+                    self.get_logger().info(
+                        f"[7/8] Cartesian descend to place: "
+                        f"z={pre_place_z:.3f}->{pz:.3f}"
+                    )
+
+                    if not self.cartesian_z_move(
+                        px,
+                        py,
+                        pre_place_z,
+                        pz,
+                        qx,
+                        qy,
+                        qz,
+                        qw
+                    ):
+
+                        self.reset_after_failure(
+                            "Cartesian place descent failed."
+                        )
+
+                        continue
+
+                    self.get_logger().info(
+                        "[7/8] Place position reached."
+                    )
+
+                    # ----------------------------------------------------
+                    # 여기서 처음으로 OPEN
+                    # ----------------------------------------------------
+
+                    self.get_logger().info(
+                        "[7/8] Opening gripper."
+                    )
+
+                    if not self.control_gripper(
+                        "OPEN"
+                    ):
+
+                        self.reset_after_failure(
+                            "Gripper OPEN at place failed."
+                        )
+
+                        continue
+
+                    time.sleep(0.6)
+
+                    # ====================================================
+                    # [8/8] Retract + Home
+                    # ====================================================
+
+                    self.get_logger().info(
+                        f"[8/8] Retracting: "
+                        f"z={pz:.3f}->{pre_place_z:.3f}"
+                    )
+
+                    if not self.cartesian_z_move(
+                        px,
+                        py,
+                        pz,
+                        pre_place_z,
+                        qx,
+                        qy,
+                        qz,
+                        qw
+                    ):
+
+                        self.get_logger().warn(
+                            "[PnP] Retract failed."
+                        )
+
+                    if not self.plan_and_execute_named_state(
+                        "ready"
+                    ):
+
+                        self.get_logger().warn(
+                            "[PnP] Failed to return home."
+                        )
+
+                    self.get_logger().info(
+                        "================================================"
+                    )
+
+                    self.get_logger().info(
+                        "[PnP] Pick & Place completed successfully."
+                    )
+
+                    self.get_logger().info(
+                        "================================================"
+                    )
+
+                    self.target_pose=None
+                    self.object_height=None
+                    self.target_yaw=0.0
+                    self.is_busy=False
+                    self.state="IDLE"
+
+                time.sleep(0.05)
+
+            except Exception as e:
+
+                self.get_logger().error(
+                    f"[PnP WORKER] Exception: {e}"
                 )
 
-                self.get_logger().info(
-                    "========== [PICK & PLACE SUCCESS] =========="
+                self.reset_after_failure(
+                    f"Worker exception: {e}"
                 )
 
-                # ====================================================
-                # Reset
-                # ====================================================
-
-                self.target_pose=None
-                self.target_height=None
-                self.target_yaw=0.0
-                self.is_busy=False
-                self.state="IDLE"
-
-            time.sleep(0.05)
-
-    # ================================================================
+    # ============================================================
     # Shutdown
-    # ================================================================
+    # ============================================================
 
     def shutdown(self):
+
         self.shutdown_requested=True
 
         if (
-            self.worker_thread.is_alive()
-            and threading.current_thread() is not self.worker_thread
+            self.worker.is_alive()
+            and threading.current_thread() is not self.worker
         ):
-            self.worker_thread.join(timeout=2.0)
 
+            self.worker.join(
+                timeout=2.0
+            )
 
-# ====================================================================
-# Main
-# ====================================================================
 
 def main(args=None):
+
     rclpy.init(args=args)
 
     node=PandaMoveItPickAndPlace()
 
     try:
+
         rclpy.spin(node)
+
     except KeyboardInterrupt:
         pass
+
     finally:
+
         node.shutdown()
         node.destroy_node()
-
-        if rclpy.ok():
-            rclpy.shutdown()
+        rclpy.shutdown()
 
 
 if __name__=="__main__":
