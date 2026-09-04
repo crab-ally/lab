@@ -13,7 +13,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from sensor_msgs.msg import JointState, Image, CameraInfo
 from geometry_msgs.msg import TransformStamped
 from std_msgs.msg import String, Float64
-from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
+from tf2_ros import StaticTransformBroadcaster
 from control_msgs.action import FollowJointTrajectory, GripperCommand
 import mujoco
 import mujoco.viewer
@@ -67,7 +67,6 @@ class MjcfBridgeNode(Node):
         self.depth_pub = self.create_publisher(Image, "/camera/depth/image_raw", 10)
         self.seg_pub = self.create_publisher(Image, "/camera/segmentation/image_raw", 10)
         self.info_pub = self.create_publisher(CameraInfo, "/camera/depth/camera_info", 10)
-        self.tf_broadcaster = TransformBroadcaster(self)
         self.static_tf_broadcaster = StaticTransformBroadcaster(self)
 
         self.create_subscription(
@@ -362,50 +361,6 @@ class MjcfBridgeNode(Node):
         R = self.data.xmat[body_id].reshape(3, 3)
         Rp = self.data.xmat[parent_id].reshape(3, 3)
         return Rp.T @ (p - pp), Rp.T @ R
-
-    def publish_tf(self):
-        stamp = self.get_clock().now().to_msg()
-        root = self.model.body("link0").id
-
-        t = TransformStamped()
-        t.header.stamp = stamp
-        t.header.frame_id = "world"
-        t.child_frame_id = "link0"
-        p = self.data.xpos[root]
-        q = self._mat_to_quat(self.data.xmat[root].reshape(3, 3))
-        t.transform.translation.x = float(p[0])
-        t.transform.translation.y = float(p[1])
-        t.transform.translation.z = float(p[2])
-        t.transform.rotation.x, t.transform.rotation.y = q[0], q[1]
-        t.transform.rotation.z, t.transform.rotation.w = q[2], q[3]
-        self.tf_broadcaster.sendTransform(t)
-
-        for bid in range(1, self.model.nbody):
-            name = mujoco.mj_id2name(
-                self.model, mujoco.mjtObj.mjOBJ_BODY, bid
-            )
-            if not name or name in ("link0", self.camera_link_frame):
-                continue
-
-            parent = self.model.body_parentid[bid]
-            parent_name = mujoco.mj_id2name(
-                self.model, mujoco.mjtObj.mjOBJ_BODY, parent
-            )
-            if not parent_name or parent == 0:
-                continue
-
-            pos, rot = self._relative_transform(bid, parent)
-            t = TransformStamped()
-            t.header.stamp = stamp
-            t.header.frame_id = parent_name
-            t.child_frame_id = name
-            t.transform.translation.x = float(pos[0])
-            t.transform.translation.y = float(pos[1])
-            t.transform.translation.z = float(pos[2])
-            q = self._mat_to_quat(rot)
-            t.transform.rotation.x, t.transform.rotation.y = q[0], q[1]
-            t.transform.rotation.z, t.transform.rotation.w = q[2], q[3]
-            self.tf_broadcaster.sendTransform(t)
 
     def arm_goal(self, goal):
         if not goal.trajectory.joint_names:
@@ -1097,7 +1052,6 @@ def main():
                     node._prepare_physics_step()
                     mujoco.mj_step(model, data)
                     node.publish_joint_states()
-                    node.publish_tf()
 
                 sim_elapsed = float(data.time) - sim_start
                 wall_elapsed = time.perf_counter() - wall_start
@@ -1131,7 +1085,6 @@ def main():
                         node._prepare_physics_step()
                         mujoco.mj_step(model, data)
                         node.publish_joint_states()
-                        node.publish_tf()
 
                     viewer.sync()
 
