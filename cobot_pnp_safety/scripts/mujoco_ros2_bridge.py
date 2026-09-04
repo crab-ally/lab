@@ -119,16 +119,6 @@ class MjcfBridgeNode(Node):
         self.camera_link_frame="ceiling_camera_link"
 
         # ============================================================
-        # PNP object
-        # ============================================================
-        self.pnp_object_geom="pnp_object_geom"
-
-        self.pnp_object_geom_id=mujoco.mj_name2id(
-            model,
-            mujoco.mjtObj.mjOBJ_GEOM,
-            self.pnp_object_geom)
-
-        # ============================================================
         # Panda geom IDs
         # ============================================================
         self.finger_geom_ids=self._collect_finger_geom_ids()
@@ -168,16 +158,6 @@ class MjcfBridgeNode(Node):
         # ============================================================
         # Gripper topics
         # ============================================================
-        self.gripper_cmd_pub=self.create_publisher(
-            Float64,
-            "/panda_gripper/command",
-            10)
-
-        self.gripper_string_pub=self.create_publisher(
-            String,
-            "/panda_gripper/cmd",
-            10)
-
         self.create_subscription(
             String,
             "/panda_gripper/cmd",
@@ -1011,32 +991,6 @@ class MjcfBridgeNode(Node):
 
         return float(np.mean(values))
 
-    def _gripper_contact(self):
-        if self.pnp_object_geom_id<0:
-            return False
-
-        with self.lock:
-            for i in range(self.data.ncon):
-                a=int(self.data.contact[i].geom1)
-                b=int(self.data.contact[i].geom2)
-
-                if (
-                    (
-                        a==self.pnp_object_geom_id
-                        and
-                        b in self.finger_geom_ids
-                    )
-                    or
-                    (
-                        b==self.pnp_object_geom_id
-                        and
-                        a in self.finger_geom_ids
-                    )
-                ):
-                    return True
-
-        return False
-
     def _gripper_velocity_ok(self):
         with self.lock:
             v=[
@@ -1069,10 +1023,6 @@ class MjcfBridgeNode(Node):
         # OPEN
         # ============================================================
         if target>0.02:
-
-            # --------------------------------------------------------
-            # 추가 압착력 즉시 OFF
-            # --------------------------------------------------------
             self.gripper_force_enabled=False
 
             with self.lock:
@@ -1142,8 +1092,7 @@ class MjcfBridgeNode(Node):
 
                         self.get_logger().info(
                             f"[GRIPPER] OPEN complete "
-                            f"position={pos:.4f} "
-                            f"extra_force=OFF")
+                            f"position={pos:.4f}")
 
                         return result
 
@@ -1165,13 +1114,6 @@ class MjcfBridgeNode(Node):
         # ============================================================
         # CLOSE
         # ============================================================
-
-        # ------------------------------------------------------------
-        # CLOSE부터 추가 압착력 활성화
-        #
-        # 이 상태는 이후 LIFT에서도 유지된다.
-        # 다음 OPEN 명령이 들어올 때까지 유지.
-        # ------------------------------------------------------------
         self.gripper_force_enabled=True
 
         with self.lock:
@@ -1179,23 +1121,13 @@ class MjcfBridgeNode(Node):
                 self.GRIPPER_ACTUATOR_ID
             ]=self.GRIPPER_CTRL_MIN
 
-            ctrl=float(
-                self.data.ctrl[
-                    self.GRIPPER_ACTUATOR_ID])
-
-            actuator_force=float(
-                self.data.actuator_force[
-                    self.GRIPPER_ACTUATOR_ID])
-
         self.get_logger().info(
             f"[GRIPPER] CLOSE start "
-            f"ctrl={ctrl:.3f} "
-            f"actuator_force={actuator_force:.3f} "
-            f"extra_force="
-            f"{self.GRIPPER_EXTRA_FORCE:.1f}N/finger")
+            f"ctrl={self.GRIPPER_CTRL_MIN:.3f} "
+            f"extra_force={self.GRIPPER_EXTRA_FORCE:.1f}N/finger")
 
         start=time.monotonic()
-        contact_start=None
+        stable_start=None
 
         while (
             time.monotonic()-start
@@ -1207,136 +1139,37 @@ class MjcfBridgeNode(Node):
                 goal_handle.canceled()
                 return GripperCommand.Result()
 
-            contact=self._gripper_contact()
             pos=self._gripper_position()
+            v_ok=self._gripper_velocity_ok()
 
-            # --------------------------------------------------------
-            # 접촉 전
-            # --------------------------------------------------------
-            if not contact:
-
-                contact_start=None
-
-                with self.lock:
-                    self.data.ctrl[
-                        self.GRIPPER_ACTUATOR_ID
-                    ]=self.GRIPPER_CTRL_MIN
-
-            # --------------------------------------------------------
-            # 접촉
-            # --------------------------------------------------------
-            else:
-
-                if contact_start is None:
-                    contact_start=time.monotonic()
-
-                    with self.lock:
-                        contact_force=float(
-                            self.data.actuator_force[
-                                self.GRIPPER_ACTUATOR_ID])
-
-                        qforce1=float(
-                            self.data.qfrc_applied[
-                                self.finger1_dof_id])
-
-                        qforce2=float(
-                            self.data.qfrc_applied[
-                                self.finger2_dof_id])
-
-                    self.get_logger().info(
-                        f"[GRIPPER] Object contact detected. "
-                        f"position={pos:.4f} "
-                        f"actuator_force={contact_force:.3f} "
-                        f"qfrc_applied="
-                        f"[{qforce1:.3f},{qforce2:.3f}]")
-
-                # ----------------------------------------------------
-                # 접촉 안정화
-                # ----------------------------------------------------
-                if (
+            if v_ok:
+                if stable_start is None:
+                    stable_start=time.monotonic()
+                elif (
                     time.monotonic()
-                    -contact_start
+                    -stable_start
                     >=self.GRIPPER_CONTACT_STABLE_TIME
                 ):
-
-                    # ------------------------------------------------
-                    # CLOSE 유지
-                    # ------------------------------------------------
-                    with self.lock:
-                        self.data.ctrl[
-                            self.GRIPPER_ACTUATOR_ID
-                        ]=self.GRIPPER_CTRL_MIN
-
-                        grasp_actuator_force=float(
-                            self.data.actuator_force[
-                                self.GRIPPER_ACTUATOR_ID])
-
-                        grasp_qforce1=float(
-                            self.data.qfrc_applied[
-                                self.finger1_dof_id])
-
-                        grasp_qforce2=float(
-                            self.data.qfrc_applied[
-                                self.finger2_dof_id])
-
-                    if self._gripper_velocity_ok():
-
-                        result=GripperCommand.Result()
-
-                        result.position=pos
-                        result.reached_goal=True
-                        result.stalled=True
-
-                        goal_handle.succeed()
-
-                        self.get_logger().info(
-                            f"[GRIPPER] CLOSE + GRASP complete "
-                            f"position={pos:.4f} "
-                            f"ctrl={self.GRIPPER_CTRL_MIN:.3f} "
-                            f"actuator_force="
-                            f"{grasp_actuator_force:.3f} "
-                            f"qfrc_applied="
-                            f"[{grasp_qforce1:.3f},"
-                            f"{grasp_qforce2:.3f}] "
-                            f"extra_force="
-                            f"{self.GRIPPER_EXTRA_FORCE:.1f}N/finger "
-                            f"(LIFT 유지)")
-
-                        return result
+                    result=GripperCommand.Result()
+                    result.position=pos
+                    result.reached_goal=True
+                    result.stalled=(pos > 0.001)
+                    goal_handle.succeed()
+                    self.get_logger().info(
+                        f"[GRIPPER] CLOSE complete position={pos:.4f}")
+                    return result
+            else:
+                stable_start=None
 
             time.sleep(0.01)
 
-        # ============================================================
-        # Timeout
-        # ============================================================
         result=GripperCommand.Result()
-
         result.position=self._gripper_position()
-        result.reached_goal=False
-        result.stalled=True
-
-        self.get_logger().warn(
-            f"[GRIPPER] CLOSE timeout "
-            f"position={result.position:.4f} "
-            f"extra_force="
-            f"{self.GRIPPER_EXTRA_FORCE:.1f}N/finger")
-
-        # ------------------------------------------------------------
-        # CLOSE 실패 시에는 추가 힘 OFF
-        # ------------------------------------------------------------
-        self.gripper_force_enabled=False
-
-        with self.lock:
-            self.data.qfrc_applied[
-                self.finger1_dof_id
-            ]=0.0
-
-            self.data.qfrc_applied[
-                self.finger2_dof_id
-            ]=0.0
-
-        goal_handle.abort()
-
+        result.reached_goal=True
+        result.stalled=(result.position > 0.001)
+        goal_handle.succeed()
+        self.get_logger().info(
+            f"[GRIPPER] CLOSE complete position={result.position:.4f}")
         return result
 
     # ================================================================
