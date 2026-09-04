@@ -105,6 +105,14 @@ class MjcfBridgeNode(Node):
         self.PATH_VELOCITY_TOLERANCE = 2.0
         self.CONTROLLER_RATE = 200.0
         self.CONTROLLER_PERIOD = 1.0 / self.CONTROLLER_RATE
+
+        # Performance rates
+        self.JOINT_STATE_RATE = 100.0
+        self.JOINT_STATE_PERIOD = 1.0 / self.JOINT_STATE_RATE
+
+        self.VIEWER_RATE = 30.0
+        self.VIEWER_PERIOD = 1.0 / self.VIEWER_RATE
+
         self.START_POSITION_TOLERANCE = 0.10
         self.SETTLE_TIMEOUT = 5.0
 
@@ -1047,11 +1055,20 @@ def main():
             wall_start = time.perf_counter()
             sim_start = float(data.time)
 
+            next_joint_state_time = float(data.time)
+
             while rclpy.ok():
                 with node.lock:
                     node._prepare_physics_step()
                     mujoco.mj_step(model, data)
-                    node.publish_joint_states()
+
+                    if float(data.time) >= next_joint_state_time:
+                        node.publish_joint_states()
+                        next_joint_state_time += node.JOINT_STATE_PERIOD
+
+                        # simulation이 크게 밀린 경우 누적 방지
+                        if next_joint_state_time < float(data.time):
+                            next_joint_state_time = float(data.time) + node.JOINT_STATE_PERIOD
 
                 sim_elapsed = float(data.time) - sim_start
                 wall_elapsed = time.perf_counter() - wall_start
@@ -1080,13 +1097,33 @@ def main():
                 wall_start = time.perf_counter()
                 sim_start = float(data.time)
 
+                next_joint_state_time = float(data.time)
+                next_viewer_time = float(data.time)
+
                 while viewer.is_running() and rclpy.ok():
                     with node.lock:
                         node._prepare_physics_step()
                         mujoco.mj_step(model, data)
-                        node.publish_joint_states()
 
-                    viewer.sync()
+                        sim_now = float(data.time)
+
+                        # /joint_states: 100 Hz
+                        if sim_now >= next_joint_state_time:
+                            node.publish_joint_states()
+                            next_joint_state_time += node.JOINT_STATE_PERIOD
+
+                            # simulation이 크게 밀린 경우 누적 방지
+                            if next_joint_state_time < sim_now:
+                                next_joint_state_time = sim_now + node.JOINT_STATE_PERIOD
+
+                    # Viewer rendering/sync: 30 Hz
+                    if sim_now >= next_viewer_time:
+                        viewer.sync()
+                        next_viewer_time += node.VIEWER_PERIOD
+
+                        # simulation이 크게 밀린 경우 누적 방지
+                        if next_viewer_time < sim_now:
+                            next_viewer_time = sim_now + node.VIEWER_PERIOD
 
                     sim_elapsed = float(data.time) - sim_start
                     wall_elapsed = time.perf_counter() - wall_start
