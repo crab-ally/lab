@@ -22,6 +22,7 @@ services:
     command: >
       bash -c "
       ros2 launch /workspace/launch/panda_moveit.launch.py &
+      ros2 launch /workspace/launch/panda_tf.launch.py &
       python3 -u scripts/mujoco_ros2_bridge.py &
       wait"
 
