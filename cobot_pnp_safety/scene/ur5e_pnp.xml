@@ -1,5 +1,5 @@
-<mujoco model="panda_scene">
-  <compiler angle="radian" meshdir="../model/franka_emika_panda/assets"/>
+<mujoco model="ur5e_scene">
+  <compiler angle="radian" meshdir="../model/ur5e_2f85/assets"/>
 
   <visual>
     <headlight diffuse="0.8 0.8 0.8" ambient="0.5 0.5 0.5" specular="0.2 0.2 0.2"/>
@@ -14,5 +14,5 @@
     <include file="../world/table_object.xml"/>
   </worldbody>
 
-  <include file="../model/franka_emika_panda/panda.xml"/>
+  <include file="../model/ur5e_2f85/ur5e_2f85.xml"/>
 </mujoco>
