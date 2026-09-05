@@ -1,5 +1,7 @@
 services:
-  # 1. MuJoCo 브릿지 + MoveIt 2 (MoveGroup & RSP) 백엔드 컨테이너
+  # ===========================================================================
+  # Panda
+  # ===========================================================================
   mujoco_panda:
     build:
       context: .
@@ -23,7 +25,7 @@ services:
       bash -c "
       ros2 launch /workspace/launch/panda_moveit.launch.py &
       ros2 launch /workspace/launch/panda_tf.launch.py &
-      python3 -u scripts/panda/mujoco_ros2_bridge.py &
+      python3 -u scripts/panda/panda_mujoco_ros2_bridge.py &
       wait"
 
   # 2. RViz2 시각화 전용 독립 컨테이너
