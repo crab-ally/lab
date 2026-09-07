@@ -78,18 +78,47 @@
   <disable_collisions link1="wrist_2_link" link2="wrist_3_link" reason="Adjacent"/>
   <disable_collisions link1="wrist_3_link" link2="attachment_site" reason="Adjacent"/>
   <disable_collisions link1="wrist_3_link" link2="base-mount" reason="Adjacent"/>
+  <disable_collisions link1="wrist_3_link" link2="2f85-base" reason="Never"/>
+  <disable_collisions link1="wrist_3_link" link2="right-driver" reason="Never"/>
+  <disable_collisions link1="wrist_3_link" link2="left-driver" reason="Never"/>
+  <disable_collisions link1="wrist_3_link" link2="right-spring-link" reason="Never"/>
+  <disable_collisions link1="wrist_3_link" link2="left-spring-link" reason="Never"/>
   <disable_collisions link1="base-mount" link2="2f85-base" reason="Adjacent"/>
+  <disable_collisions link1="base-mount" link2="right-driver" reason="Never"/>
+  <disable_collisions link1="base-mount" link2="left-driver" reason="Never"/>
+  <disable_collisions link1="base-mount" link2="right-spring-link" reason="Never"/>
+  <disable_collisions link1="base-mount" link2="left-spring-link" reason="Never"/>
   <disable_collisions link1="2f85-base" link2="right-driver" reason="Adjacent"/>
   <disable_collisions link1="2f85-base" link2="left-driver" reason="Adjacent"/>
   <disable_collisions link1="2f85-base" link2="right-spring-link" reason="Adjacent"/>
   <disable_collisions link1="2f85-base" link2="left-spring-link" reason="Adjacent"/>
+  <disable_collisions link1="2f85-base" link2="right-coupler" reason="Never"/>
+  <disable_collisions link1="2f85-base" link2="left-coupler" reason="Never"/>
+  <disable_collisions link1="2f85-base" link2="right-follower" reason="Never"/>
+  <disable_collisions link1="2f85-base" link2="left-follower" reason="Never"/>
+  <disable_collisions link1="2f85-base" link2="right-pad" reason="Never"/>
+  <disable_collisions link1="2f85-base" link2="left-pad" reason="Never"/>
   <disable_collisions link1="2f85-base" link2="pinch-site" reason="Adjacent"/>
   <disable_collisions link1="right-driver" link2="right-coupler" reason="Adjacent"/>
+  <disable_collisions link1="right-driver" link2="right-spring-link" reason="Never"/>
+  <disable_collisions link1="right-driver" link2="right-follower" reason="Never"/>
   <disable_collisions link1="left-driver" link2="left-coupler" reason="Adjacent"/>
+  <disable_collisions link1="left-driver" link2="left-spring-link" reason="Never"/>
+  <disable_collisions link1="left-driver" link2="left-follower" reason="Never"/>
+  <disable_collisions link1="right-coupler" link2="right-follower" reason="Default"/>
+  <disable_collisions link1="right-coupler" link2="right-spring-link" reason="Never"/>
+  <disable_collisions link1="right-coupler" link2="right-pad" reason="Never"/>
+  <disable_collisions link1="left-coupler" link2="left-follower" reason="Default"/>
+  <disable_collisions link1="left-coupler" link2="left-spring-link" reason="Never"/>
+  <disable_collisions link1="left-coupler" link2="left-pad" reason="Never"/>
   <disable_collisions link1="right-spring-link" link2="right-follower" reason="Adjacent"/>
+  <disable_collisions link1="right-spring-link" link2="right-pad" reason="Never"/>
   <disable_collisions link1="left-spring-link" link2="left-follower" reason="Adjacent"/>
+  <disable_collisions link1="left-spring-link" link2="left-pad" reason="Never"/>
   <disable_collisions link1="right-follower" link2="right-pad" reason="Adjacent"/>
+  <disable_collisions link1="right-follower" link2="right-silicone-pad" reason="Never"/>
   <disable_collisions link1="left-follower" link2="left-pad" reason="Adjacent"/>
+  <disable_collisions link1="left-follower" link2="left-silicone-pad" reason="Never"/>
   <disable_collisions link1="right-pad" link2="right-silicone-pad" reason="Adjacent"/>
   <disable_collisions link1="left-pad" link2="left-silicone-pad" reason="Adjacent"/>
 </robot>
