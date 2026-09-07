@@ -11,7 +11,7 @@ from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from geometry_msgs.msg import PoseStamped, Pose
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, Bool
 from moveit_msgs.action import MoveGroup, ExecuteTrajectory
 from moveit_msgs.msg import (
     MotionPlanRequest, Constraints, PositionConstraint,
@@ -33,6 +33,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         self.target_yaw = 0.0
         self.is_busy = False
         self.shutdown_requested = False
+        self.grasped = False
 
         # UR5e home/ready pose & joint names
         self.home_qpos = [0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0]
@@ -111,6 +112,14 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             callback_group=self.cb_group
         )
 
+        # gripper grasped topic subscription
+        self.grasped_sub = self.create_subscription(
+            Bool,
+            "/robotiq_gripper/grasped",
+            self.grasped_callback,
+            10
+        )
+
         # Vision topic subscriptions
         self.target_sub = self.create_subscription(
             PoseStamped, "/target_object_pose",
@@ -152,6 +161,131 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             [float(states[j]) for j in self.arm_joints],
             dtype=np.float64
         )
+
+    def grasped_callback(self, msg):
+        self.grasped = bool(msg.data)
+
+        self.get_logger().info(
+            f"[GRASP CONTACT] grasped={self.grasped}"
+        )
+
+    def unwrap_trajectory_joint_positions(self, trajectory, label="[Trajectory]"):
+        jt = trajectory.joint_trajectory
+        names = list(jt.joint_names)
+        points = jt.points
+
+        if not points:
+            return trajectory
+
+        current = self.get_current_arm_joint_state()
+
+        if current is None:
+            self.get_logger().warn(
+                f"{label} /joint_states unavailable. "
+                f"Using trajectory first point as unwrap reference."
+            )
+            reference = np.array(
+                points[0].positions,
+                dtype=np.float64
+            )
+        else:
+            current_map = dict(zip(self.arm_joints, current))
+            reference = np.array(
+                [
+                    float(
+                        current_map.get(
+                            name,
+                            points[0].positions[i]
+                        )
+                    )
+                    for i, name in enumerate(names)
+                ],
+                dtype=np.float64
+            )
+
+        two_pi = 2.0 * math.pi
+        changed = False
+
+        # 첫 번째 point를 현재 실제 관절각에 가장 가까운 branch로 맞춤
+        first = np.array(
+            points[0].positions,
+            dtype=np.float64
+        )
+
+        for j, name in enumerate(names):
+            if name not in self.arm_joints:
+                continue
+
+            delta = first[j] - reference[j]
+            k = round(delta / two_pi)
+            corrected = first[j] - k * two_pi
+
+            if abs(corrected - first[j]) > 1e-6:
+                self.get_logger().info(
+                    f"{label} unwrap first: "
+                    f"{name}: {first[j]:.6f} -> {corrected:.6f}"
+                )
+                first[j] = corrected
+                changed = True
+
+        previous = first.copy()
+
+        # 이후 모든 point를 바로 이전 point와 가장 가까운 branch로 맞춤
+        for point_index in range(len(points)):
+            point = points[point_index]
+
+            if point_index == 0:
+                corrected_positions = first
+            else:
+                positions = np.array(
+                    point.positions,
+                    dtype=np.float64
+                )
+                corrected_positions = positions.copy()
+
+                for j, name in enumerate(names):
+                    if name not in self.arm_joints:
+                        continue
+
+                    raw = positions[j]
+
+                    k = round(
+                        (raw - previous[j]) / two_pi
+                    )
+
+                    candidate = raw - k * two_pi
+
+                    if abs(candidate - raw) > 1e-6:
+                        changed = True
+
+                    corrected_positions[j] = candidate
+
+            point.positions = [
+                float(v) for v in corrected_positions
+            ]
+
+            previous = corrected_positions.copy()
+
+        if changed:
+            self.get_logger().info(
+                f"{label} Joint-angle 2π unwrap applied."
+            )
+
+            self.get_logger().info(
+                f"{label} corrected first_position="
+                f"{[round(float(v), 6) for v in points[0].positions]}"
+            )
+
+            self.get_logger().info(
+                f"{label} corrected last_position="
+                f"{[round(float(v), 6) for v in points[-1].positions]}"
+            )
+        else:
+            self.get_logger().info(
+                f"{label} No joint-angle 2π wrapping detected."
+            )
+
+        return trajectory
 
     # Trajectory diagnostics
     def log_trajectory_execution_diagnostics(self, trajectory, label="[Trajectory]"):
@@ -471,6 +605,34 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             )
         return code == 1
 
+    def scale_trajectory_time(self, trajectory, scale=2.5):
+        jt = trajectory.joint_trajectory
+
+        for point in jt.points:
+            total_ns = (
+                point.time_from_start.sec * 1_000_000_000
+                + point.time_from_start.nanosec
+            )
+
+            total_ns = int(total_ns * scale)
+
+            point.time_from_start.sec = total_ns // 1_000_000_000
+            point.time_from_start.nanosec = total_ns % 1_000_000_000
+
+            if point.velocities:
+                point.velocities = [
+                    float(v / scale)
+                    for v in point.velocities
+                ]
+
+            if point.accelerations:
+                point.accelerations = [
+                    float(a / (scale * scale))
+                    for a in point.accelerations
+                ]
+
+        return trajectory
+
     # Cartesian Z
     def cartesian_z_move(
         self, x, y, start_z, end_z,
@@ -521,8 +683,22 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             )
             return False
 
+        trajectory = response.solution
+
+        trajectory = self.unwrap_trajectory_joint_positions(
+            trajectory,
+            label
+        )
+
+        trajectory = self.scale_trajectory_time(
+            trajectory,
+            scale=2.5
+        )
+
         return self.execute_trajectory_with_diagnostics(
-            response.solution, label, 30.0
+            trajectory,
+            label,
+            30.0
         )
 
     # Cartesian XYZ
@@ -594,8 +770,14 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             "[Cartesian XYZ] Path computation SUCCESS. Executing trajectory..."
         )
 
+        trajectory = response.solution
+
+        trajectory = self.unwrap_trajectory_joint_positions(
+            trajectory, "[Step 6 Cartesian XYZ]"
+        )
+
         return self.execute_trajectory_with_diagnostics(
-            response.solution, "[Step 6 Cartesian XYZ]", 30.0
+            trajectory, "[Step 6 Cartesian XYZ]", 30.0
         )
 
     # Step 6
@@ -926,15 +1108,19 @@ class Ur5e2f85MoveItPickAndPlace(Node):
     def check_grasp_success(self, result_obj):
         if result_obj is None:
             return False
-        pos = result_obj.position
-        # For Robotiq 2F-85: 0.0=Open, 0.8=Closed. Grasped object position: 0.02 <= pos <= 0.75 rad
-        if self.min_grasp_position_threshold <= pos <= 0.75:
+
+        pos = float(result_obj.position)
+
+        if self.grasped:
             self.get_logger().info(
-                f"[GRASP CHECK] 물체 파지 성공: finger={pos:.4f}rad"
+                "[GRASP CHECK] 물체 파지 성공: "
+                f"finger={pos:.4f}rad, contact=True"
             )
             return True
+
         self.get_logger().warn(
-            f"[GRASP CHECK] 물체 파지 실패: finger={pos:.4f}rad"
+            "[GRASP CHECK] 물체 파지 실패: "
+            f"finger={pos:.4f}rad, contact=False"
         )
         return False
 
