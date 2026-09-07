@@ -1027,7 +1027,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model",
-        default="/workspace/scene/panda_test.xml"
+        default="/workspace/scene/panda_pnp.xml"
     )
     parser.add_argument("--headless", action="store_true")
     args = parser.parse_args()
