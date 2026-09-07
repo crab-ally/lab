@@ -338,10 +338,10 @@
   <joint name="base_mount_joint" type="fixed">
     <origin xyz="0 0.1 0" rpy="-1.57079632679 0 0"/>
     <parent link="wrist_3_link"/>
-    <child link="base_mount"/>
+    <child link="base-mount"/>
   </joint>
 
-  <link name="base_mount">
+  <link name="base-mount">
     <visual>
       <geometry>
         <mesh filename="file:///workspace/model/ur5e_2f85/assets/base_mount.stl" scale="0.001 0.001 0.001"/>
@@ -358,11 +358,11 @@
   <!-- 2F-85 Base -->
   <joint name="2f85_base_joint" type="fixed">
     <origin xyz="0 0 0.0038" rpy="0 0 -1.57079632679"/>
-    <parent link="base_mount"/>
-    <child link="2f85_base"/>
+    <parent link="base-mount"/>
+    <child link="2f85-base"/>
   </joint>
 
-  <link name="2f85_base">
+  <link name="2f85-base">
     <inertial>
       <origin xyz="0 -2.70394e-05 0.0354675" rpy="-0.00305698 0 0"/>
       <mass value="0.777441"/>
@@ -384,22 +384,22 @@
   <!-- Pinch Site (TCP) -->
   <joint name="pinch_site_joint" type="fixed">
     <origin xyz="0 0 0.145" rpy="0 0 0"/>
-    <parent link="2f85_base"/>
-    <child link="pinch_site"/>
+    <parent link="2f85-base"/>
+    <child link="pinch-site"/>
   </joint>
-  <link name="pinch_site"/>
+  <link name="pinch-site"/>
 
   <!-- Right Driver -->
   <joint name="right_driver_joint" type="revolute">
     <origin xyz="0 0.0306011 0.054904" rpy="0 0 0"/>
-    <parent link="2f85_base"/>
-    <child link="right_driver"/>
+    <parent link="2f85-base"/>
+    <child link="right-driver"/>
     <axis xyz="1 0 0"/>
     <limit lower="0.0" upper="0.8" effort="10.0" velocity="2.0"/>
     <dynamics damping="0.1" friction="0.0"/>
   </joint>
 
-  <link name="right_driver">
+  <link name="right-driver">
     <inertial>
       <origin xyz="2.96931e-12 0.0177547 0.00107314" rpy="1.6422323 0 0"/>
       <mass value="0.00899563"/>
@@ -421,14 +421,15 @@
   <!-- Right Coupler -->
   <joint name="right_coupler_joint" type="revolute">
     <origin xyz="0 0.0315 -0.0041" rpy="0 0 0"/>
-    <parent link="right_driver"/>
-    <child link="right_coupler"/>
+    <parent link="right-driver"/>
+    <child link="right-coupler"/>
     <axis xyz="1 0 0"/>
     <limit lower="-1.57" upper="0.0" effort="10.0" velocity="2.0"/>
+    <mimic joint="right_driver_joint" multiplier="-1" offset="0"/>
     <dynamics damping="0.001" friction="0.0"/>
   </joint>
 
-  <link name="right_coupler">
+  <link name="right-coupler">
     <inertial>
       <origin xyz="0 0.00301209 0.0232175" rpy="0 0 0"/>
       <mass value="0.0140974"/>
@@ -450,14 +451,15 @@
   <!-- Right Spring Link -->
   <joint name="right_spring_link_joint" type="revolute">
     <origin xyz="0 0.0132 0.0609" rpy="0 0 0"/>
-    <parent link="2f85_base"/>
-    <child link="right_spring_link"/>
+    <parent link="2f85-base"/>
+    <child link="right-spring-link"/>
     <axis xyz="1 0 0"/>
     <limit lower="-0.2967" upper="0.8" effort="10.0" velocity="2.0"/>
+    <mimic joint="right_driver_joint" multiplier="1" offset="0"/>
     <dynamics damping="0.00125" friction="0.0"/>
   </joint>
 
-  <link name="right_spring_link">
+  <link name="right-spring-link">
     <inertial>
       <origin xyz="-8.65005e-09 0.0181624 0.0212658" rpy="0 0 0"/>
       <mass value="0.0221642"/>
@@ -479,14 +481,15 @@
   <!-- Right Follower -->
   <joint name="right_follower_joint" type="revolute">
     <origin xyz="0 0.055 0.0375" rpy="0 0 0"/>
-    <parent link="right_spring_link"/>
-    <child link="right_follower"/>
+    <parent link="right-spring-link"/>
+    <child link="right-follower"/>
     <axis xyz="1 0 0"/>
     <limit lower="-0.872664" upper="0.872664" effort="10.0" velocity="2.0"/>
+    <mimic joint="right_driver_joint" multiplier="-1" offset="0"/>
     <dynamics damping="0.001" friction="0.0"/>
   </joint>
 
-  <link name="right_follower">
+  <link name="right-follower">
     <inertial>
       <origin xyz="0 -0.011046 0.0124786" rpy="0.3328 0 0"/>
       <mass value="0.0125222"/>
@@ -508,11 +511,11 @@
   <!-- Right Pad -->
   <joint name="right_pad_joint" type="fixed">
     <origin xyz="0 -0.0189 0.01352" rpy="0 0 0"/>
-    <parent link="right_follower"/>
-    <child link="right_pad"/>
+    <parent link="right-follower"/>
+    <child link="right-pad"/>
   </joint>
 
-  <link name="right_pad">
+  <link name="right-pad">
     <inertial>
       <origin xyz="0 -0.0025 0.0185" rpy="0 0 1.57079632679"/>
       <mass value="0.0035"/>
@@ -540,11 +543,11 @@
   <!-- Right Silicone Pad -->
   <joint name="right_silicone_pad_joint" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0"/>
-    <parent link="right_pad"/>
-    <child link="right_silicone_pad"/>
+    <parent link="right-pad"/>
+    <child link="right-silicone-pad"/>
   </joint>
 
-  <link name="right_silicone_pad">
+  <link name="right-silicone-pad">
     <visual>
       <geometry>
         <mesh filename="file:///workspace/model/ur5e_2f85/assets/silicone_pad.stl" scale="0.001 0.001 0.001"/>
@@ -556,14 +559,15 @@
   <!-- Left Driver -->
   <joint name="left_driver_joint" type="revolute">
     <origin xyz="0 -0.0306011 0.054904" rpy="0 0 3.14159265359"/>
-    <parent link="2f85_base"/>
-    <child link="left_driver"/>
+    <parent link="2f85-base"/>
+    <child link="left-driver"/>
     <axis xyz="1 0 0"/>
     <limit lower="0.0" upper="0.8" effort="10.0" velocity="2.0"/>
+    <mimic joint="right_driver_joint" multiplier="1" offset="0"/>
     <dynamics damping="0.1" friction="0.0"/>
   </joint>
 
-  <link name="left_driver">
+  <link name="left-driver">
     <inertial>
       <origin xyz="0 0.0177547 0.00107314" rpy="1.6422323 0 0"/>
       <mass value="0.00899563"/>
@@ -585,14 +589,15 @@
   <!-- Left Coupler -->
   <joint name="left_coupler_joint" type="revolute">
     <origin xyz="0 0.0315 -0.0041" rpy="0 0 0"/>
-    <parent link="left_driver"/>
-    <child link="left_coupler"/>
+    <parent link="left-driver"/>
+    <child link="left-coupler"/>
     <axis xyz="1 0 0"/>
     <limit lower="-1.57" upper="0.0" effort="10.0" velocity="2.0"/>
+    <mimic joint="left_driver_joint" multiplier="-1" offset="0"/>
     <dynamics damping="0.001" friction="0.0"/>
   </joint>
 
-  <link name="left_coupler">
+  <link name="left-coupler">
     <inertial>
       <origin xyz="0 0.00301209 0.0232175" rpy="0 0 0"/>
       <mass value="0.0140974"/>
@@ -614,14 +619,15 @@
   <!-- Left Spring Link -->
   <joint name="left_spring_link_joint" type="revolute">
     <origin xyz="0 -0.0132 0.0609" rpy="0 0 3.14159265359"/>
-    <parent link="2f85_base"/>
-    <child link="left_spring_link"/>
+    <parent link="2f85-base"/>
+    <child link="left-spring-link"/>
     <axis xyz="1 0 0"/>
     <limit lower="-0.2967" upper="0.8" effort="10.0" velocity="2.0"/>
+    <mimic joint="left_driver_joint" multiplier="1" offset="0"/>
     <dynamics damping="0.00125" friction="0.0"/>
   </joint>
 
-  <link name="left_spring_link">
+  <link name="left-spring-link">
     <inertial>
       <origin xyz="-8.65005e-09 0.0181624 0.0212658" rpy="0 0 0"/>
       <mass value="0.0221642"/>
@@ -643,14 +649,15 @@
   <!-- Left Follower -->
   <joint name="left_follower_joint" type="revolute">
     <origin xyz="0 0.055 0.0375" rpy="0 0 0"/>
-    <parent link="left_spring_link"/>
-    <child link="left_follower"/>
+    <parent link="left-spring-link"/>
+    <child link="left-follower"/>
     <axis xyz="1 0 0"/>
     <limit lower="-0.872664" upper="0.872664" effort="10.0" velocity="2.0"/>
+    <mimic joint="left_driver_joint" multiplier="-1" offset="0"/>
     <dynamics damping="0.001" friction="0.0"/>
   </joint>
 
-  <link name="left_follower">
+  <link name="left-follower">
     <inertial>
       <origin xyz="0 -0.011046 0.0124786" rpy="0.3328 0 0"/>
       <mass value="0.0125222"/>
@@ -672,11 +679,11 @@
   <!-- Left Pad -->
   <joint name="left_pad_joint" type="fixed">
     <origin xyz="0 -0.0189 0.01352" rpy="0 0 0"/>
-    <parent link="left_follower"/>
-    <child link="left_pad"/>
+    <parent link="left-follower"/>
+    <child link="left-pad"/>
   </joint>
 
-  <link name="left_pad">
+  <link name="left-pad">
     <inertial>
       <origin xyz="0 -0.0025 0.0185" rpy="0 0 1.57079632679"/>
       <mass value="0.0035"/>
@@ -704,11 +711,11 @@
   <!-- Left Silicone Pad -->
   <joint name="left_silicone_pad_joint" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0"/>
-    <parent link="left_pad"/>
-    <child link="left_silicone_pad"/>
+    <parent link="left-pad"/>
+    <child link="left-silicone-pad"/>
   </joint>
 
-  <link name="left_silicone_pad">
+  <link name="left-silicone-pad">
     <visual>
       <geometry>
         <mesh filename="file:///workspace/model/ur5e_2f85/assets/silicone_pad.stl" scale="0.001 0.001 0.001"/>
