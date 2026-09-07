@@ -18,6 +18,22 @@ python3 scripts/panda/mujoco_planning_scene.py
 python3 scripts/panda/panda_pick_and_place.py
 
 # ==========================================
+# UR5e + 2F-85 MoveIt2 3D Vision Pick & Place
+# ==========================================
+
+# 1. MuJoCo 시뮬레이션 + MoveIt2 (MoveGroup & Robot State Publisher) 실행
+docker compose up mujoco_ur5e
+
+# 2. 3D 물체 인식 노드 실행 (새 터미널)
+docker compose exec mujoco_ur5e bash
+python3 scripts/ur5e/object_detector_3d.py
+
+# 3. MoveIt 2 기반 Pick & Place 제어 노드 실행 (새 터미널)
+docker compose exec mujoco_ur5e bash
+python3 scripts/ur5e/mujoco_planning_scene.py
+python3 scripts/ur5e/ur5e_2f85_pick_and_place.py
+
+# ==========================================
 # 유용한 디버깅 명령어
 # ==========================================
 
