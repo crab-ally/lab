@@ -8,7 +8,7 @@ Input:
   - /camera/segmentation/image_raw
 
 TF:
-  - ceiling_camera_optical_frame -> link0
+  - ceiling_camera_optical_frame -> base
 
 Output:
   - /target_object_pose
@@ -38,7 +38,7 @@ class Ransac3DObjectDetector(Node):
         super().__init__("ransac_3d_object_detector")
 
         self.camera_frame="ceiling_camera_optical_frame"
-        self.target_frame="link0"
+        self.target_frame="base"
         self.depth=None
         self.seg=None
         self.depth_stamp=None
@@ -399,7 +399,7 @@ class Ransac3DObjectDetector(Node):
             cam_pose.pose.orientation.z=q_cam[2]
             cam_pose.pose.orientation.w=q_cam[3]
 
-            # Camera -> link0
+            # Camera -> base
             target_pose=self.transform_pose(cam_pose)
 
             if target_pose is None:
@@ -421,7 +421,7 @@ class Ransac3DObjectDetector(Node):
                 if now-self.last_pose_log_time>=POSE_LOG_INTERVAL:
 
                     self.get_logger().info(
-                        f"Target center(link0): "
+                        f"Target center(base): "
                         f"({px:.3f}, {py:.3f}, {pz:.3f}) | "
                         f"Object height: {object_height:.3f}")
 

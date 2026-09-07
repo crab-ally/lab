@@ -1065,7 +1065,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model",
-        default="/workspace/model/ur5e_2f85/ur5e_2f85.xml"
+        default="/workspace/scene/ur5e_pnp.xml"
     )
     parser.add_argument("--headless", action="store_true")
     args = parser.parse_args()

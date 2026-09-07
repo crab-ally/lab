@@ -52,7 +52,7 @@ class MujocoPlanningScene(Node):
         # 기본 설정
         # ============================================================
 
-        self.world_xml = "/workspace/world/test.xml"
+        self.world_xml = "/workspace/world/table_object.xml"
         # UR5e MoveIt의 planning frame은 base link
         self.frame_id = "base"
 
