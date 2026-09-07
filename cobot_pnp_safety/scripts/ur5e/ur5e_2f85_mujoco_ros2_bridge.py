@@ -12,7 +12,7 @@ from rclpy.action import ActionServer, GoalResponse, CancelResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from sensor_msgs.msg import JointState, Image, CameraInfo
 from geometry_msgs.msg import TransformStamped
-from std_msgs.msg import String, Float64
+from std_msgs.msg import String, Float64, Bool
 from tf2_ros import StaticTransformBroadcaster
 from control_msgs.action import FollowJointTrajectory, GripperCommand
 import mujoco
@@ -72,7 +72,7 @@ class MjcfBridgeNode(Node):
         }
         self.finger1_dof_id = self.finger_dof_ids["right_driver_joint"]
         self.finger2_dof_id = self.finger_dof_ids["left_driver_joint"]
-        self.GRIPPER_EXTRA_FORCE = 5.0   # 2F-85 forcerange is -5 ~ 5
+        self.GRIPPER_EXTRA_FORCE = 0.0
         self.gripper_force_enabled = False
 
         self.camera_name = "ceiling_camera"
@@ -100,6 +100,7 @@ class MjcfBridgeNode(Node):
             Float64, "/robotiq_gripper/command", self.gripper_float_callback, 10,
             callback_group=self.cb_group
         )
+        self.grasped_pub = self.create_publisher(Bool, "/robotiq_gripper/grasped", 10)
 
         self.arm_action = ActionServer(
             self, FollowJointTrajectory,
@@ -123,7 +124,7 @@ class MjcfBridgeNode(Node):
             [0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0],
             dtype=float
         )
-        self.POSITION_TOLERANCE = 0.01
+        self.POSITION_TOLERANCE = 0.02
         self.VELOCITY_TOLERANCE = 0.1
         self.PATH_POSITION_TOLERANCE = 0.20
         self.PATH_VELOCITY_TOLERANCE = 2.0
@@ -185,8 +186,6 @@ class MjcfBridgeNode(Node):
 
     def _prepare_physics_step(self):
         self.data.qfrc_applied[:] = 0.0
-        if self.gripper_force_enabled:
-            self._apply_gripper_extra_force()
 
     def _gripper_extra_force_values(self):
         with self.lock:
@@ -268,7 +267,7 @@ class MjcfBridgeNode(Node):
 
         self.gripper_force_enabled = False
         self.data.qfrc_applied[:] = 0.0
-        self.data.ctrl[self.GRIPPER_ACTUATOR_ID] = self.GRIPPER_CTRL_MAX
+        self.data.ctrl[self.GRIPPER_ACTUATOR_ID] = self.GRIPPER_CTRL_MIN
 
         for i, name in enumerate(self.arm_joints):
             self.data.ctrl[self.actuator_ids[name]] = self.home_qpos[i]
@@ -835,16 +834,16 @@ class MjcfBridgeNode(Node):
                     self.active_arm_goal = None
 
     def _gripper_position(self):
-        """Return mean position of the driver joints (range 0~0.8 rad)."""
-        if not self.finger_joints:
-            return 0.0
         with self.lock:
             values = [
-                self.data.qpos[
-                    self.model.jnt_qposadr[self.joint_ids[n]]
-                ]
+                float(
+                    self.data.qpos[
+                        self.model.jnt_qposadr[self.joint_ids[n]]
+                    ]
+                )
                 for n in self.finger_joints
             ]
+
         return float(np.mean(values))
 
     def _gripper_velocity_ok(self):
@@ -857,14 +856,112 @@ class MjcfBridgeNode(Node):
             ]
         return max(v, default=0.0) <= self.VELOCITY_TOLERANCE
 
+    def _log_gripper_state(self, label):
+        right_jid = self.joint_ids["right_driver_joint"]
+        left_jid = self.joint_ids["left_driver_joint"]
+
+        right_qpos = float(
+            self.data.qpos[
+                self.model.jnt_qposadr[right_jid]
+            ]
+        )
+        left_qpos = float(
+            self.data.qpos[
+                self.model.jnt_qposadr[left_jid]
+            ]
+        )
+
+        right_qvel = float(
+            self.data.qvel[
+                self.model.jnt_dofadr[right_jid]
+            ]
+        )
+        left_qvel = float(
+            self.data.qvel[
+                self.model.jnt_dofadr[left_jid]
+            ]
+        )
+
+        act_id = self.GRIPPER_ACTUATOR_ID
+
+        ctrl = float(self.data.ctrl[act_id])
+        actuator_force = float(self.data.actuator_force[act_id])
+
+        tendon_id = mujoco.mj_name2id(
+            self.model,
+            mujoco.mjtObj.mjOBJ_TENDON,
+            "split"
+        )
+
+        tendon_length = float(self.data.ten_length[tendon_id])
+        tendon_velocity = float(self.data.ten_velocity[tendon_id])
+
+        extra_right = float(
+            self.data.qfrc_applied[self.finger1_dof_id]
+        )
+        extra_left = float(
+            self.data.qfrc_applied[self.finger2_dof_id]
+        )
+
+        self.get_logger().info(
+            f"[GRIPPER DEBUG {label}] "
+            f"right_q={right_qpos:.6f}, "
+            f"left_q={left_qpos:.6f}, "
+            f"right_qvel={right_qvel:.6f}, "
+            f"left_qvel={left_qvel:.6f}, "
+            f"ctrl={ctrl:.3f}, "
+            f"actuator_force={actuator_force:.6f}, "
+            f"tendon_length={tendon_length:.6f}, "
+            f"tendon_velocity={tendon_velocity:.6f}, "
+            f"extra_force=[{extra_right:.3f}, {extra_left:.3f}]"
+        )
+
+    def _check_gripper_object_contact(self):
+        left_contact = False
+        right_contact = False
+        left_force = 0.0
+        right_force = 0.0
+
+        left_geoms = {"left_pad1", "left_pad2"}
+        right_geoms = {"right_pad1", "right_pad2"}
+        object_geom = "pnp_object_geom"
+
+        for i in range(self.data.ncon):
+            contact = self.data.contact[i]
+
+            geom1 = self.model.geom(contact.geom1).name
+            geom2 = self.model.geom(contact.geom2).name
+
+            if object_geom not in (geom1, geom2):
+                continue
+
+            other_geom = geom2 if geom1 == object_geom else geom1
+
+            force = np.zeros(6, dtype=np.float64)
+            mujoco.mj_contactForce(self.model, self.data, i, force)
+            normal_force = abs(float(force[0]))
+
+            if other_geom in left_geoms:
+                left_contact = True
+                left_force = max(left_force, normal_force)
+
+            elif other_geom in right_geoms:
+                right_contact = True
+                right_force = max(right_force, normal_force)
+
+        grasped = left_contact and right_contact
+
+        return grasped, left_contact, right_contact, left_force, right_force
+
     def execute_gripper(self, goal_handle):
         # command.position is treated as a fraction of max opening (0.0~0.04 m)
         # Mapped to 2F-85 ctrl range 0~255 (0=open, 255=close)
         target = float(np.clip(
-            goal_handle.request.command.position, 0.0, 0.04
+            goal_handle.request.command.position, 0.0, 0.8
         ))
+        self._log_gripper_state("BEFORE")
 
-        if target > 0.02:
+        if target <= 0.02:
             # OPEN: low ctrl value -> open gripper
             self.gripper_force_enabled = False
 
@@ -874,7 +971,7 @@ class MjcfBridgeNode(Node):
 
             # For 2F-85: 0=open, 255=close -> invert mapping
             ctrl = float(np.clip(
-                (1.0 - target / 0.04) * 255.0,
+                (target / 0.8) * 255.0,
                 self.GRIPPER_CTRL_MIN,
                 self.GRIPPER_CTRL_MAX
             ))
@@ -885,6 +982,12 @@ class MjcfBridgeNode(Node):
             self.get_logger().info(
                 f"[GRIPPER] OPEN target={target:.4f} ctrl={ctrl:.2f} "
                 f"extra_force=OFF"
+            )
+            self._log_gripper_state("OPEN_CMD")
+
+            start_pos = self._gripper_position()
+            self.get_logger().info(
+                f"[GRIPPER] OPEN initial position={start_pos:.6f}"
             )
 
             start = self._get_sim_time()
@@ -928,7 +1031,9 @@ class MjcfBridgeNode(Node):
             return result
 
         # CLOSE: high ctrl value -> close gripper
-        self.gripper_force_enabled = True
+        self.gripper_force_enabled = False
+
+        start_pos = self._gripper_position()
 
         with self.lock:
             self.data.ctrl[self.GRIPPER_ACTUATOR_ID] = self.GRIPPER_CTRL_MAX
@@ -937,6 +1042,7 @@ class MjcfBridgeNode(Node):
             f"[GRIPPER] CLOSE start ctrl={self.GRIPPER_CTRL_MAX:.3f} "
             f"extra_force={self.GRIPPER_EXTRA_FORCE:.1f}N/finger"
         )
+        self._log_gripper_state("CLOSE_CMD")
 
         start = self._get_sim_time()
         stable_start = None
@@ -949,7 +1055,9 @@ class MjcfBridgeNode(Node):
             pos = self._gripper_position()
             v_ok = self._gripper_velocity_ok()
 
-            if v_ok:
+            movement = abs(pos - start_pos)
+
+            if v_ok and movement > 0.001:
                 if stable_start is None:
                     stable_start = self._get_sim_time()
                 elif (
@@ -964,6 +1072,27 @@ class MjcfBridgeNode(Node):
                     self.get_logger().info(
                         f"[GRIPPER] CLOSE complete position={pos:.4f}"
                     )
+                    # ============================================================
+                    # Grasp contact check
+                    # ============================================================
+                    (
+                        grasped,
+                        left_contact,
+                        right_contact,
+                        left_force,
+                        right_force,
+                    ) = self._check_gripper_object_contact()
+
+                    self.get_logger().info(
+                        "[GRASP CONTACT] "
+                        f"left={left_contact} ({left_force:.3f}N), "
+                        f"right={right_contact} ({right_force:.3f}N), "
+                        f"grasped={grasped}"
+                    )
+
+                    grasped_msg = Bool()
+                    grasped_msg.data = grasped
+                    self.grasped_pub.publish(grasped_msg)
                     return result
             else:
                 stable_start = None
@@ -972,12 +1101,36 @@ class MjcfBridgeNode(Node):
 
         result = GripperCommand.Result()
         result.position = self._gripper_position()
-        result.reached_goal = True
-        result.stalled = result.position < 0.75
+
+        movement = abs(result.position - start_pos)
+
+        result.reached_goal = movement > 0.001
+        result.stalled = movement <= 0.001
+
+        if result.stalled:
+            self.get_logger().error(
+                f"[GRIPPER] CLOSE FAILED: "
+                f"gripper did not move. "
+                f"start={start_pos:.6f}, "
+                f"end={result.position:.6f}, "
+                f"movement={movement:.6f}"
+            )
+
+            self._log_gripper_state("CLOSE_TIMEOUT")
+
+            goal_handle.abort()
+            return result
+
         goal_handle.succeed()
+
         self.get_logger().info(
-            f"[GRIPPER] CLOSE complete position={result.position:.4f}"
+            f"[GRIPPER] CLOSE complete "
+            f"position={result.position:.6f}, "
+            f"movement={movement:.6f}"
         )
+
+        self._log_gripper_state("CLOSE_END")
+
         return result
 
     def gripper_string_callback(self, msg):
@@ -992,9 +1145,22 @@ class MjcfBridgeNode(Node):
             self.get_logger().info("[GRIPPER] Topic OPEN extra_force=OFF")
 
         elif cmd in ("close", "grasp"):
-            self.gripper_force_enabled = True
+            # CLOSE: high ctrl value -> close gripper
+            self.gripper_force_enabled = False
+
+            start_pos = self._gripper_position()
+
             with self.lock:
+                self.data.qfrc_applied[self.finger1_dof_id] = 0.0
+                self.data.qfrc_applied[self.finger2_dof_id] = 0.0
                 self.data.ctrl[self.GRIPPER_ACTUATOR_ID] = self.GRIPPER_CTRL_MAX
+
+            self.get_logger().info(
+                f"[GRIPPER] CLOSE start "
+                f"position={start_pos:.6f}, "
+                f"ctrl={self.GRIPPER_CTRL_MAX:.3f}, "
+                f"extra_force=OFF"
+            )
             self.get_logger().info(
                 f"[GRIPPER] Topic CLOSE extra_force="
                 f"{self.GRIPPER_EXTRA_FORCE:.1f}N/finger"
@@ -1010,7 +1176,7 @@ class MjcfBridgeNode(Node):
                 self.data.qfrc_applied[self.finger1_dof_id] = 0.0
                 self.data.qfrc_applied[self.finger2_dof_id] = 0.0
         else:
-            self.gripper_force_enabled = True
+            self.gripper_force_enabled = False
 
         with self.lock:
             self.data.ctrl[self.GRIPPER_ACTUATOR_ID] = value
