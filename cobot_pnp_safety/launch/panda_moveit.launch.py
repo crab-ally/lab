@@ -21,7 +21,7 @@ def generate_launch_description():
     # ==================================================================
 
     urdf_path = workspace_dir / "urdf" / "panda.urdf"
-    srdf_path = workspace_dir / "config" / "panda.srdf"
+    srdf_path = workspace_dir / "config" / "panda" / "panda.srdf"
 
     with open(urdf_path, "r", encoding="utf-8") as f:
         robot_description_content = f.read()
@@ -43,7 +43,7 @@ def generate_launch_description():
 
     kinematics_yaml = load_yaml(
         str(workspace_dir),
-        "config/kinematics.yaml"
+        "config/panda/kinematics.yaml"
     )
 
     robot_description_kinematics = {
@@ -56,7 +56,7 @@ def generate_launch_description():
 
     ompl_planning_yaml = load_yaml(
         str(workspace_dir),
-        "config/ompl_planning.yaml"
+        "config/panda/ompl_planning.yaml"
     )
 
     ompl_config = ompl_planning_yaml or {}
@@ -77,7 +77,7 @@ def generate_launch_description():
 
     joint_limits_yaml = load_yaml(
         str(workspace_dir),
-        "config/joint_limits.yaml"
+        "config/panda/joint_limits.yaml"
     )
 
     robot_description_planning = {
@@ -90,7 +90,7 @@ def generate_launch_description():
 
     moveit_controllers_yaml = load_yaml(
         str(workspace_dir),
-        "config/moveit_controllers.yaml"
+        "config/panda/moveit_controllers.yaml"
     )
 
     moveit_controller_config = moveit_controllers_yaml or {}
