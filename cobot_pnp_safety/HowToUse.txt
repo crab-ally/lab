@@ -6,7 +6,7 @@
 docker compose up mujoco_panda
 
 # 2. RViz2 시각화 실행 (새 터미널)
-docker compose --profile rviz up rviz
+docker compose --profile rviz up panda_rviz
 
 # 3. 3D 물체 인식 노드 실행 (새 터미널)
 docker compose exec mujoco_panda bash
@@ -32,6 +32,9 @@ python3 scripts/ur5e/object_detector_3d.py
 docker compose exec mujoco_ur5e bash
 python3 scripts/ur5e/mujoco_planning_scene.py
 python3 scripts/ur5e/ur5e_2f85_pick_and_place.py
+
+# 4. Rviz
+docker compose --profile rviz up ur5e_rviz
 
 # ==========================================
 # 유용한 디버깅 명령어
