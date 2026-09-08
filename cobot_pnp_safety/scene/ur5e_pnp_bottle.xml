@@ -15,4 +15,5 @@
   </worldbody>
 
   <include file="../model/ur5e_2f85/ur5e_2f85.xml"/>
+  <include file="../model/PF_TRON1A/TRON1A.xml"/>
 </mujoco>
