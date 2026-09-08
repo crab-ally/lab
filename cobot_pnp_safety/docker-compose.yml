@@ -28,6 +28,27 @@ services:
       python3 -u scripts/panda/panda_mujoco_ros2_bridge.py &
       wait"
 
+  panda_rviz:
+    profiles: ["rviz"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: panda_rviz
+    network_mode: host
+    ipc: host
+    privileged: true
+    environment:
+      - DISPLAY=${DISPLAY:-host.docker.internal:0.0}
+      - ROS_DOMAIN_ID=50
+      - QT_X11_NO_MITSHM=1
+      - LIBGL_ALWAYS_SOFTWARE=1
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    command: rviz2 -d /workspace/config/panda/panda.rviz
+
   # ===========================================================================
   # ur5e + 2f85
   # ===========================================================================
@@ -58,13 +79,12 @@ services:
       python3 -u scripts/ur5e/ur5e_2f85_mujoco_ros2_bridge.py &
       wait"
 
-  # 2. RViz2 시각화 전용 독립 컨테이너
-  rviz:
+  ur5e_rviz:
     profiles: ["rviz"]
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: panda_rviz
+    container_name: ur5e_rviz
     network_mode: host
     ipc: host
     privileged: true
@@ -78,4 +98,4 @@ services:
     working_dir: /workspace
     stdin_open: true
     tty: true
-    command: rviz2 -d /workspace/config/panda.rviz
+    command: rviz2 -d /workspace/config/ur5e_2f85/ur5e_2f85.rviz
