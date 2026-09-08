@@ -924,7 +924,7 @@ class MjcfBridgeNode(Node):
 
         left_geoms = {"left_pad1", "left_pad2"}
         right_geoms = {"right_pad1", "right_pad2"}
-        object_geom = "pnp_object_geom"
+        object_geom = "bottle_col"
 
         for i in range(self.data.ncon):
             contact = self.data.contact[i]
@@ -1231,7 +1231,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model",
-        default="/workspace/scene/ur5e_pnp.xml"
+        default="/workspace/scene/ur5e_pnp_bottle.xml"
     )
     parser.add_argument("--headless", action="store_true")
     args = parser.parse_args()
