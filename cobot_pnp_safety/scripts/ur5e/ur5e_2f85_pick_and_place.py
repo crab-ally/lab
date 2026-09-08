@@ -18,7 +18,8 @@ from moveit_msgs.msg import (
     OrientationConstraint, BoundingVolume, PlanningOptions,
     JointConstraint
 )
-from moveit_msgs.srv import GetCartesianPath
+from moveit_msgs.srv import GetCartesianPath, GetPositionIK
+from moveit_msgs.msg import RobotState
 from shape_msgs.msg import SolidPrimitive
 from control_msgs.action import GripperCommand
 
@@ -52,7 +53,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
 
         # Motion offsets
         self.pre_grasp_z_offset = 0.10
-        self.lift_z_offset = 0.10
+        self.lift_z_offset = 0.15
         self.post_place_z_offset = 0.10
         self.pre_place_xy_step = 0.05
 
@@ -112,6 +113,11 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         )
         self.cartesian_client = self.create_client(
             GetCartesianPath, "/compute_cartesian_path",
+            callback_group=self.cb_group
+        )
+        self.ik_client = self.create_client(
+            GetPositionIK,
+            "/compute_ik",
             callback_group=self.cb_group
         )
 
@@ -553,88 +559,585 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         qw =  b * c
         return qx, qy, qz, qw
 
+    def normalize_angle_near(self,angle,reference):
+        two_pi=2.0*math.pi
+        return angle-round((angle-reference)/two_pi)*two_pi
+
+    def joint_distance(self,q1,q2):
+        q1=np.asarray(q1,dtype=np.float64)
+        q2=np.asarray(q2,dtype=np.float64)
+        d=q1-q2
+        d=np.arctan2(np.sin(d),np.cos(d))
+        weights=np.array([2.0,1.0,1.0,1.0,1.0,0.5],dtype=np.float64)
+        return float(np.sum(weights*np.abs(d)))
+
+    def make_ik_seed(self,current,offsets=None):
+        seed=np.array(current,dtype=np.float64)
+        if offsets is not None:
+            for i,v in offsets.items():
+                seed[i]+=v
+        return seed
+
+    def compute_ik_candidate(
+        self,x,y,z,qx,qy,qz,qw,seed,timeout_sec=1.0
+    ):
+        if not self.ik_client.wait_for_service(timeout_sec=3.0):
+            self.get_logger().error("[IK] /compute_ik service unavailable.")
+            return None
+
+        req=GetPositionIK.Request()
+        req.ik_request.group_name="ur5e_arm"
+        req.ik_request.ik_link_name="pinch-site"
+        req.ik_request.pose_stamped.header.frame_id="base"
+
+        req.ik_request.pose_stamped.pose.position.x=float(x)
+        req.ik_request.pose_stamped.pose.position.y=float(y)
+        req.ik_request.pose_stamped.pose.position.z=float(z)
+        req.ik_request.pose_stamped.pose.orientation.x=float(qx)
+        req.ik_request.pose_stamped.pose.orientation.y=float(qy)
+        req.ik_request.pose_stamped.pose.orientation.z=float(qz)
+        req.ik_request.pose_stamped.pose.orientation.w=float(qw)
+
+        req.ik_request.robot_state.joint_state.name=list(self.arm_joints)
+        req.ik_request.robot_state.joint_state.position=[
+            float(v) for v in seed
+        ]
+
+        req.ik_request.avoid_collisions=True
+
+        timeout_ns=int(timeout_sec*1e9)
+        req.ik_request.timeout.sec=timeout_ns//1000000000
+        req.ik_request.timeout.nanosec=timeout_ns%1000000000
+
+        response=self.wait_future(
+            self.ik_client.call_async(req),
+            timeout_sec+2.0,
+            "IK computation"
+        )
+
+        if response is None:
+            return None
+
+        if response.error_code.val != 1:
+            return None
+
+        result=response.solution.joint_state
+        result_map=dict(zip(result.name,result.position))
+
+        if any(j not in result_map for j in self.arm_joints):
+            return None
+
+        candidate=np.array(
+            [float(result_map[j]) for j in self.arm_joints],
+            dtype=np.float64
+        )
+
+        return candidate
+
+    def find_nearest_ik_solution(
+        self,x,y,z,qx,qy,qz,qw
+    ):
+        current=self.get_current_arm_joint_state()
+
+        if current is None:
+            self.get_logger().error(
+                "[IK SELECT] Current joint state unavailable."
+            )
+            return None
+
+        self.get_logger().info(
+            "[IK SELECT] current="
+            f"{[round(float(v),6) for v in current]}"
+        )
+
+        # 여러 IK branch를 탐색하기 위한 seed
+        seeds=[
+            {},
+            {0:math.pi},
+            {0:-math.pi},
+            {1:math.pi},
+            {1:-math.pi},
+            {2:math.pi},
+            {2:-math.pi},
+            {3:math.pi},
+            {3:-math.pi},
+            {4:math.pi},
+            {4:-math.pi},
+            {5:math.pi},
+            {5:-math.pi},
+            {0:math.pi,2:math.pi},
+            {0:-math.pi,2:-math.pi},
+            {0:math.pi,2:-math.pi},
+            {0:-math.pi,2:math.pi},
+        ]
+
+        candidates=[]
+
+        for index,offsets in enumerate(seeds):
+            seed=self.make_ik_seed(current,offsets)
+
+            candidate=self.compute_ik_candidate(
+                x,y,z,qx,qy,qz,qw,seed
+            )
+
+            if candidate is None:
+                continue
+
+            # 현재 joint state 기준으로 각도 branch 정규화
+            for i in range(len(candidate)):
+                candidate[i]=self.normalize_angle_near(
+                    candidate[i],current[i]
+                )
+
+            distance=self.joint_distance(current,candidate)
+
+            duplicate=False
+            for old_candidate,_ in candidates:
+                if self.joint_distance(old_candidate,candidate)<0.01:
+                    duplicate=True
+                    break
+
+            if duplicate:
+                continue
+
+            candidates.append((candidate,distance))
+
+            self.get_logger().info(
+                f"[IK SELECT] candidate {len(candidates)} "
+                f"seed={index} "
+                f"distance={distance:.4f} "
+                f"q={[round(float(v),6) for v in candidate]}"
+            )
+
+        if not candidates:
+            self.get_logger().error(
+                "[IK SELECT] No valid IK solution found."
+            )
+            return None
+
+        candidates.sort(key=lambda item:item[1])
+
+        best_q,best_distance=candidates[0]
+
+        self.get_logger().info(
+            "[IK SELECT] BEST solution: "
+            f"distance={best_distance:.4f}, "
+            f"q={[round(float(v),6) for v in best_q]}"
+        )
+
+        return best_q
+
+    def find_nearest_ik_solution_relaxed(
+        self,
+        x,y,z,
+        qx,qy,qz,qw,
+        tilt_deg=30.0
+    ):
+        current=self.get_current_arm_joint_state()
+        if current is None:
+            self.get_logger().error("[IK RELAXED] Current joint state unavailable.")
+            return None
+
+        self.get_logger().info(
+            f"[IK RELAXED] target=({x:.3f},{y:.3f},{z:.3f}), "
+            f"orientation tilt ±{tilt_deg:.1f}°"
+        )
+
+        base_q=np.array([qx,qy,qz,qw],dtype=np.float64)
+
+        def quat_mul(q1,q2):
+            x1,y1,z1,w1=q1
+            x2,y2,z2,w2=q2
+            return np.array([
+                w1*x2+x1*w2+y1*z2-z1*y2,
+                w1*y2-x1*z2+y1*w2+z1*x2,
+                w1*z2+x1*y2-y1*x2+z1*w2,
+                w1*w2-x1*x2-y1*y2-z1*z2
+            ],dtype=np.float64)
+
+        def quat_normalize(q):
+            n=np.linalg.norm(q)
+            if n<1e-12:
+                return q
+            return q/n
+
+        def axis_angle_quat(axis,angle):
+            axis=np.asarray(axis,dtype=np.float64)
+            axis=axis/np.linalg.norm(axis)
+            s=math.sin(angle/2.0)
+            return np.array([
+                axis[0]*s,
+                axis[1]*s,
+                axis[2]*s,
+                math.cos(angle/2.0)
+            ],dtype=np.float64)
+
+        tilt=math.radians(float(tilt_deg))
+
+        # 현재 side-grasp orientation을 기준으로
+        # X/Y 방향으로 ±tilt 후보를 생성한다.
+        tilt_angles=[
+            0.0,
+            -tilt,
+            tilt,
+            -tilt*0.5,
+            tilt*0.5,
+        ]
+
+        # quaternion의 local X/Y 축 기준으로 tilt 후보 생성
+        candidates=[]
+
+        for angle in tilt_angles:
+            for axis in ([1.0,0.0,0.0],[0.0,1.0,0.0]):
+                dq=axis_angle_quat(axis,angle)
+                q=quat_normalize(quat_mul(base_q,dq))
+                candidates.append(q)
+
+        # X+Y 조합도 추가
+        for ax in (-tilt,tilt):
+            for ay in (-tilt,tilt):
+                qx_rot=axis_angle_quat([1.0,0.0,0.0],ax)
+                qy_rot=axis_angle_quat([0.0,1.0,0.0],ay)
+                q=quat_mul(base_q,qx_rot)
+                q=quat_mul(q,qy_rot)
+                candidates.append(quat_normalize(q))
+
+        best_q=None
+        best_distance=float("inf")
+        valid_count=0
+
+        seeds=[
+            {},
+            {0:math.pi},{0:-math.pi},
+            {1:math.pi},{1:-math.pi},
+            {2:math.pi},{2:-math.pi},
+            {3:math.pi},{3:-math.pi},
+            {4:math.pi},{4:-math.pi},
+            {5:math.pi},{5:-math.pi},
+            {0:math.pi,2:math.pi},
+            {0:-math.pi,2:-math.pi},
+            {0:math.pi,2:-math.pi},
+            {0:-math.pi,2:math.pi},
+        ]
+
+        for orientation_index,target_q in enumerate(candidates):
+            oqx,oqy,oqz,oqw=[float(v) for v in target_q]
+
+            for seed in seeds:
+                req=GetPositionIK.Request()
+                req.ik_request.group_name="ur5e_arm"
+                req.ik_request.ik_link_name="pinch-site"
+
+                req.ik_request.pose_stamped.header.frame_id="base"
+                req.ik_request.pose_stamped.pose.position.x=float(x)
+                req.ik_request.pose_stamped.pose.position.y=float(y)
+                req.ik_request.pose_stamped.pose.position.z=float(z)
+                req.ik_request.pose_stamped.pose.orientation.x=oqx
+                req.ik_request.pose_stamped.pose.orientation.y=oqy
+                req.ik_request.pose_stamped.pose.orientation.z=oqz
+                req.ik_request.pose_stamped.pose.orientation.w=oqw
+
+                req.ik_request.robot_state.joint_state.name=list(self.arm_joints)
+
+                seed_q=list(current)
+                for index,value in seed.items():
+                    seed_q[index]=float(value)
+
+                req.ik_request.robot_state.joint_state.position=[
+                    float(v) for v in seed_q
+                ]
+
+                # IK 완화 단계에서는 collision을 제외한다.
+                # 최종 경로 collision 검사는 MoveGroup이 수행한다.
+                req.ik_request.avoid_collisions=False
+
+                result=self.wait_future(
+                    self.ik_client.call_async(req),
+                    1.0,
+                    "relaxed IK"
+                )
+
+                if result is None:
+                    continue
+
+                if result.error_code.val!=1:
+                    continue
+
+                candidate_q=[]
+                for joint in self.arm_joints:
+                    try:
+                        index=result.solution.joint_state.name.index(joint)
+                        candidate_q.append(
+                            float(result.solution.joint_state.position[index])
+                        )
+                    except ValueError:
+                        candidate_q=None
+                        break
+
+                if candidate_q is None or len(candidate_q)!=6:
+                    continue
+
+                candidate_q=[
+                    self.normalize_angle_near(v,ref)
+                    for v,ref in zip(candidate_q,current)
+                ]
+
+                distance=self.joint_distance(current,candidate_q)
+
+                valid_count+=1
+
+                self.get_logger().info(
+                    f"[IK RELAXED] valid orientation={orientation_index}, "
+                    f"distance={distance:.4f}"
+                )
+
+                if distance<best_distance:
+                    best_distance=distance
+                    best_q=candidate_q
+
+        if best_q is None:
+            self.get_logger().error(
+                "[IK RELAXED] No valid IK solution found "
+                f"within ±{tilt_deg:.1f}°."
+            )
+            return None
+
+        self.get_logger().info(
+            f"[IK RELAXED] selected distance={best_distance:.4f}, "
+            f"valid_candidates={valid_count}"
+        )
+
+        return best_q
+
     # Motion Planning
     def plan_and_execute_pose(
-        self, x, y, z, qx=1.0, qy=0.0, qz=0.0, qw=0.0,
-        num_attempts=10, planning_time=5.0,
-        vel_scale=0.1, acc_scale=0.1,
-        pos_tol=0.015, ori_tol=0.25
+        self,x,y,z,qx=1.0,qy=0.0,qz=0.0,qw=0.0,
+        num_attempts=10,planning_time=5.0,
+        vel_scale=0.1,acc_scale=0.1,
+        pos_tol=0.015,ori_tol=0.25
     ):
         if not self.move_group_client.wait_for_server(timeout_sec=3.0):
-            self.get_logger().error("[PnP] MoveGroup server unavailable.")
+            self.get_logger().error(
+                "[PnP] MoveGroup server unavailable."
+            )
             return False
 
-        req = MotionPlanRequest()
-        req.group_name = "ur5e_arm"
-        req.num_planning_attempts = num_attempts
-        req.allowed_planning_time = planning_time
-        req.max_velocity_scaling_factor = vel_scale
-        req.max_acceleration_scaling_factor = acc_scale
-        req.start_state.is_diff = True
+        # 현재 joint state와 가장 가까운 IK branch 선택
+        target_q=self.find_nearest_ik_solution(
+            x,y,z,qx,qy,qz,qw
+        )
 
-        pc = PositionConstraint()
-        pc.header.frame_id = "base"
-        pc.link_name = "pinch-site"
+        if target_q is None:
+            self.get_logger().error(
+                "[PnP] Failed to find nearest IK solution."
+            )
+            return False
 
-        primitive = SolidPrimitive()
-        primitive.type = SolidPrimitive.SPHERE
-        primitive.dimensions = [pos_tol]
+        current=self.get_current_arm_joint_state()
 
-        pc.constraint_region = BoundingVolume()
-        pc.constraint_region.primitives.append(primitive)
+        if current is not None:
+            self.get_logger().info(
+                "[IK SELECT] current -> target:"
+                f"\n  current="
+                f"{[round(float(v),6) for v in current]}"
+                f"\n  target="
+                f"{[round(float(v),6) for v in target_q]}"
+                f"\n  distance="
+                f"{self.joint_distance(current,target_q):.4f}"
+            )
 
-        pose = Pose()
-        pose.position.x, pose.position.y, pose.position.z = x, y, z
-        pose.orientation.w = 1.0
-        pc.constraint_region.primitive_poses.append(pose)
-        pc.weight = 1.0
+        req=MotionPlanRequest()
+        req.group_name="ur5e_arm"
+        req.num_planning_attempts=num_attempts
+        req.allowed_planning_time=planning_time
+        req.max_velocity_scaling_factor=vel_scale
+        req.max_acceleration_scaling_factor=acc_scale
+        req.start_state.is_diff=True
 
-        oc = OrientationConstraint()
-        oc.header.frame_id = "base"
-        oc.link_name = "pinch-site"
-        oc.orientation.x, oc.orientation.y = qx, qy
-        oc.orientation.z, oc.orientation.w = qz, qw
-        oc.absolute_x_axis_tolerance = ori_tol
-        oc.absolute_y_axis_tolerance = ori_tol
-        oc.absolute_z_axis_tolerance = ori_tol + 0.10
-        oc.weight = 1.0
+        constraints=Constraints()
 
-        constraints = Constraints()
-        constraints.position_constraints.append(pc)
-        constraints.orientation_constraints.append(oc)
+        for joint,value in zip(self.arm_joints,target_q):
+            jc=JointConstraint()
+            jc.joint_name=joint
+            jc.position=float(value)
+            jc.tolerance_above=0.02
+            jc.tolerance_below=0.02
+            jc.weight=1.0
+            constraints.joint_constraints.append(jc)
+
         req.goal_constraints.append(constraints)
 
-        options = PlanningOptions()
-        options.plan_only = False
-        options.look_around = False
-        options.replan = True
-        options.replan_attempts = 5
+        options=PlanningOptions()
+        options.plan_only=False
+        options.look_around=False
+        options.replan=True
+        options.replan_attempts=5
 
-        goal = MoveGroup.Goal()
-        goal.request = req
-        goal.planning_options = options
+        goal=MoveGroup.Goal()
+        goal.request=req
+        goal.planning_options=options
 
-        handle = self.wait_future(
+        self.get_logger().info(
+            "[PnP] MoveGroup joint target="
+            f"{[round(float(v),6) for v in target_q]}"
+        )
+
+        handle=self.wait_future(
             self.move_group_client.send_goal_async(goal),
-            10.0, "MoveGroup goal"
+            10.0,
+            "MoveGroup goal"
         )
 
         if handle is None or not handle.accepted:
-            self.get_logger().error("[PnP] MoveGroup goal rejected.")
+            self.get_logger().error(
+                "[PnP] MoveGroup goal rejected."
+            )
             return False
 
-        result = self.wait_future(
-            handle.get_result_async(), 30.0, "MoveGroup result"
+        result=self.wait_future(
+            handle.get_result_async(),
+            30.0,
+            "MoveGroup result"
         )
+
         if result is None:
             return False
 
-        code = result.result.error_code.val
-        if code != 1:
+        code=result.result.error_code.val
+
+        if code!=1:
             self.get_logger().error(
                 f"[PnP] MoveGroup failed: error_code={code}"
             )
-        return code == 1
+            return False
+
+        self.get_logger().info(
+            "[PnP] MoveGroup joint-target planning SUCCESS."
+        )
+
+        return True
+
+    def plan_and_execute_step6(
+        self,
+        x,y,z,
+        qx,qy,qz,qw,
+        tilt_deg=30.0,
+        num_attempts=15,
+        planning_time=6.0,
+        vel_scale=0.10,
+        acc_scale=0.10
+    ):
+        if not self.move_group_client.wait_for_server(timeout_sec=3.0):
+            self.get_logger().error("[Step 6] MoveGroup server unavailable.")
+            return False
+
+        target_q=self.find_nearest_ik_solution_relaxed(
+            x,y,z,
+            qx,qy,qz,qw,
+            tilt_deg=tilt_deg
+        )
+
+        if target_q is None:
+            self.get_logger().error("[Step 6] No valid relaxed IK solution found.")
+            return False
+
+        current=self.get_current_arm_joint_state()
+
+        if current is not None:
+            self.get_logger().info(
+                "[Step 6] IK current -> target:"
+                f"\n  current={[round(float(v),6) for v in current]}"
+                f"\n  target={[round(float(v),6) for v in target_q]}"
+                f"\n  distance={self.joint_distance(current,target_q):.4f}"
+            )
+
+        req=MotionPlanRequest()
+        req.group_name="ur5e_arm"
+        req.num_planning_attempts=num_attempts
+        req.allowed_planning_time=planning_time
+        req.max_velocity_scaling_factor=vel_scale
+        req.max_acceleration_scaling_factor=acc_scale
+        req.start_state.is_diff=True
+
+        goal_constraints=Constraints()
+
+        for joint,value in zip(self.arm_joints,target_q):
+            jc=JointConstraint()
+            jc.joint_name=joint
+            jc.position=float(value)
+            jc.tolerance_above=0.05
+            jc.tolerance_below=0.05
+            jc.weight=1.0
+            goal_constraints.joint_constraints.append(jc)
+
+        req.goal_constraints.append(goal_constraints)
+
+        # Step 6 경로 전체에서 side-grasp 기준 ±30° tilt 허용
+        oc=OrientationConstraint()
+        oc.header.frame_id="base"
+        oc.link_name="pinch-site"
+        oc.orientation.x=float(qx)
+        oc.orientation.y=float(qy)
+        oc.orientation.z=float(qz)
+        oc.orientation.w=float(qw)
+
+        tolerance=math.radians(float(tilt_deg))
+
+        oc.absolute_x_axis_tolerance=tolerance
+        oc.absolute_y_axis_tolerance=tolerance
+        oc.absolute_z_axis_tolerance=math.pi
+        oc.weight=1.0
+
+        req.path_constraints=Constraints()
+        req.path_constraints.orientation_constraints.append(oc)
+
+        options=PlanningOptions()
+        options.plan_only=False
+        options.look_around=False
+        options.replan=True
+        options.replan_attempts=5
+
+        goal=MoveGroup.Goal()
+        goal.request=req
+        goal.planning_options=options
+
+        self.get_logger().info(
+            f"[Step 6] MoveGroup planning: "
+            f"relaxed IK + side-grasp orientation path tolerance ±{tilt_deg:.1f}°"
+        )
+
+        handle=self.wait_future(
+            self.move_group_client.send_goal_async(goal),
+            10.0,
+            "Step 6 MoveGroup goal"
+        )
+
+        if handle is None or not handle.accepted:
+            self.get_logger().error("[Step 6] MoveGroup goal rejected.")
+            return False
+
+        result=self.wait_future(
+            handle.get_result_async(),
+            30.0,
+            "Step 6 MoveGroup result"
+        )
+
+        if result is None:
+            return False
+
+        code=result.result.error_code.val
+
+        if code!=1:
+            self.get_logger().error(
+                f"[Step 6] MoveGroup failed: error_code={code}"
+            )
+            return False
+
+        self.get_logger().info(
+            "[Step 6] Pre-place planning SUCCESS."
+        )
+
+        return True
 
     def scale_trajectory_time(self, trajectory, scale=2.5):
         jt = trajectory.joint_trajectory
@@ -813,18 +1316,20 @@ class Ur5e2f85MoveItPickAndPlace(Node):
 
     # Step 6
     def move_to_pre_place_position(
-        self, start_x, start_y, start_z,
-        target_x, target_y, target_z,
-        qx, qy, qz, qw
+        self,start_x,start_y,start_z,
+        target_x,target_y,target_z,
+        qx,qy,qz,qw
     ):
         self.get_logger().info(
-            f"[Step 6/9] Pre-place 이동 (grasp orientation 유지): "
+            f"[Step 6/9] Pre-place 이동 "
+            f"(orientation ±30° 허용): "
             f"({target_x:.3f}, {target_y:.3f}, {target_z:.3f})"
         )
 
         time.sleep(self.step6_state_wait)
 
-        current = self.get_current_arm_joint_state()
+        current=self.get_current_arm_joint_state()
+
         if current is None:
             self.get_logger().warn(
                 "[Step 6/9] 현재 /joint_states를 가져오지 못했습니다."
@@ -832,30 +1337,17 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         else:
             self.get_logger().info(
                 f"[Step 6/9] current arm joint state="
-                f"{[round(float(v), 6) for v in current]}"
+                f"{[round(float(v),6) for v in current]}"
             )
 
-        if self.cartesian_xyz_move(
-            start_x, start_y, start_z,
-            target_x, target_y, target_z,
-            qx, qy, qz, qw
-        ):
-            self.get_logger().info("[Step 6/9] Pre-place 이동 SUCCESS.")
-            return True
-
-        self.get_logger().error(
-            "[Step 6/9] Cartesian execution FAILED. Pose fallback 시도."
-        )
-
-        return self.plan_and_execute_pose(
-            target_x, target_y, target_z,
-            qx, qy, qz, qw,
+        return self.plan_and_execute_step6(
+            target_x,target_y,target_z,
+            qx,qy,qz,qw,
+            tilt_deg=30.0,
             num_attempts=self.fallback_planning_attempts,
             planning_time=self.fallback_planning_time,
-            vel_scale=0.10,
-            acc_scale=0.10,
-            pos_tol=0.015,
-            ori_tol=0.05
+            vel_scale=self.fallback_velocity_scale,
+            acc_scale=self.fallback_acceleration_scale
         )
 
     # Z fallback
@@ -1204,7 +1696,6 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                 if self.state == "TRIGGER_PICK" and self.target_pose is not None:
                     self.state = "PICKING"
                     tx, ty, tz = self.target_pose
-                    half_height = self.object_height / 2.0
 
                     # 로봇 베이스 → 물체 방향의 수평 접근각 계산 (atan2)
                     approach_yaw = math.atan2(ty, tx)
@@ -1308,7 +1799,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                             continue
 
                     # 5. Lift: 파지 후 수직으로 들어올림 (side grasp 자세 유지)
-                    after_grasp_z = grasp_z + half_height + self.lift_z_offset
+                    after_grasp_z = grasp_z + self.lift_z_offset
                     self.get_logger().info(
                         f"[Step 5/9] Lift (side grasp): "
                         f"{grasp_z:.3f} -> {after_grasp_z:.3f}"
