@@ -86,7 +86,6 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         self.gripper_close_position = 0.8
         self.gripper_open_effort = 20.0
         self.gripper_close_effort = 30.0
-        self.min_grasp_position_threshold = 0.02
 
         # Gripper geometry
         self.gripper_clearance = 0.100
@@ -276,23 +275,17 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             previous = corrected_positions.copy()
 
         if changed:
-            self.get_logger().info(
-                f"{label} Joint-angle 2π unwrap applied."
-            )
-
+            self.get_logger().info(f"{label} Joint-angle 2π unwrap applied.")
             self.get_logger().info(
                 f"{label} corrected first_position="
                 f"{[round(float(v), 6) for v in points[0].positions]}"
             )
-
             self.get_logger().info(
                 f"{label} corrected last_position="
                 f"{[round(float(v), 6) for v in points[-1].positions]}"
             )
         else:
-            self.get_logger().info(
-                f"{label} No joint-angle 2π wrapping detected."
-            )
+            self.get_logger().info(f"{label} No joint-angle 2π wrapping detected.")
 
         return trajectory
 
@@ -640,15 +633,10 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         current=self.get_current_arm_joint_state()
 
         if current is None:
-            self.get_logger().error(
-                "[IK SELECT] Current joint state unavailable."
-            )
+            self.get_logger().error("[IK SELECT] Current joint state unavailable.")
             return None
 
-        self.get_logger().info(
-            "[IK SELECT] current="
-            f"{[round(float(v),6) for v in current]}"
-        )
+        self.get_logger().info("[IK SELECT] current="f"{[round(float(v),6) for v in current]}")
 
         # 여러 IK branch를 탐색하기 위한 seed
         seeds=[
@@ -917,9 +905,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         pos_tol=0.015,ori_tol=0.25
     ):
         if not self.move_group_client.wait_for_server(timeout_sec=3.0):
-            self.get_logger().error(
-                "[PnP] MoveGroup server unavailable."
-            )
+            self.get_logger().error("[PnP] MoveGroup server unavailable.")
             return False
 
         # 현재 joint state와 가장 가까운 IK branch 선택
@@ -928,9 +914,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         )
 
         if target_q is None:
-            self.get_logger().error(
-                "[PnP] Failed to find nearest IK solution."
-            )
+            self.get_logger().error("[PnP] Failed to find nearest IK solution.")
             return False
 
         current=self.get_current_arm_joint_state()
@@ -938,12 +922,9 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         if current is not None:
             self.get_logger().info(
                 "[IK SELECT] current -> target:"
-                f"\n  current="
-                f"{[round(float(v),6) for v in current]}"
-                f"\n  target="
-                f"{[round(float(v),6) for v in target_q]}"
-                f"\n  distance="
-                f"{self.joint_distance(current,target_q):.4f}"
+                f"\n  current={[round(float(v),6) for v in current]}"
+                f"\n  target={[round(float(v),6) for v in target_q]}"
+                f"\n  distance={self.joint_distance(current,target_q):.4f}"
             )
 
         req=MotionPlanRequest()
@@ -989,9 +970,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         )
 
         if handle is None or not handle.accepted:
-            self.get_logger().error(
-                "[PnP] MoveGroup goal rejected."
-            )
+            self.get_logger().error("[PnP] MoveGroup goal rejected.")
             return False
 
         result=self.wait_future(
@@ -1006,15 +985,10 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         code=result.result.error_code.val
 
         if code!=1:
-            self.get_logger().error(
-                f"[PnP] MoveGroup failed: error_code={code}"
-            )
+            self.get_logger().error(f"[PnP] MoveGroup failed: error_code={code}")
             return False
 
-        self.get_logger().info(
-            "[PnP] MoveGroup joint-target planning SUCCESS."
-        )
-
+        self.get_logger().info("[PnP] MoveGroup joint-target planning SUCCESS.")
         return True
 
     def plan_and_execute_step6(
@@ -1128,15 +1102,10 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         code=result.result.error_code.val
 
         if code!=1:
-            self.get_logger().error(
-                f"[Step 6] MoveGroup failed: error_code={code}"
-            )
+            self.get_logger().error(f"[Step 6] MoveGroup failed: error_code={code}")
             return False
 
-        self.get_logger().info(
-            "[Step 6] Pre-place planning SUCCESS."
-        )
-
+        self.get_logger().info("[Step 6] Pre-place planning SUCCESS.")
         return True
 
     def scale_trajectory_time(self, trajectory, scale=2.5):
@@ -1331,13 +1300,10 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         current=self.get_current_arm_joint_state()
 
         if current is None:
-            self.get_logger().warn(
-                "[Step 6/9] 현재 /joint_states를 가져오지 못했습니다."
-            )
+            self.get_logger().warn("[Step 6/9] 현재 /joint_states를 가져오지 못했습니다.")
         else:
             self.get_logger().info(
-                f"[Step 6/9] current arm joint state="
-                f"{[round(float(v),6) for v in current]}"
+                f"[Step 6/9] current arm joint state={[round(float(v),6) for v in current]}"
             )
 
         return self.plan_and_execute_step6(
@@ -1354,9 +1320,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
     def lift_joint_space_fallback(
         self, x, y, target_z, qx, qy, qz, qw
     ):
-        self.get_logger().warn(
-            f"[Z FALLBACK] Pose fallback: z={target_z:.3f}"
-        )
+        self.get_logger().warn(f"[Z FALLBACK] Pose fallback: z={target_z:.3f}")
         return self.plan_and_execute_pose(
             x, y, target_z, qx, qy, qz, qw,
             num_attempts=self.fallback_planning_attempts,
@@ -1542,9 +1506,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             )
             if ok:
                 return True
-            self.get_logger().warn(
-                f"[MOVE] {description} Cartesian 실패. Fallback 시도."
-            )
+            self.get_logger().warn(f"[MOVE] {description} Cartesian 실패. Fallback 시도.")
         else:
             ok = self.plan_and_execute_pose(
                 target_x, target_y, target_z,
@@ -1552,9 +1514,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             )
             if ok:
                 return True
-            self.get_logger().warn(
-                f"[MOVE] {description} Pose planning 실패. Fallback 시도."
-            )
+            self.get_logger().warn(f"[MOVE] {description} Pose planning 실패. Fallback 시도.")
 
         return self.plan_and_execute_pose(
             target_x, target_y, target_z,
@@ -1709,9 +1669,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     grasp_x, grasp_y, grasp_z = tx, ty, tz
 
                     self.get_logger().info("=" * 60)
-                    self.get_logger().info(
-                        "[PnP] Starting UR5e + 2F-85 9-Step Side Grasp Pick & Place"
-                    )
+                    self.get_logger().info("[PnP] Starting UR5e + 2F-85 9-Step Side Grasp Pick & Place")
                     self.get_logger().info(
                         f"[PnP] Target=({tx:.3f},{ty:.3f},{tz:.3f}), "
                         f"h={self.object_height:.3f}m, "
@@ -1727,13 +1685,10 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                         time.sleep(0.3)
                         ok, _ = self.control_gripper("OPEN")
                         if not ok:
-                            self.reset_after_failure(
-                                "Step 1 Gripper OPEN failed."
-                            )
+                            self.reset_after_failure("Step 1 Gripper OPEN failed.")
                             continue
 
-                    # 2. Pre-grasp: 물체와 같은 높이의 옆 위치 (approach 반대 방향)로 이동
-                    # pre_grasp = grasp - approach_vector (물체 뒤편에서 정렬)
+                    # 2. Pre-grasp: 물체와 같은 높이의 옆 위치로 이동
                     pre_grasp_x = grasp_x - approach_dx
                     pre_grasp_y = grasp_y - approach_dy
                     pre_grasp_z = grasp_z  # 수평 접근이므로 Z 고정
@@ -1742,9 +1697,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                         qx, qy, qz, qw,
                         description="[Step 2/9] Pre-grasp (side)"
                     ):
-                        self.reset_after_failure(
-                            "Step 2 Pre-grasp failed."
-                        )
+                        self.reset_after_failure("Step 2 Pre-grasp failed.")
                         continue
 
                     # 3. 수평 접근: pre-grasp → 물체 중심으로 Cartesian XY 이동
@@ -1761,31 +1714,23 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     )
 
                     if not ok:
-                        self.get_logger().warn(
-                            "[Step 3/9] Cartesian 수평접근 실패. Pose fallback"
-                        )
+                        self.get_logger().warn("[Step 3/9] Cartesian 수평접근 실패. Pose fallback")
                         # fallback: joint-space로 파지 위치 직접 이동
                         ok = self.lift_joint_space_fallback(
                             grasp_x, grasp_y, grasp_z, qx, qy, qz, qw
                         )
 
                     if not ok:
-                        self.reset_after_failure(
-                            "Step 3 Horizontal approach failed."
-                        )
+                        self.reset_after_failure("Step 3 Horizontal approach failed.")
                         continue
 
                     # 4. Close / grasp check
-                    self.get_logger().info(
-                        "[Step 4/9] Gripper CLOSE & grasp check"
-                    )
+                    self.get_logger().info("[Step 4/9] Gripper CLOSE & grasp check")
                     cmd_ok, result_obj = self.control_gripper("CLOSE")
                     grasped = self.check_grasp_success(result_obj) if cmd_ok else False
 
                     if not grasped:
-                        self.get_logger().warn(
-                            "[Step 4/9] Grasp retry"
-                        )
+                        self.get_logger().warn("[Step 4/9] Grasp retry")
                         self.control_gripper("OPEN")
                         time.sleep(0.3)
                         cmd_ok, result_obj = self.control_gripper("CLOSE")
@@ -1801,8 +1746,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     # 5. Lift: 파지 후 수직으로 들어올림 (side grasp 자세 유지)
                     after_grasp_z = grasp_z + self.lift_z_offset
                     self.get_logger().info(
-                        f"[Step 5/9] Lift (side grasp): "
-                        f"{grasp_z:.3f} -> {after_grasp_z:.3f}"
+                        f"[Step 5/9] Lift (side grasp): {grasp_z:.3f} -> {after_grasp_z:.3f}"
                     )
 
                     ok = self.cartesian_z_move(
@@ -1812,9 +1756,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     )
 
                     if not ok:
-                        self.get_logger().warn(
-                            "[Step 5/9] Cartesian Lift 실패. Fallback"
-                        )
+                        self.get_logger().warn("[Step 5/9] Cartesian Lift 실패. Fallback")
                         ok = self.lift_position_downward_fallback(
                             grasp_x, grasp_y, after_grasp_z,
                             qx, qy, qz, qw
@@ -1827,9 +1769,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                         )
                         continue
 
-                    self.get_logger().info(
-                        "[Step 5/9] After-grasp Lift SUCCESS"
-                    )
+                    self.get_logger().info("[Step 5/9] After-grasp Lift SUCCESS")
 
                     # 6. Pre-place: 파지된 물체를 place 위치 상단으로 이동
                     px, py, pz = self.calculate_place_pose()
@@ -1848,14 +1788,11 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                         )
                         continue
 
-                    self.get_logger().info(
-                        "[Step 6/9] Pre-place 완료"
-                    )
+                    self.get_logger().info("[Step 6/9] Pre-place 완료")
 
                     # 7. Place descent / open
                     self.get_logger().info(
-                        f"[Step 7/9] Place 하강: "
-                        f"{pre_place_z:.3f} -> {pz:.3f}"
+                        f"[Step 7/9] Place 하강: {pre_place_z:.3f} -> {pz:.3f}"
                     )
 
                     ok = self.cartesian_z_move(
@@ -1865,9 +1802,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     )
 
                     if not ok:
-                        self.get_logger().warn(
-                            "[Step 7/9] Cartesian 실패. Pose fallback"
-                        )
+                        self.get_logger().warn("[Step 7/9] Cartesian 실패. Pose fallback")
                         ok = self.lift_joint_space_fallback(
                             px, py, pz, qx, qy, qz, qw
                         )
@@ -1879,21 +1814,15 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                         )
                         continue
 
-                    self.get_logger().info(
-                        "[Step 7/9] Place 도착 -> Gripper OPEN"
-                    )
+                    self.get_logger().info("[Step 7/9] Place 도착 -> Gripper OPEN")
 
                     ok, _ = self.control_gripper("OPEN")
                     if not ok:
-                        self.get_logger().warn(
-                            "[Step 7/9] OPEN retry"
-                        )
+                        self.get_logger().warn("[Step 7/9] OPEN retry")
                         time.sleep(0.3)
                         ok, _ = self.control_gripper("OPEN")
                         if not ok:
-                            self.reset_after_failure(
-                                "Step 7 Gripper OPEN failed."
-                            )
+                            self.reset_after_failure("Step 7 Gripper OPEN failed.")
                             continue
 
                     time.sleep(0.5)
@@ -1901,8 +1830,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     # 8. Retract
                     after_place_z = pre_place_z
                     self.get_logger().info(
-                        f"[Step 8/9] Retract: "
-                        f"{pz:.3f} -> {after_place_z:.3f}"
+                        f"[Step 8/9] Retract: {pz:.3f} -> {after_place_z:.3f}"
                     )
 
                     ok = self.cartesian_z_move(
@@ -1912,18 +1840,14 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     )
 
                     if not ok:
-                        self.get_logger().warn(
-                            "[Step 8/9] Retract 실패. Pose fallback"
-                        )
+                        self.get_logger().warn("[Step 8/9] Retract 실패. Pose fallback")
                         ok = self.lift_joint_space_fallback(
                             px, py, after_place_z,
                             qx, qy, qz, qw
                         )
 
                     if not ok:
-                        self.reset_after_failure(
-                            "Step 8 Retract failed."
-                        )
+                        self.reset_after_failure("Step 8 Retract failed.")
                         continue
 
                     # 9. Ready
@@ -1931,23 +1855,17 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     ok = self.plan_and_execute_named_state("ready")
 
                     if not ok:
-                        self.get_logger().warn(
-                            "[Step 9/9] Ready fallback"
-                        )
+                        self.get_logger().warn("[Step 9/9] Ready fallback")
                         ok = self.plan_and_execute_named_state(
                             "ready", num_attempts=10, planning_time=5.0
                         )
 
                     if not ok:
-                        self.reset_after_failure(
-                            "Step 9 Return to ready failed."
-                        )
+                        self.reset_after_failure("Step 9 Return to ready failed.")
                         continue
 
                     self.get_logger().info("=" * 60)
-                    self.get_logger().info(
-                        "[PnP SUCCESS] 9-Step Pick & Place Completed!"
-                    )
+                    self.get_logger().info("[PnP SUCCESS] 9-Step Pick & Place Completed!")
                     self.get_logger().info("=" * 60)
 
                     self.target_pose = None
@@ -1959,9 +1877,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                 time.sleep(0.05)
 
             except Exception as e:
-                self.get_logger().error(
-                    f"[PnP WORKER] Exception: {e}"
-                )
+                self.get_logger().error(f"[PnP WORKER] Exception: {e}")
                 self.reset_after_failure(f"Worker exception: {e}")
 
     def shutdown(self):
