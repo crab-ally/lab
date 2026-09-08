@@ -56,6 +56,9 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         self.post_place_z_offset = 0.10
         self.pre_place_xy_step = 0.05
 
+        # Side grasp 파라미터: 물체 옆에서 수평 접근할 때 사용할 접근 거리
+        self.side_grasp_approach_offset = 0.15
+
         # Lift / fallback parameters
         self.lift_tilt_tolerance = math.radians(25.0)
         self.fallback_planning_attempts = 15
@@ -459,7 +462,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
     def target_pose_callback(self, msg):
         if self.is_busy or self.state != "IDLE":
             return
-        if msg.header.frame_id not in ("base", "world", "link0"):
+        if msg.header.frame_id not in ("base", "world"):
             self.get_logger().warn(
                 f"[PnP] Invalid target frame: {msg.header.frame_id}"
             )
@@ -514,13 +517,41 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             )
             return None
 
-    # Grasp orientation
+    # Grasp orientation (Top-Down: 위에서 집기, 현재 미사용)
     def yaw_to_grasp_quaternion(self, yaw):
+        """yaw 각도에 맞춰 위에서 아래로 집는 쿼터니언 반환 (qx 축 기준)."""
         while yaw > math.pi / 2:
             yaw -= math.pi
         while yaw < -math.pi / 2:
             yaw += math.pi
         return math.cos(yaw / 2), math.sin(yaw / 2), 0.0, 0.0
+
+    # Side Grasp orientation: 옆에서 수평으로 집기
+    def yaw_to_side_grasp_quaternion(self, approach_yaw):
+        """그리퍼가 approach_yaw 방향으로 수평 접근하도록 쿼터니언을 계산한다.
+
+        q = Rz(approach_yaw) ⊗ Ry(90°) 조합.
+        결과: pinch-site의 TCP Z축이 XY 평면상 approach_yaw 방향을 향함.
+        즉, 그리퍼가 수평으로 물체 측면에 접근하는 자세가 됨.
+
+        Args:
+            approach_yaw: 로봇 베이스 → 물체 방향의 수평 각도 (rad)
+
+        Returns:
+            (qx, qy, qz, qw): MoveIt OrientationConstraint에 사용할 쿼터니언
+        """
+        # Ry(90°) 성분: Z축을 +X 방향으로 회전 (수평 기본 자세)
+        s = math.sin(math.pi / 4)   # sin(45°) ≈ 0.7071
+        c = math.cos(math.pi / 4)   # cos(45°) ≈ 0.7071
+        # Rz(approach_yaw) 성분: XY 평면 내 접근 방향 회전
+        a = math.sin(approach_yaw / 2)
+        b = math.cos(approach_yaw / 2)
+        # 쿼터니언 곱: q = Rz ⊗ Ry(90°) → (qx, qy, qz, qw)
+        qx = -a * s
+        qy =  b * s
+        qz =  a * c
+        qw =  b * c
+        return qx, qy, qz, qw
 
     # Motion Planning
     def plan_and_execute_pose(
@@ -1174,16 +1205,26 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     self.state = "PICKING"
                     tx, ty, tz = self.target_pose
                     half_height = self.object_height / 2.0
-                    qx, qy, qz, qw = self.yaw_to_grasp_quaternion(self.target_yaw)
+
+                    # 로봇 베이스 → 물체 방향의 수평 접근각 계산 (atan2)
+                    approach_yaw = math.atan2(ty, tx)
+                    # 옆에서 집기용 쿼터니언: TCP Z축이 approach_yaw 방향으로 수평을 향함
+                    qx, qy, qz, qw = self.yaw_to_side_grasp_quaternion(approach_yaw)
+
+                    # 접근 방향 벡터 = approach_yaw 방향 × offset 거리
+                    approach_dx = math.cos(approach_yaw) * self.side_grasp_approach_offset
+                    approach_dy = math.sin(approach_yaw) * self.side_grasp_approach_offset
+                    # 파지 목표: 물체 중심 위치에서 수평 파지
+                    grasp_x, grasp_y, grasp_z = tx, ty, tz
 
                     self.get_logger().info("=" * 60)
                     self.get_logger().info(
-                        "[PnP] Starting UR5e + 2F-85 9-Step Pick and Place Sequence"
+                        "[PnP] Starting UR5e + 2F-85 9-Step Side Grasp Pick & Place"
                     )
                     self.get_logger().info(
                         f"[PnP] Target=({tx:.3f},{ty:.3f},{tz:.3f}), "
                         f"h={self.object_height:.3f}m, "
-                        f"yaw={math.degrees(self.target_yaw):.1f}°"
+                        f"approach_yaw={math.degrees(approach_yaw):.1f}°"
                     )
                     self.get_logger().info("=" * 60)
 
@@ -1200,45 +1241,46 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                             )
                             continue
 
-                    # 2. Pre-grasp
-                    pre_grasp_z = tz + half_height + self.pre_grasp_z_offset
+                    # 2. Pre-grasp: 물체와 같은 높이의 옆 위치 (approach 반대 방향)로 이동
+                    # pre_grasp = grasp - approach_vector (물체 뒤편에서 정렬)
+                    pre_grasp_x = grasp_x - approach_dx
+                    pre_grasp_y = grasp_y - approach_dy
+                    pre_grasp_z = grasp_z  # 수평 접근이므로 Z 고정
                     if not self.move_to_pose(
-                        tx, ty, pre_grasp_z, qx, qy, qz, qw,
-                        description="[Step 2/9] Pre-grasp"
+                        pre_grasp_x, pre_grasp_y, pre_grasp_z,
+                        qx, qy, qz, qw,
+                        description="[Step 2/9] Pre-grasp (side)"
                     ):
                         self.reset_after_failure(
                             "Step 2 Pre-grasp failed."
                         )
                         continue
 
-                    # 3. Descent
-                    grasp_z = (
-                        tz if half_height <= self.max_grasp_depth
-                        else tz + half_height - self.max_grasp_depth
-                    )
-
+                    # 3. 수평 접근: pre-grasp → 물체 중심으로 Cartesian XY 이동
                     self.get_logger().info(
-                        f"[Step 3/9] Grasp 하강: "
-                        f"{pre_grasp_z:.3f} -> {grasp_z:.3f}"
+                        f"[Step 3/9] 수평 접근: "
+                        f"({pre_grasp_x:.3f},{pre_grasp_y:.3f}) -> "
+                        f"({grasp_x:.3f},{grasp_y:.3f}), z={grasp_z:.3f}"
                     )
 
-                    ok = self.cartesian_z_move(
-                        tx, ty, pre_grasp_z, grasp_z,
-                        qx, qy, qz, qw,
-                        "[Step 3 Cartesian Z]"
+                    ok = self.cartesian_xyz_move(
+                        pre_grasp_x, pre_grasp_y, pre_grasp_z,
+                        grasp_x, grasp_y, grasp_z,
+                        qx, qy, qz, qw
                     )
 
                     if not ok:
                         self.get_logger().warn(
-                            "[Step 3/9] Cartesian 실패. Pose fallback"
+                            "[Step 3/9] Cartesian 수평접근 실패. Pose fallback"
                         )
+                        # fallback: joint-space로 파지 위치 직접 이동
                         ok = self.lift_joint_space_fallback(
-                            tx, ty, grasp_z, qx, qy, qz, qw
+                            grasp_x, grasp_y, grasp_z, qx, qy, qz, qw
                         )
 
                     if not ok:
                         self.reset_after_failure(
-                            "Step 3 Grasp descent failed."
+                            "Step 3 Horizontal approach failed."
                         )
                         continue
 
@@ -1265,15 +1307,15 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                             )
                             continue
 
-                    # 5. Lift
-                    after_grasp_z = tz + half_height + self.lift_z_offset
+                    # 5. Lift: 파지 후 수직으로 들어올림 (side grasp 자세 유지)
+                    after_grasp_z = grasp_z + half_height + self.lift_z_offset
                     self.get_logger().info(
-                        f"[Step 5/9] Single Cartesian Lift: "
+                        f"[Step 5/9] Lift (side grasp): "
                         f"{grasp_z:.3f} -> {after_grasp_z:.3f}"
                     )
 
                     ok = self.cartesian_z_move(
-                        tx, ty, grasp_z, after_grasp_z,
+                        grasp_x, grasp_y, grasp_z, after_grasp_z,
                         qx, qy, qz, qw,
                         "[Step 5 Cartesian Lift]"
                     )
@@ -1283,7 +1325,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                             "[Step 5/9] Cartesian Lift 실패. Fallback"
                         )
                         ok = self.lift_position_downward_fallback(
-                            tx, ty, after_grasp_z,
+                            grasp_x, grasp_y, after_grasp_z,
                             qx, qy, qz, qw
                         )
 
@@ -1298,12 +1340,12 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                         "[Step 5/9] After-grasp Lift SUCCESS"
                     )
 
-                    # 6. Pre-place
+                    # 6. Pre-place: 파지된 물체를 place 위치 상단으로 이동
                     px, py, pz = self.calculate_place_pose()
                     pre_place_z = pz + self.post_place_z_offset
 
                     ok = self.move_to_pre_place_position(
-                        tx, ty, after_grasp_z,
+                        grasp_x, grasp_y, after_grasp_z,   # grasp_x/y = tx/ty
                         px, py, pre_place_z,
                         qx, qy, qz, qw
                     )
