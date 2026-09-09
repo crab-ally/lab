@@ -75,12 +75,12 @@ class MjcfBridgeNode(Node):
         self.GRIPPER_EXTRA_FORCE = 0.0
         self.gripper_force_enabled = False
 
-        self.camera_name = "ceiling_camera"
+        self.camera_name = "gripper_camera"
         self.camera_width = 640
         self.camera_height = 480
         self.camera_rate = 10.0
-        self.camera_optical_frame = "ceiling_camera_optical_frame"
-        self.camera_link_frame = "ceiling_camera_link"
+        self.camera_optical_frame = "gripper_camera_optical_frame"
+        self.camera_link_frame = "gripper_camera"
 
         self.finger_geom_ids = self._collect_finger_geom_ids()
         self.robot_geom_ids = self._collect_robot_geom_ids()
@@ -193,7 +193,6 @@ class MjcfBridgeNode(Node):
         self.active_arm_goal_lock = threading.Lock()
 
         self._set_initial_pose()
-        self.publish_static_camera_tf()
 
         self.camera_thread = threading.Thread(
             target=self._camera_render_loop, daemon=True
@@ -235,40 +234,6 @@ class MjcfBridgeNode(Node):
                 float(self.data.qfrc_applied[self.finger1_dof_id]),
                 float(self.data.qfrc_applied[self.finger2_dof_id])
             )
-
-    def publish_static_camera_tf(self):
-        stamp = self.get_clock().now().to_msg()
-        transforms = []
-        cam_id = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_CAMERA, self.camera_name
-        )
-        cam_body = self.model.cam_bodyid[cam_id]
-        cam_name = mujoco.mj_id2name(
-            self.model, mujoco.mjtObj.mjOBJ_BODY, cam_body
-        )
-
-        if cam_name:
-            t = TransformStamped()
-            t.header.stamp = stamp
-            t.header.frame_id = "world"
-            t.child_frame_id = self.camera_link_frame
-            p = self.data.xpos[cam_body]
-            q = self._mat_to_quat(self.data.xmat[cam_body].reshape(3, 3))
-            t.transform.translation.x = float(p[0])
-            t.transform.translation.y = float(p[1])
-            t.transform.translation.z = float(p[2])
-            t.transform.rotation.x, t.transform.rotation.y = q[0], q[1]
-            t.transform.rotation.z, t.transform.rotation.w = q[2], q[3]
-            transforms.append(t)
-
-        t = TransformStamped()
-        t.header.stamp = stamp
-        t.header.frame_id = self.camera_link_frame
-        t.child_frame_id = self.camera_optical_frame
-        t.transform.rotation.x = 1.0
-        t.transform.rotation.w = 0.0
-        transforms.append(t)
-        self.static_tf_broadcaster.sendTransform(transforms)
 
     def _collect_robot_geom_ids(self):
         """Collect all geom IDs belonging to the UR5e robot (rooted at 'base')."""
