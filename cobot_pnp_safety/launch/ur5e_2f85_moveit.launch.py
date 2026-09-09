@@ -136,21 +136,6 @@ def generate_launch_description():
     )
 
     # ==================================================================
-    # 9. Robot State Publisher
-    # ==================================================================
-
-    robot_state_publisher_node = Node(
-        package="robot_state_publisher",
-        executable="robot_state_publisher",
-        name="robot_state_publisher",
-        output="screen",
-        parameters=[
-            robot_description,
-            {"use_sim_time": False},
-        ],
-    )
-
-    # ==================================================================
     # 10. MoveGroup
     # ==================================================================
 
@@ -179,6 +164,5 @@ def generate_launch_description():
 
     return LaunchDescription([
         world_to_base,
-        robot_state_publisher_node,
         move_group_node,
     ])
