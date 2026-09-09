@@ -43,13 +43,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/base_0.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/base_0.obj"/>
       </geometry>
       <material name="black"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/base_1.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/base_1.obj"/>
       </geometry>
       <material name="jointgray"/>
     </visual>
@@ -73,19 +73,19 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/shoulder_0.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/shoulder_0.obj"/>
       </geometry>
       <material name="urblue"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/shoulder_1.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/shoulder_1.obj"/>
       </geometry>
       <material name="black"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/shoulder_2.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/shoulder_2.obj"/>
       </geometry>
       <material name="jointgray"/>
     </visual>
@@ -115,25 +115,25 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/upperarm_0.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/upperarm_0.obj"/>
       </geometry>
       <material name="linkgray"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/upperarm_1.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/upperarm_1.obj"/>
       </geometry>
       <material name="black"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/upperarm_2.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/upperarm_2.obj"/>
       </geometry>
       <material name="jointgray"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/upperarm_3.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/upperarm_3.obj"/>
       </geometry>
       <material name="urblue"/>
     </visual>
@@ -169,25 +169,25 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/forearm_0.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/forearm_0.obj"/>
       </geometry>
       <material name="urblue"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/forearm_1.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/forearm_1.obj"/>
       </geometry>
       <material name="linkgray"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/forearm_2.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/forearm_2.obj"/>
       </geometry>
       <material name="black"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/forearm_3.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/forearm_3.obj"/>
       </geometry>
       <material name="jointgray"/>
     </visual>
@@ -223,19 +223,19 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/wrist1_0.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/wrist1_0.obj"/>
       </geometry>
       <material name="black"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/wrist1_1.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/wrist1_1.obj"/>
       </geometry>
       <material name="urblue"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/wrist1_2.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/wrist1_2.obj"/>
       </geometry>
       <material name="jointgray"/>
     </visual>
@@ -265,19 +265,19 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/wrist2_0.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/wrist2_0.obj"/>
       </geometry>
       <material name="black"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/wrist2_1.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/wrist2_1.obj"/>
       </geometry>
       <material name="urblue"/>
     </visual>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/wrist2_2.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/wrist2_2.obj"/>
       </geometry>
       <material name="jointgray"/>
     </visual>
@@ -313,7 +313,7 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/wrist3.obj"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/wrist3.obj"/>
       </geometry>
       <material name="linkgray"/>
     </visual>
@@ -344,16 +344,51 @@
   <link name="base-mount">
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/base_mount.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/base_mount.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="2f85_black"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/base_mount.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/base_mount.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
+
+  <!-- Gripper Camera Bracket -->
+  <joint name="gripper_camera_bracket_joint" type="fixed">
+    <origin xyz="0 -0.07 0" rpy="-1.74533 0 0"/>
+    <parent link="base-mount"/>
+    <child link="gripper_camera_bracket"/>
+  </joint>
+
+  <link name="gripper_camera_bracket"/>
+
+  <!-- Gripper Camera -->
+  <joint name="gripper_camera_joint" type="fixed">
+    <origin xyz="0 0 0.025" rpy="0 0 0"/>
+    <parent link="gripper_camera_bracket"/>
+    <child link="gripper_camera"/>
+  </joint>
+
+  <link name="gripper_camera">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.018 0.012 0.012"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+
+  <!-- ROS Camera Optical Frame -->
+  <joint name="gripper_camera_optical_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="3.14159265359 0 0"/>
+    <parent link="gripper_camera"/>
+    <child link="gripper_camera_optical_frame"/>
+  </joint>
+
+  <link name="gripper_camera_optical_frame"/>
 
   <!-- 2F-85 Base -->
   <joint name="2f85_base_joint" type="fixed">
@@ -370,13 +405,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/base.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/base.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="2f85_black"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/base.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/base.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -407,13 +442,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/driver.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/driver.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="gray"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/driver.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/driver.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -437,13 +472,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/coupler.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/coupler.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="2f85_black"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/coupler.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/coupler.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -467,13 +502,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/spring_link.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/spring_link.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="2f85_black"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/spring_link.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/spring_link.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -497,13 +532,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/follower.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/follower.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="2f85_black"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/follower.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/follower.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -523,7 +558,7 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/pad.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/pad.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </visual>
     <collision>
@@ -550,7 +585,7 @@
   <link name="right-silicone-pad">
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/silicone_pad.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/silicone_pad.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="2f85_black"/>
     </visual>
@@ -575,13 +610,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/driver.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/driver.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="gray"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/driver.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/driver.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -605,13 +640,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/coupler.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/coupler.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="2f85_black"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/coupler.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/coupler.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -635,13 +670,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/spring_link.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/spring_link.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="2f85_black"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/spring_link.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/spring_link.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -665,13 +700,13 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/follower.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/follower.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="2f85_black"/>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/follower.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/follower.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -691,7 +726,7 @@
     </inertial>
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/pad.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/pad.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </visual>
     <collision>
@@ -718,7 +753,7 @@
   <link name="left-silicone-pad">
     <visual>
       <geometry>
-        <mesh filename="file:///workspace/model/ur5e_2f85/assets/silicone_pad.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="file:///workspace/assets/ur5e_2f85/silicone_pad.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="2f85_black"/>
     </visual>
