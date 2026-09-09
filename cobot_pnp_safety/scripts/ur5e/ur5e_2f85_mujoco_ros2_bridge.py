@@ -84,6 +84,9 @@ class MjcfBridgeNode(Node):
 
         self.finger_geom_ids = self._collect_finger_geom_ids()
         self.robot_geom_ids = self._collect_robot_geom_ids()
+        self.pnp_object_body_name = "water_bottle"
+        self.pnp_object_body_id = self.model.body(self.pnp_object_body_name).id
+        self.pnp_object_geom_ids = self._collect_body_geom_ids(self.pnp_object_body_id)
 
         self.joint_pub = self.create_publisher(JointState, "/joint_states", 10)
         self.rgb_pub = self.create_publisher(Image, "/camera/image_raw", 10)
@@ -121,10 +124,10 @@ class MjcfBridgeNode(Node):
 
         # UR5e home pose from keyframe: 0 -1.5708 1.5708 -1.5708 -1.5708 0
         self.home_qpos = np.array(
-            [0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0],
+            [0.0, -1.5708, 1.5708, -1.5708, -1.5708, -1.5708],
             dtype=float
         )
-        self.POSITION_TOLERANCE = 0.02
+        self.POSITION_TOLERANCE = 0.03
         self.VELOCITY_TOLERANCE = 0.1
         self.PATH_POSITION_TOLERANCE = 0.20
         self.PATH_VELOCITY_TOLERANCE = 2.0
@@ -299,6 +302,21 @@ class MjcfBridgeNode(Node):
                 body = int(self.model.body_parentid[body])
         return ids
 
+    def _collect_body_geom_ids(self, root_body_id):
+        ids = set()
+
+        for gid in range(self.model.ngeom):
+            body = int(self.model.geom_bodyid[gid])
+
+            while body > 0:
+                if body == root_body_id:
+                    ids.add(gid)
+                    break
+
+                body = int(self.model.body_parentid[body])
+
+        return ids
+
     def _set_initial_pose(self):
         for i, name in enumerate(self.arm_joints):
             jid = self.joint_ids[name]
@@ -353,13 +371,19 @@ class MjcfBridgeNode(Node):
 
             seg_id = seg_raw[:, :, 0].astype(np.int32)
             seg_type = seg_raw[:, :, 1].astype(np.int32)
+
             geom_mask = seg_type == int(mujoco.mjtObj.mjOBJ_GEOM)
-            robot_mask = geom_mask & np.isin(
-                seg_id, np.asarray(list(self.robot_geom_ids), dtype=np.int32)
+
+            pnp_mask = geom_mask & np.isin(
+                seg_id,
+                np.asarray(list(self.pnp_object_geom_ids), dtype=np.int32)
             )
-            seg = seg_id.copy()
-            seg[~geom_mask] = 0
-            seg[robot_mask] = 0
+
+            seg = np.where(
+                pnp_mask,
+                seg_id,
+                0
+            ).astype(np.int32)
 
             stamp = self.get_clock().now().to_msg()
             self.rgb_pub.publish(self._image_msg(rgb, "rgb8", 3, stamp))
@@ -963,7 +987,7 @@ class MjcfBridgeNode(Node):
 
         left_geoms = {"left_pad1", "left_pad2"}
         right_geoms = {"right_pad1", "right_pad2"}
-        object_geom = "bottle_col"
+        object_geom = "water_bottle_body_col"
 
         for i in range(self.data.ncon):
             contact = self.data.contact[i]
