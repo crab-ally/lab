@@ -36,8 +36,4 @@
   <body name="ur5e_bottom_box">
     <geom type="box" pos="0 0 0.30" size="0.3 0.3 0.30" rgba="1 1 1 0"/>
   </body>
-
-  <body name="ceiling_camera_link" pos="0.4 0.8 2">
-    <camera name="ceiling_camera" pos="0 0 0" fovy="58"/>
-  </body>
 </mujocoinclude>
