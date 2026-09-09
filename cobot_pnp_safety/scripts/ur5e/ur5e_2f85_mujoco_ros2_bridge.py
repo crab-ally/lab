@@ -1357,10 +1357,10 @@ def main():
             )
 
             with mujoco.viewer.launch_passive(model, data) as viewer:
-                viewer.cam.distance = 1.5
-                viewer.cam.azimuth = 180
+                viewer.cam.distance = 4
+                viewer.cam.azimuth = 270
                 viewer.cam.elevation = -20
-                viewer.cam.lookat[:] = [0, 0.5, 0.5]
+                viewer.cam.lookat[:] = [0, 0, 0.7]
 
                 print(
                     "[INFO] MuJoCo passive viewer launched successfully.",
@@ -1376,7 +1376,24 @@ def main():
                 while viewer.is_running() and rclpy.ok():
                     with node.lock:
                         node._prepare_physics_step()
+                        # ===== [Point-Foot PD 제어 계산 추가 (mj_step 직전)] =====
+                        if len(node.pf_dof_ids) == 6:
+                            pf_qpos = data.qpos[node.pf_dof_ids]
+                            pf_qvel = data.qvel[node.pf_vel_ids]
+
+                            # Tau = Kp * (q_target - q) - Kd * q_dot
+                            pf_tau = node.pf_kp * (node.pf_target_qpos - pf_qpos) - node.pf_kd * pf_qvel
+                            pf_tau_clipped = np.clip(pf_tau, -80.0, 80.0)
+
+                            # Actuator ctrl 배열에 반영
+                            for idx, act_id in enumerate(node.pf_actuator_ids):
+                                data.ctrl[act_id] = pf_tau_clipped[idx]
+
+                        # 물리 연산 수행
                         mujoco.mj_step(model, data)
+
+                        # ===== [Point-Foot State Publish 추가 (mj_step 직후)] =====
+                        node.publish_pf_joint_states()
 
                         sim_now = float(data.time)
 
