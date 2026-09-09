@@ -1,5 +1,5 @@
 <mujoco model="ur5e_scene">
-  <compiler angle="radian" meshdir="../model/ur5e_2f85/assets"/>
+  <compiler angle="radian" meshdir="../assets/ur5e_2f85"/>
 
   <visual>
     <headlight diffuse="0.8 0.8 0.8" ambient="0.5 0.5 0.5" specular="0.2 0.2 0.2"/>
@@ -14,6 +14,6 @@
     <include file="../world/table_bottle.xml"/>
   </worldbody>
 
-  <include file="../model/ur5e_2f85/ur5e_2f85.xml"/>
-  <include file="../model/PF_TRON1A/TRON1A.xml"/>
+  <include file="../model/ur5e_2f85.xml"/>
+  <!--<include file="../model/TRON1A.xml"/>-->
 </mujoco>
