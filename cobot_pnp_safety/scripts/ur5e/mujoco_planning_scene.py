@@ -52,7 +52,7 @@ class MujocoPlanningScene(Node):
         # 기본 설정
         # ============================================================
 
-        self.world_xml = "/workspace/world/table_object.xml"
+        self.world_xml = "/workspace/world/table_bottle.xml"
         # UR5e MoveIt의 planning frame은 base link
         self.frame_id = "base"
 
@@ -61,8 +61,9 @@ class MujocoPlanningScene(Node):
         # ============================================================
 
         self.ignore_body_names = {
-            "pnp_object",
+            "water_bottle",
             "ceiling_camera_link",
+            "ur5e_bottom_box",
         }
 
         self.ignore_geom_names = {
