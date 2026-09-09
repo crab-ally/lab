@@ -48,7 +48,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         ]
 
         # Place target location
-        self.place_x, self.place_y = 0.0, -0.55
+        self.place_x, self.place_y = 0.8, 0.0
         self.table_top_z = 0.44
 
         # Motion offsets
@@ -1273,14 +1273,17 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             "[Cartesian XYZ] Path computation SUCCESS. Executing trajectory..."
         )
 
-        trajectory = response.solution
-
-        trajectory = self.unwrap_trajectory_joint_positions(
-            trajectory, "[Step 6 Cartesian XYZ]"
+        trajectory=response.solution
+        trajectory=self.unwrap_trajectory_joint_positions(
+            trajectory,"[Step 6 Cartesian XYZ]"
+        )
+        trajectory=self.scale_trajectory_time(
+            trajectory,
+            scale=2.5
         )
 
         return self.execute_trajectory_with_diagnostics(
-            trajectory, "[Step 6 Cartesian XYZ]", 30.0
+            trajectory,"[Step 6 Cartesian XYZ]",30.0
         )
 
     # Step 6
