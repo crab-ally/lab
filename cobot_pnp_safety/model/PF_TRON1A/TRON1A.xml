@@ -3,6 +3,7 @@
     <size njmax="500" nconmax="100" />
 
     <default>
+      <default class="tron1a">
         <light castshadow="false" diffuse="1 1 1" />
         <camera fovy="60"/>
         <default class="visual">
@@ -10,6 +11,7 @@
         </default>
         <joint armature="0.01" damping="0.01"/>
         <geom contype="1" conaffinity="1" condim="3" friction="0.6 0.005 0.0001" rgba="0.5 0.6 0.7 0.0" margin="0.001" group="0" />
+      </default>
     </default>
     <visual>
         <rgba com="0.502 1.0 0 0.5" contactpoint="1.0 1.0 0.6 0.4" contactforce="0.2 0.98 0.2 0.8"/>
