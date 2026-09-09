@@ -329,24 +329,7 @@ class MjcfBridgeNode(Node):
             rgb = np.asarray(renderer.render()).copy()
 
             depth_renderer.update_scene(render_data, camera=self.camera_name)
-            depth_buffer = np.asarray(depth_renderer.render()).copy()
-
-            cam_id = mujoco.mj_name2id(
-                self.model,
-                mujoco.mjtObj.mjOBJ_CAMERA,
-                self.camera_name
-            )
-
-            znear = self.model.vis.map.znear
-            zfar = self.model.vis.map.zfar
-
-            depth = (
-                znear * zfar
-                / (
-                    zfar
-                    - depth_buffer * (zfar - znear)
-                )
-            ).astype(np.float32)
+            depth = np.asarray(depth_renderer.render()).copy().astype(np.float32)
 
             seg_renderer.update_scene(render_data, camera=self.camera_name)
             seg_raw = np.asarray(seg_renderer.render()).copy()
@@ -366,6 +349,19 @@ class MjcfBridgeNode(Node):
                 seg_id,
                 0
             ).astype(np.int32)
+
+            pnp_depth=depth[pnp_mask]
+            valid_pnp_depth=pnp_depth[np.isfinite(pnp_depth)&(pnp_depth>0)]
+
+            if valid_pnp_depth.size:
+                self.get_logger().info(
+                    f"[DEBUG] Bottle depth(m): "
+                    f"min={valid_pnp_depth.min():.4f}, "
+                    f"max={valid_pnp_depth.max():.4f}, "
+                    f"mean={valid_pnp_depth.mean():.4f}, "
+                    f"median={np.median(valid_pnp_depth):.4f}, "
+                    f"points={valid_pnp_depth.size}"
+                )
 
             stamp = self.get_clock().now().to_msg()
             self.rgb_pub.publish(self._image_msg(rgb, "rgb8", 3, stamp))
