@@ -33,7 +33,11 @@ docker compose exec mujoco_ur5e bash
 python3 scripts/ur5e/mujoco_planning_scene.py
 python3 scripts/ur5e/ur5e_2f85_pick_and_place.py
 
-# 4. Rviz
+# 4. TRON1A Point Foot Controller
+docker compose exec mujoco_ur5e bash
+python3 scripts/ur5e/point_foot_controller.py
+
+# 5. Rviz
 docker compose --profile rviz up ur5e_rviz
 
 # ==========================================
