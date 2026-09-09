@@ -165,6 +165,16 @@
                   <body name="base_mount" pos="0 0.1 0" quat="0.7071 -0.7071 0 0" childclass="2f85">
                     <geom class="2f85_visual" mesh="base_mount" material="2f85_black"/>
                     <geom class="2f85_collision" mesh="base_mount"/>
+
+                    <!-- 카메라 -->
+                    <body name="gripper_camera_bracket" pos="0 -0.07 0" quat="0.6428 -0.7660 0 0">
+                      <body name="gripper_camera" pos="0 0 0.025">
+                        <geom name="gripper_camera_body" type="box" size="0.009 0.006 0.006" rgba="0.08 0.08 0.08 1" contype="0" conaffinity="0"/>
+                        <geom name="gripper_camera_lens" type="cylinder" pos="0 0 0.007" quat="0.7071 0 0 0.7071" size="0.003 0.001" rgba="0.02 0.02 0.02 1" contype="0" conaffinity="0"/>
+                        <camera name="gripper_camera" pos="0 0 0" fovy="60"/>
+                      </body>
+                    </body>
+
                     <body name="2f85_base" pos="0 0 0.0038" quat="1 0 0 -1">
                       <inertial mass="0.777441" pos="0 -2.70394e-05 0.0354675" quat="1 -0.00152849 0 0" diaginertia="0.000260285 0.000225381 0.000152708"/>
                       <geom class="2f85_visual" mesh="base" material="2f85_black"/>
