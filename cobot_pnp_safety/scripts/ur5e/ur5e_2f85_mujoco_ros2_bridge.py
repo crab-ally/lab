@@ -12,7 +12,7 @@ from rclpy.action import ActionServer, GoalResponse, CancelResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from sensor_msgs.msg import JointState, Image, CameraInfo
 from geometry_msgs.msg import TransformStamped
-from std_msgs.msg import String, Float64, Bool
+from std_msgs.msg import String, Float64, Bool, Float64MultiArray
 from tf2_ros import StaticTransformBroadcaster
 from control_msgs.action import FollowJointTrajectory, GripperCommand
 import mujoco
@@ -149,9 +149,11 @@ class MjcfBridgeNode(Node):
         for name in self.pf_joint_names:
             j_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
             act_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, name)
-            self.pf_dof_ids.append(self.model.jnt_qposadr[j_id])
-            self.pf_vel_ids.append(self.model.jnt_dofadr[j_id])
-            self.pf_actuator_ids.append(act_id)
+            if j_id != -1:
+                self.pf_dof_ids.append(self.model.jnt_qposadr[j_id])
+                self.pf_vel_ids.append(self.model.jnt_dofadr[j_id])
+            if act_id != -1:
+                self.pf_actuator_ids.append(act_id)
 
         # 별도 제어 노드에서 전송하는 point_foot 제어 명령 수신 Subscriber
         self.pf_cmd_sub = self.create_subscription(
