@@ -131,6 +131,43 @@ class MjcfBridgeNode(Node):
         self.CONTROLLER_RATE = 200.0
         self.CONTROLLER_PERIOD = 1.0 / self.CONTROLLER_RATE
 
+        # ===== [Point-Foot 로봇 설정 추가] =====
+        self.pf_joint_names = [
+            "abad_L_Joint", "hip_L_Joint", "knee_L_Joint",
+            "abad_R_Joint", "hip_R_Joint", "knee_R_Joint"
+        ]
+        # 기본 직립 자세 목표값
+        self.pf_target_qpos = np.array([0.0, 0.2, -0.4, 0.0, -0.2, 0.4])
+        self.pf_kp = 150.0
+        self.pf_kd = 5.0
+
+        # 관절 / 액추에이터 ID 탐색 및 저장
+        self.pf_dof_ids = []
+        self.pf_vel_ids = []
+        self.pf_actuator_ids = []
+
+        for name in self.pf_joint_names:
+            j_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            act_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, name)
+            self.pf_dof_ids.append(self.model.jnt_qposadr[j_id])
+            self.pf_vel_ids.append(self.model.jnt_dofadr[j_id])
+            self.pf_actuator_ids.append(act_id)
+
+        # 별도 제어 노드에서 전송하는 point_foot 제어 명령 수신 Subscriber
+        self.pf_cmd_sub = self.create_subscription(
+            Float64MultiArray,
+            '/point_foot/commands',
+            self.pf_cmd_callback,
+            10
+        )
+
+        # point_foot 관절 상태 전송 Publisher
+        self.pf_state_pub = self.create_publisher(
+            JointState,
+            '/point_foot/joint_states',
+            10
+        )
+
         # Performance rates
         self.JOINT_STATE_RATE = 100.0
         self.JOINT_STATE_PERIOD = 1.0 / self.JOINT_STATE_RATE
@@ -1181,6 +1218,19 @@ class MjcfBridgeNode(Node):
         with self.lock:
             self.data.ctrl[self.GRIPPER_ACTUATOR_ID] = value
 
+    def pf_cmd_callback(self, msg: Float64MultiArray):
+        if len(msg.data) == 6:
+            self.pf_target_qpos = np.array(msg.data)
+
+    def publish_pf_joint_states(self):
+        if len(self.pf_dof_ids) == 6:
+            msg = JointState()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.name = self.pf_joint_names
+            msg.position = self.data.qpos[self.pf_dof_ids].tolist()
+            msg.velocity = self.data.qvel[self.pf_vel_ids].tolist()
+            self.pf_state_pub.publish(msg)
+
     def destroy_node(self):
         self.running = False
         self.gripper_force_enabled = False
@@ -1264,7 +1314,24 @@ def main():
             while rclpy.ok():
                 with node.lock:
                     node._prepare_physics_step()
+                    # ===== [Point-Foot PD 제어 계산 추가 (mj_step 직전)] =====
+                    if len(node.pf_dof_ids) == 6:
+                        pf_qpos = data.qpos[node.pf_dof_ids]
+                        pf_qvel = data.qvel[node.pf_vel_ids]
+
+                        # Tau = Kp * (q_target - q) - Kd * q_dot
+                        pf_tau = node.pf_kp * (node.pf_target_qpos - pf_qpos) - node.pf_kd * pf_qvel
+                        pf_tau_clipped = np.clip(pf_tau, -80.0, 80.0)
+
+                        # Actuator ctrl 배열에 반영
+                        for idx, act_id in enumerate(node.pf_actuator_ids):
+                            data.ctrl[act_id] = pf_tau_clipped[idx]
+
+                    # 물리 연산 수행
                     mujoco.mj_step(model, data)
+
+                    # ===== [Point-Foot State Publish 추가 (mj_step 직후)] =====
+                    node.publish_pf_joint_states()
 
                     if float(data.time) >= next_joint_state_time:
                         node.publish_joint_states()
