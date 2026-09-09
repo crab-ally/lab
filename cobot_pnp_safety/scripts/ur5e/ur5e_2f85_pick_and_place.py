@@ -37,7 +37,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         self.grasped = False
 
         # UR5e home/ready pose & joint names
-        self.home_qpos = [0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0]
+        self.home_qpos = [0.0, -1.5708, 1.5708, -1.5708, -1.5708, -1.5708]
         self.arm_joints = [
             "shoulder_pan_joint",
             "shoulder_lift_joint",
@@ -49,7 +49,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
 
         # Place target location
         self.place_x, self.place_y = 0.8, 0.0
-        self.table_top_z = 0.44
+        self.table_top_z = 0.74
 
         # Motion offsets
         self.pre_grasp_z_offset = 0.10
@@ -59,6 +59,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
 
         # Side grasp 파라미터: 물체 옆에서 수평 접근할 때 사용할 접근 거리
         self.side_grasp_approach_offset = 0.15
+        self.side_grasp_insertion_offset = 0.02
 
         # Lift / fallback parameters
         self.lift_tilt_tolerance = math.radians(25.0)
@@ -1669,7 +1670,9 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     approach_dx = math.cos(approach_yaw) * self.side_grasp_approach_offset
                     approach_dy = math.sin(approach_yaw) * self.side_grasp_approach_offset
                     # 파지 목표: 물체 중심 위치에서 수평 파지
-                    grasp_x, grasp_y, grasp_z = tx, ty, tz
+                    grasp_x = tx + math.cos(approach_yaw) * self.side_grasp_insertion_offset
+                    grasp_y = ty + math.sin(approach_yaw) * self.side_grasp_insertion_offset
+                    grasp_z = tz
 
                     self.get_logger().info("=" * 60)
                     self.get_logger().info("[PnP] Starting UR5e + 2F-85 9-Step Side Grasp Pick & Place")
@@ -1830,22 +1833,29 @@ class Ur5e2f85MoveItPickAndPlace(Node):
 
                     time.sleep(0.5)
 
-                    # 8. Retract
-                    after_place_z = pre_place_z
+                    # 8. Retract: Place 위치에서 수평으로 후퇴
+                    retract_x = px - approach_dx
+                    retract_y = py - approach_dy
+                    retract_z = pz
+
                     self.get_logger().info(
-                        f"[Step 8/9] Retract: {pz:.3f} -> {after_place_z:.3f}"
+                        f"[Step 8/9] Retract (side): "
+                        f"({px:.3f},{py:.3f},{pz:.3f}) -> "
+                        f"({retract_x:.3f},{retract_y:.3f},{retract_z:.3f})"
                     )
 
-                    ok = self.cartesian_z_move(
-                        px, py, pz, after_place_z,
-                        qx, qy, qz, qw,
-                        "[Step 8 Cartesian Z]"
+                    ok = self.cartesian_xyz_move(
+                        px, py, pz,
+                        retract_x, retract_y, retract_z,
+                        qx, qy, qz, qw
                     )
 
                     if not ok:
-                        self.get_logger().warn("[Step 8/9] Retract 실패. Pose fallback")
+                        self.get_logger().warn(
+                            "[Step 8/9] Side retract 실패. Pose fallback"
+                        )
                         ok = self.lift_joint_space_fallback(
-                            px, py, after_place_z,
+                            retract_x, retract_y, retract_z,
                             qx, qy, qz, qw
                         )
 
