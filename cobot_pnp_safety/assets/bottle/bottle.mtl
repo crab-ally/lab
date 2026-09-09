@@ -1,0 +1,9 @@
+# MTL for Boston Round Bottle
+newmtl BottleMaterial
+Ka 1.0 1.0 1.0
+Kd 0.92 0.94 0.96
+Ks 0.5 0.5 0.5
+Ns 60.0
+d 0.88
+illum 2
+map_Kd Collected_NaturalBostonRoundBottle_A01_PR_NVD_01/SubUSDs/textures/Plastic_Glossy_White_A/T_Plastic_Glossy_White_A_Albedo.png
