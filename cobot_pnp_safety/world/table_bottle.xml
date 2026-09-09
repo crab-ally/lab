@@ -1,37 +1,55 @@
 <mujocoinclude>
   <light name="world_light" pos="0 0 3" dir="0 0 -1" directional="true"/>
+  <geom name="floor" rgba="0.5 0.6 0.7 0.5" pos="0 0 0" size="0 0 0.25" type="plane"/>
 
-  <body name="pallet_rack" pos="0.5 -0.55 0">
-    <!-- 4 pillars -->
-    <geom type="box" pos="-.4 .2 .6" size=".03 .03 .6"/>
-    <geom type="box" pos=".4 .2 .6" size=".03 .03 .6"/>
-    <geom type="box" pos="-.4 -.2 .6" size=".03 .03 .6"/>
-    <geom type="box" pos=".4 -.2 .6" size=".03 .03 .6"/>
+  <asset>
+    <mesh name="bottle_mesh" file="../assets/bottle/bottle.obj"/>
+    <material name="bottle_mat" rgba="0.92 0.94 0.96 0.9" specular="0.6" shininess="0.5"/>
+    <material name="collision_mat" rgba="0.2 0.8 0.2 0.0"/>
+  </asset>
 
-    <!-- shelves -->
-    <geom type="box" pos="0 0 .4" size=".37 .18 .03"/>
-    <geom type="box" pos="0 0 .8" size=".37 .18 .03"/>
-    <geom type="box" pos="0 0 1.2" size=".37 .18 .03"/>
+  <default>
+    <default class="bottle_collision">
+      <geom contype="1" conaffinity="1" condim="4" friction="1.2 0.005 0.0001" material="collision_mat"/>
+    </default>
+  </default>
+
+  <body name="docking_statio1" pos="0.6 -0.1 0">
+    <geom name="table1_top" type="box" pos="0.30 0 0.72" size="0.30 0.45 0.02"/>
+    <geom name="table1_leg1" type="cylinder" pos="0.05 0.40 0.35" size="0.025 0.35" rgba="1 1 1 0"/>
+    <geom name="table1_leg2" type="cylinder" pos="0.05 -0.40 0.35" size="0.025 0.35" rgba="1 1 1 0"/>
+    <geom name="table1_leg3" type="cylinder" pos="0.55 0.40 0.35" size="0.025 0.35" rgba="1 1 1 0"/>
+    <geom name="table1_leg4" type="cylinder" pos="0.55 -0.40 0.35" size="0.025 0.35" rgba="1 1 1 0"/>
   </body>
 
-  <!-- body 기준점: 0.15 0.55 0.47, 무게중심: body origin 기준 -0.03
-       시각화, 충돌체 ㅡ 반지름 0.0325m, 반높이 0.11m
-       뚜껑 ㅡ body 기준점: 0 0 0.115, 반지름 0.018m, 반높이 0.015m
-       -->
-  <body name="bottle" pos="0.15 0.55 0.55">
-    <freejoint/>
-    <inertial pos="0 0 -0.030" mass="0.5" diaginertia="0.00058 0.00058 0.00007"/>
-    <geom name="bottle_visual" type="cylinder" size="0.0325 0.110" rgba="0.2 0.7 0.9 0.85" contype="0" conaffinity="0" group="1"/>
-    <geom name="bottle_col" type="cylinder" size="0.0325 0.110" friction="1.0 0.01 0.001" contype="1" conaffinity="1" condim="4"/>
-    <geom name="bottle_cap" type="cylinder" size="0.018 0.015" pos="0 0 0.115" rgba="0.9 0.9 0.9 1.0"/>
-
-    <!-- 검출 센서 사이트 (바디 중심 / 무게 중심 / 바닥면 기준) -->
-    <site name="bottle_center" pos="0 0 0" size="0.005" rgba="1 0 0 1"/>
-    <site name="bottle_cog_site" pos="0 0 -0.030" size="0.005" rgba="0 1 0 1"/>
-    <site name="bottle_bottom" pos="0 0 -0.110" size="0.005" rgba="0 1 0 1"/>
+  <body name="docking_station2" pos="0.1 0.8 0">
+    <geom name="table2_top" type="box" pos="0.30 0 0.72" size="0.30 0.45 0.02"/>
+    <geom name="table2_leg1" type="cylinder" pos="0.05 0.40 0.35" size="0.025 0.35"/>
+    <geom name="table2_leg2" type="cylinder" pos="0.05 -0.40 0.35" size="0.025 0.35"/>
+    <geom name="table2_leg3" type="cylinder" pos="0.55 0.40 0.35" size="0.025 0.35"/>
+    <geom name="table2_leg4" type="cylinder" pos="0.55 -0.40 0.35" size="0.025 0.35"/>
   </body>
 
-  <body name="ceiling_camera_link" pos="0 0.55 1.5">
+  <!-- pnp_object -->
+  <body name="water_bottle" pos="0.4 0.8 0.74">
+    <freejoint name="bottle_freejoint"/>
+    <inertial pos="0 0 0.075" mass="0.15" diaginertia="0.0004 0.0004 0.00015"/>
+
+    <geom name="water_bottle_visual" type="mesh" mesh="bottle_mesh" class="bottle_collision" contype="0" conaffinity="0" group="1" material="bottle_mat"/>
+    <geom name="water_bottle_body_col" class="bottle_collision" type="cylinder" pos="0 0 0.058" size="0.033 0.055" group="0"/>
+    <geom name="water_bottle_shoulder_col" class="bottle_collision" type="cylinder" pos="0 0 0.125" size="0.024 0.015" group="0"/>
+    <geom name="water_bottle_cap_col" class="bottle_collision" type="cylinder" pos="0 0 0.1575" size="0.0155 0.0175" group="0"/>
+
+    <site name="water_bottle_center" pos="0 0 0.075" size="0.005" rgba="1 0 0 1"/>
+    <site name="water_bottle_cog_site" pos="0 0 0.075" size="0.005" rgba="0 1 0 1"/>
+    <site name="water_bottle_bottom" pos="0 0 0" size="0.005" rgba="0 1 0 1"/>
+  </body>
+
+  <body name="ur5e_bottom_box">
+    <geom type="box" pos="0 0 0.30" size="0.3 0.3 0.30" rgba="1 1 1 0"/>
+  </body>
+
+  <body name="ceiling_camera_link" pos="0.4 0.8 2">
     <camera name="ceiling_camera" pos="0 0 0" fovy="58"/>
   </body>
 </mujocoinclude>
