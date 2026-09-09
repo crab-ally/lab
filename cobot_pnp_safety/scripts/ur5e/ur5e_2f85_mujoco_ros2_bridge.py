@@ -329,7 +329,24 @@ class MjcfBridgeNode(Node):
             rgb = np.asarray(renderer.render()).copy()
 
             depth_renderer.update_scene(render_data, camera=self.camera_name)
-            depth = np.asarray(depth_renderer.render()).copy()
+            depth_buffer = np.asarray(depth_renderer.render()).copy()
+
+            cam_id = mujoco.mj_name2id(
+                self.model,
+                mujoco.mjtObj.mjOBJ_CAMERA,
+                self.camera_name
+            )
+
+            znear = self.model.vis.map.znear
+            zfar = self.model.vis.map.zfar
+
+            depth = (
+                znear * zfar
+                / (
+                    zfar
+                    - depth_buffer * (zfar - znear)
+                )
+            ).astype(np.float32)
 
             seg_renderer.update_scene(render_data, camera=self.camera_name)
             seg_raw = np.asarray(seg_renderer.render()).copy()
