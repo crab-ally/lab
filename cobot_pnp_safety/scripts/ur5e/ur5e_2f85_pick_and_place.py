@@ -30,14 +30,13 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         self.cb_group = ReentrantCallbackGroup()
         self.state = "IDLE"
         self.target_pose = None
-        self.object_height = None
         self.target_yaw = 0.0
         self.is_busy = False
         self.shutdown_requested = False
         self.grasped = False
 
         # UR5e home/ready pose & joint names
-        self.home_qpos = [0.0, -1.5708, 1.5708, -1.5708, -1.5708, -1.5708]
+        self.ready_qpos = [0.0, -1.5708, 1.5708, -1.5708, -1.5708, -1.5708]
         self.arm_joints = [
             "shoulder_pan_joint",
             "shoulder_lift_joint",
@@ -48,13 +47,14 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         ]
 
         # Place target location
+        self.base_origin_z_world = 0.6  
         self.place_x, self.place_y = 0.8, 0.0
-        self.table_top_z = 0.74
+        self.table_top_z = 0.74 - self.base_origin_z_world
 
         # Motion offsets
         self.pre_grasp_z_offset = 0.10
         self.lift_z_offset = 0.15
-        self.post_place_z_offset = 0.10
+        self.pre_place_z_offset = 0.10
         self.pre_place_xy_step = 0.05
 
         # Side grasp 파라미터: 물체 옆에서 수평 접근할 때 사용할 접근 거리
@@ -89,14 +89,9 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         self.gripper_close_effort = 30.0
 
         # Gripper geometry
-        self.gripper_clearance = 0.100
-        self.grasp_margin = 0.010
-        self.max_grasp_depth = self.gripper_clearance - self.grasp_margin
         self.tcp_to_fingertip = 0.0
 
         # Object validation
-        self.min_object_height = 0.005
-        self.max_object_height = 0.40
         self.cartesian_fraction_threshold = 0.95
 
         # MoveIt action clients & services
@@ -134,10 +129,6 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             PoseStamped, "/target_object_pose",
             self.target_pose_callback, 10, callback_group=self.cb_group
         )
-        self.height_sub = self.create_subscription(
-            Float32, "/object_height",
-            self.object_height_callback, 10, callback_group=self.cb_group
-        )
 
         self.get_logger().info(
             "[PnP INIT] UR5e + Robotiq 2F-85 MoveIt 9-Step Pick & Place Controller Ready."
@@ -159,6 +150,10 @@ class Ur5e2f85MoveItPickAndPlace(Node):
 
     def get_current_arm_joint_state(self):
         if self.latest_joint_state is None:
+            return None
+        if self.latest_joint_state_time is None:
+            return None
+        if time.monotonic()-self.latest_joint_state_time>self.joint_state_timeout:
             return None
         states = dict(zip(
             self.latest_joint_state.name,
@@ -452,35 +447,17 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         return False
 
     # Topic subscribers
-    def object_height_callback(self, msg):
-        if self.is_busy:
-            return
-        height = float(msg.data)
-        if np.isfinite(height):
-            self.object_height = height
-
     def target_pose_callback(self, msg):
         if self.is_busy or self.state != "IDLE":
             return
-        if msg.header.frame_id not in ("base", "world"):
-            self.get_logger().warn(
-                f"[PnP] Invalid target frame: {msg.header.frame_id}"
-            )
+        if msg.header.frame_id != "base":
+            self.get_logger().warn(f"[PnP] Invalid target frame: {msg.header.frame_id}")
             return
 
         p, q = msg.pose.position, msg.pose.orientation
         x, y, z = float(p.x), float(p.y), float(p.z)
         if not all(np.isfinite(v) for v in (x, y, z)):
             self.get_logger().warn("[PnP] Invalid target position.")
-            return
-
-        if self.object_height is None or not np.isfinite(self.object_height):
-            self.get_logger().warn("[PnP] Object height is not available.")
-            return
-
-        h = float(self.object_height)
-        if not self.min_object_height <= h <= self.max_object_height:
-            self.get_logger().warn(f"[PnP] Invalid object height: {h:.4f} m")
             return
 
         r11 = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
@@ -492,7 +469,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
 
         self.get_logger().info(
             f"[PnP] Target received: xyz=({x:.3f},{y:.3f},{z:.3f}), "
-            f"h={h:.3f}, yaw={math.degrees(self.target_yaw):.1f} deg"
+            f"yaw={math.degrees(self.target_yaw):.1f} deg"
         )
 
     # Future helper
@@ -902,8 +879,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
     def plan_and_execute_pose(
         self,x,y,z,qx=1.0,qy=0.0,qz=0.0,qw=0.0,
         num_attempts=10,planning_time=5.0,
-        vel_scale=0.1,acc_scale=0.1,
-        pos_tol=0.015,ori_tol=0.25
+        vel_scale=0.1,acc_scale=0.1
     ):
         if not self.move_group_client.wait_for_server(timeout_sec=3.0):
             self.get_logger().error("[PnP] MoveGroup server unavailable.")
@@ -1289,8 +1265,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
 
     # Step 6
     def move_to_pre_place_position(
-        self,start_x,start_y,start_z,
-        target_x,target_y,target_z,
+        self,target_x,target_y,target_z,
         qx,qy,qz,qw
     ):
         self.get_logger().info(
@@ -1330,17 +1305,15 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             num_attempts=self.fallback_planning_attempts,
             planning_time=self.fallback_planning_time,
             vel_scale=self.fallback_velocity_scale,
-            acc_scale=self.fallback_acceleration_scale,
-            pos_tol=0.015,
-            ori_tol=self.fallback_orientation_tolerance
+            acc_scale=self.fallback_acceleration_scale
         )
 
     # Step 5 fallback
-    def lift_position_downward_fallback(
+    def lift_side_grasp_fallback(
         self, x, y, target_z, qx, qy, qz, qw
     ):
         self.get_logger().warn(
-            f"[LIFT FALLBACK] Position + downward orientation: "
+            f"[LIFT FALLBACK] Side-grasp orientation with tilt tolerance: "
             f"({x:.3f},{y:.3f},{target_z:.3f})"
         )
 
@@ -1446,7 +1419,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         req.start_state.is_diff = True
 
         constraints = Constraints()
-        for joint, value in zip(self.arm_joints, self.home_qpos):
+        for joint, value in zip(self.arm_joints, self.ready_qpos):
             jc = JointConstraint()
             jc.joint_name = joint
             jc.position = value
@@ -1526,9 +1499,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             num_attempts=self.fallback_planning_attempts,
             planning_time=self.fallback_planning_time,
             vel_scale=self.fallback_velocity_scale,
-            acc_scale=self.fallback_acceleration_scale,
-            pos_tol=0.02,
-            ori_tol=self.fallback_orientation_tolerance
+            acc_scale=self.fallback_acceleration_scale
         )
 
     # Gripper action control
@@ -1539,9 +1510,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             return False, None
 
         if not self.gripper_client.wait_for_server(timeout_sec=3.0):
-            self.get_logger().error(
-                "[GRIPPER] Action server unavailable."
-            )
+            self.get_logger().error("[GRIPPER] Action server unavailable.")
             return False, None
 
         goal = GripperCommand.Goal()
@@ -1612,7 +1581,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         return False
 
     def calculate_place_pose(self):
-        center_z = self.table_top_z + self.object_height / 2.0
+        center_z = self.table_top_z + self.pre_place_z_offset
         return (
             self.place_x,
             self.place_y,
@@ -1648,7 +1617,6 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             )
 
         self.target_pose = None
-        self.object_height = None
         self.target_yaw = 0.0
         self.is_busy = False
         self.state = "IDLE"
@@ -1678,7 +1646,6 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     self.get_logger().info("[PnP] Starting UR5e + 2F-85 9-Step Side Grasp Pick & Place")
                     self.get_logger().info(
                         f"[PnP] Target=({tx:.3f},{ty:.3f},{tz:.3f}), "
-                        f"h={self.object_height:.3f}m, "
                         f"approach_yaw={math.degrees(approach_yaw):.1f}°"
                     )
                     self.get_logger().info("=" * 60)
@@ -1763,7 +1730,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
 
                     if not ok:
                         self.get_logger().warn("[Step 5/9] Cartesian Lift 실패. Fallback")
-                        ok = self.lift_position_downward_fallback(
+                        ok = self.lift_side_grasp_fallback(
                             grasp_x, grasp_y, after_grasp_z,
                             qx, qy, qz, qw
                         )
@@ -1778,8 +1745,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     self.get_logger().info("[Step 5/9] After-grasp Lift SUCCESS")
 
                     # 6. Pre-place: 파지된 물체를 place 위치 상단으로 이동
-                    px, py, pz = self.calculate_place_pose()
-                    pre_place_z = pz + self.post_place_z_offset
+                    px, py, pre_place_z = self.calculate_place_pose()
 
                     ok = self.move_to_pre_place_position(
                         grasp_x, grasp_y, after_grasp_z,   # grasp_x/y = tx/ty
@@ -1882,7 +1848,6 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     self.get_logger().info("=" * 60)
 
                     self.target_pose = None
-                    self.object_height = None
                     self.target_yaw = 0.0
                     self.is_busy = False
                     self.state = "IDLE"
