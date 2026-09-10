@@ -1265,7 +1265,8 @@ class Ur5e2f85MoveItPickAndPlace(Node):
 
     # Step 6
     def move_to_pre_place_position(
-        self,target_x,target_y,target_z,
+        self,start_x,start_y,start_z,
+        target_x,target_y,target_z,
         qx,qy,qz,qw
     ):
         self.get_logger().info(
