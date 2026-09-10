@@ -1,33 +1,10 @@
 #!/usr/bin/env python3
 """
-MuJoCo XML -> MoveIt 2 Planning Scene 자동 장애물 등록기 (UR5e + Robotiq 2F-85)
+MuJoCo XML -> MoveIt 2 Planning Scene 자동 장애물 등록기
+(UR5e + Robotiq 2F-85)
 
-기능:
-  - MuJoCo world/test.xml 자동 파싱
-  - body의 pos / quat / euler 누적
-  - box / sphere / cylinder 자동 변환
-  - MoveIt Planning Scene에 CollisionObject 등록
-  - /planning_scene 토픽 publish가 아니라
-    /apply_planning_scene 서비스를 사용하여 직접 적용
-
-현재 프로젝트 기준:
-  XML: /workspace/world/test.xml
-  MoveIt 기준 frame: base (UR5e base link)
-
-현재 world/test.xml:
-  table1
-    - table1_top
-    - table1_leg1~4
-  table2
-    - table2_top
-    - table2_leg1~4
-
-제외:
-  - floor
-  - pnp_object
-  - UR5e + Robotiq 2F-85 robot 관련 body
-  - camera body
-  - light
+MuJoCo WORLD 기준: UR5e base 위치 = (0, 0, 0.6)
+MoveIt 기준 frame: base
 """
 
 import os
@@ -48,35 +25,20 @@ class MujocoPlanningScene(Node):
     def __init__(self):
         super().__init__("mujoco_planning_scene")
 
-        # ============================================================
-        # 기본 설정
-        # ============================================================
-
         self.world_xml = "/workspace/world/table_bottle.xml"
-        # UR5e MoveIt의 planning frame은 base link
         self.frame_id = "base"
 
-        # ============================================================
-        # 등록하지 않을 body / geom
-        # ============================================================
+        # MuJoCo world에서 UR5e base 원점
+        self.base_world_pos = (0.0, 0.0, 0.6)
 
+        # 등록 제외 object
         self.ignore_body_names = {
             "water_bottle",
-            "ceiling_camera_link",
             "ur5e_bottom_box",
         }
-
-        self.ignore_geom_names = {
-            "floor",
-        }
-
-        # ============================================================
-        # UR5e + Robotiq 2F-85 robot 관련 이름
-        # MuJoCo XML에서 사용하는 body 이름 기준
-        # ============================================================
+        self.ignore_geom_names = {"floor"}
 
         self.robot_body_names = {
-            # UR5e arm
             "base",
             "shoulder_link",
             "upper_arm_link",
@@ -101,55 +63,29 @@ class MujocoPlanningScene(Node):
             "left_silicone_pad",
         }
 
-        # ============================================================
-        # ApplyPlanningScene 서비스
-        # ============================================================
-
         self.apply_scene_client = self.create_client(
             ApplyPlanningScene,
             "/apply_planning_scene",
         )
 
-        self.get_logger().info("=" * 60)
-        self.get_logger().info("MuJoCo World -> MoveIt Planning Scene")
-        self.get_logger().info("Automatic Collision Object Loader")
-        self.get_logger().info("[Robot: UR5e + Robotiq 2F-85]")
-        self.get_logger().info("=" * 60)
-
         self.load_and_apply_scene()
 
     # ================================================================
-    # Vector parsing
+    # Basic math
     # ================================================================
 
-    def parse_vec3(self, text, default=(0.0, 0.0, 0.0)):
-        """
-        XML의 pos / size / euler 등을 tuple로 변환한다.
-        """
+    def vec3(self, text, default=(0.0, 0.0, 0.0)):
         if not text:
             return default
-
-        values = text.split()
-        if len(values) < 3:
-            return default
-
         try:
-            return tuple(map(float, values[:3]))
+            v = list(map(float, text.split()[:3]))
+            return tuple(v) if len(v) == 3 else default
         except ValueError:
             return default
 
-    # ================================================================
-    # Quaternion
-    # ================================================================
-
-    def quat_multiply(self, q1, q2):
-        """
-        Quaternion 곱셈.
-        내부 표현: (x, y, z, w)
-        """
-        x1, y1, z1, w1 = q1
-        x2, y2, z2, w2 = q2
-
+    def quat_mul(self, a, b):
+        x1, y1, z1, w1 = a
+        x2, y2, z2, w2 = b
         return (
             w1*x2 + x1*w2 + y1*z2 - z1*y2,
             w1*y2 - x1*z2 + y1*w2 + z1*x2,
@@ -157,261 +93,163 @@ class MujocoPlanningScene(Node):
             w1*w2 - x1*x2 - y1*y2 - z1*z2,
         )
 
-    def quat_to_matrix(self, q):
-        """
-        Quaternion을 rotation matrix로 변환.
-        """
+    def quat_matrix(self, q):
         x, y, z, w = q
-
         return [
-            [
-                1 - 2*(y*y + z*z),
-                2*(x*y - z*w),
-                2*(x*z + y*w),
-            ],
-            [
-                2*(x*y + z*w),
-                1 - 2*(x*x + z*z),
-                2*(y*z - x*w),
-            ],
-            [
-                2*(x*z - y*w),
-                2*(y*z + x*w),
-                1 - 2*(x*x + y*y),
-            ],
+            [1-2*(y*y+z*z), 2*(x*y-z*w), 2*(x*z+y*w)],
+            [2*(x*y+z*w), 1-2*(x*x+z*z), 2*(y*z-x*w)],
+            [2*(x*z-y*w), 2*(y*z+x*w), 1-2*(x*x+y*y)],
         ]
 
-    def rotate_vector(self, q, v):
-        """
-        Quaternion으로 local vector를 회전시킨다.
-        """
-        m = self.quat_to_matrix(q)
-        x, y, z = v
-
-        return (
-            m[0][0]*x + m[0][1]*y + m[0][2]*z,
-            m[1][0]*x + m[1][1]*y + m[1][2]*z,
-            m[2][0]*x + m[2][1]*y + m[2][2]*z,
-        )
-
-    # ================================================================
-    # Transform composition
-    # ================================================================
-
-    def compose_transform(
-        self,
-        parent_pos,
-        parent_quat,
-        local_pos,
-        local_quat,
-    ):
-        """
-        부모 transform과 자식 transform을 합친다.
-
-        예:
-          table1 pos=(0, 0.55, 0.4)
-          geom   pos=(0.22, 0.14, -0.4)
-
-        결과:
-          (0.22, 0.69, 0.0)
-        """
-        rotated = self.rotate_vector(
-            parent_quat,
-            local_pos,
-        )
-
-        pos = tuple(
-            parent_pos[i] + rotated[i]
+    def rotate(self, q, v):
+        m = self.quat_matrix(q)
+        return tuple(
+            sum(m[i][j] * v[j] for j in range(3))
             for i in range(3)
         )
 
-        quat = self.quat_multiply(
-            parent_quat,
-            local_quat,
-        )
+    def quat(self, element):
+        if element.get("quat"):
+            try:
+                w, x, y, z = map(
+                    float, element.get("quat").split()
+                )
+                return x, y, z, w
+            except ValueError:
+                pass
 
-        return pos, quat
+        if element.get("euler"):
+            rx, ry, rz = self.vec3(element.get("euler"))
+            cx, sx = math.cos(rx/2), math.sin(rx/2)
+            cy, sy = math.cos(ry/2), math.sin(ry/2)
+            cz, sz = math.cos(rz/2), math.sin(rz/2)
 
-    # ================================================================
-    # MuJoCo quaternion
-    # ================================================================
-
-    def parse_quat(self, element):
-        """
-        MuJoCo quat="w x y z" -> ROS/internal (x y z w)
-        """
-        values = element.get("quat", "").split()
-
-        if len(values) != 4:
-            return 0.0, 0.0, 0.0, 1.0
-
-        try:
-            w, x, y, z = map(float, values)
-        except ValueError:
-            return 0.0, 0.0, 0.0, 1.0
-
-        return x, y, z, w
-
-    def euler_to_quat(self, euler):
-        """
-        Euler XYZ -> Quaternion.
-        내부 표현: x y z w
-        """
-        rx, ry, rz = euler
-
-        cx, sx = math.cos(rx/2), math.sin(rx/2)
-        cy, sy = math.cos(ry/2), math.sin(ry/2)
-        cz, sz = math.cos(rz/2), math.sin(rz/2)
-
-        return (
-            sx*cy*cz - cx*sy*sz,
-            cx*sy*cz + sx*cy*sz,
-            cx*cy*sz - sx*sy*cz,
-            cx*cy*cz + sx*sy*sz,
-        )
-
-    def get_element_quaternion(self, element):
-        """
-        quat가 있으면 quat 사용.
-        없고 euler가 있으면 euler 사용.
-        둘 다 없으면 identity.
-        """
-        if element.get("quat") is not None:
-            return self.parse_quat(element)
-
-        if element.get("euler") is not None:
-            return self.euler_to_quat(
-                self.parse_vec3(element.get("euler"))
+            return (
+                sx*cy*cz - cx*sy*sz,
+                cx*sy*cz + sx*cy*sz,
+                cx*cy*sz - sx*sy*cz,
+                cx*cy*cz + sx*sy*sz,
             )
 
         return 0.0, 0.0, 0.0, 1.0
 
-    # ================================================================
-    # Body transform
-    # ================================================================
-
-    def get_body_transform(self, body, parent_pos, parent_quat):
-        """
-        Body의 local transform을 parent transform과 합친다.
-        """
-        return self.compose_transform(
-            parent_pos,
-            parent_quat,
-            self.parse_vec3(body.get("pos")),
-            self.get_element_quaternion(body),
+    def compose(self, p, q, lp, lq):
+        rp = self.rotate(q, lp)
+        return (
+            tuple(p[i] + rp[i] for i in range(3)),
+            self.quat_mul(q, lq),
         )
 
     # ================================================================
-    # CollisionObject 생성
+    # WORLD -> BASE
     # ================================================================
 
-    def create_collision_object(
+    def world_to_base(self, world_pos):
+        return tuple(
+            world_pos[i] - self.base_world_pos[i]
+            for i in range(3)
+        )
+
+    # ================================================================
+    # Body
+    # ================================================================
+
+    def body_transform(self, body, parent_pos, parent_quat):
+        return self.compose(
+            parent_pos,
+            parent_quat,
+            self.vec3(body.get("pos")),
+            self.quat(body),
+        )
+
+    # ================================================================
+    # Collision Object
+    # ================================================================
+
+    def create_collision(
         self,
         geom,
         body_name,
         body_pos,
         body_quat,
     ):
-        """
-        MuJoCo geom 하나를 MoveIt CollisionObject로 변환한다.
-        """
-        geom_name = geom.get(
+        name = geom.get(
             "name",
             f"{body_name}_geom",
         )
 
-        if geom_name in self.ignore_geom_names:
-            self.get_logger().info(
-                f"[SKIP] Ignored geom: {geom_name}"
-            )
+        if name in self.ignore_geom_names:
             return None
 
-        geom_type = geom.get("type", "")
+        gtype = geom.get("type")
 
-        if geom_type not in ("box", "sphere", "cylinder"):
+        if gtype not in ("box", "sphere", "cylinder"):
             self.get_logger().warn(
-                f"[SKIP] Unsupported geom: "
-                f"{geom_name}, type={geom_type}"
+                f"[SKIP] {name}: type={gtype}"
             )
             return None
 
-        # ------------------------------------------------------------
-        # geom local transform
-        # ------------------------------------------------------------
-
-        world_pos, world_quat = self.compose_transform(
+        world_pos, world_quat = self.compose(
             body_pos,
             body_quat,
-            self.parse_vec3(geom.get("pos")),
-            self.get_element_quaternion(geom),
+            self.vec3(geom.get("pos")),
+            self.quat(geom),
         )
+
+        base_pos = self.world_to_base(world_pos)
 
         collision = CollisionObject()
         collision.header.frame_id = self.frame_id
-        collision.id = geom_name
+        collision.id = name
 
         primitive = SolidPrimitive()
         pose = Pose()
 
-        pose.position.x, pose.position.y, pose.position.z = world_pos
+        pose.position.x, pose.position.y, pose.position.z = base_pos
         pose.orientation.x = world_quat[0]
         pose.orientation.y = world_quat[1]
         pose.orientation.z = world_quat[2]
         pose.orientation.w = world_quat[3]
 
-        # ============================================================
-        # BOX
-        # ============================================================
-
-        if geom_type == "box":
-            size = self.parse_vec3(geom.get("size"))
-
-            # MuJoCo box size는 half-size
+        if gtype == "box":
             primitive.type = SolidPrimitive.BOX
-            primitive.dimensions = [2.0 * s for s in size]
+            primitive.dimensions = [
+                2.0 * x for x in self.vec3(geom.get("size"))
+            ]
 
-        # ============================================================
-        # SPHERE
-        # ============================================================
-
-        elif geom_type == "sphere":
-            values = geom.get("size", "").split()
-
-            if not values:
+        elif gtype == "sphere":
+            size = geom.get("size", "").split()
+            if not size:
                 return None
-
             primitive.type = SolidPrimitive.SPHERE
-            primitive.dimensions = [float(values[0])]
+            primitive.dimensions = [float(size[0])]
 
-        # ============================================================
-        # CYLINDER
-        # ============================================================
-
-        elif geom_type == "cylinder":
-            size = self.parse_vec3(geom.get("size"))
-
-            # MuJoCo:
-            #   size[0] = radius
-            #   size[1] = half-height
+        else:
+            size = self.vec3(geom.get("size"))
             primitive.type = SolidPrimitive.CYLINDER
-            primitive.dimensions = [2.0 * size[1], size[0]]
+            primitive.dimensions = [
+                2.0 * size[1],
+                size[0],
+            ]
 
         collision.primitives.append(primitive)
         collision.primitive_poses.append(pose)
         collision.operation = CollisionObject.ADD
 
         self.get_logger().info(
-            f"[ADD] {geom_name} "
-            f"type={geom_type} "
-            f"pos=({world_pos[0]:.3f}, "
+            f"[ADD] {name} "
+            f"world=({world_pos[0]:.3f}, "
             f"{world_pos[1]:.3f}, "
-            f"{world_pos[2]:.3f})"
+            f"{world_pos[2]:.3f}) "
+            f"-> base=({base_pos[0]:.3f}, "
+            f"{base_pos[1]:.3f}, "
+            f"{base_pos[2]:.3f})"
         )
 
         return collision
 
     # ================================================================
-    # Body recursive processing
+    # Recursive body processing
     # ================================================================
 
     def process_body(
@@ -421,52 +259,31 @@ class MujocoPlanningScene(Node):
         parent_quat,
         collision_objects,
     ):
-        """
-        MuJoCo body를 재귀적으로 탐색한다.
+        name = body.get("name", "unnamed")
 
-        예:
-          table1
-            |
-            +-- geom
-            |
-            +-- body
-                  |
-                  +-- geom
-        """
-        body_name = body.get("name", "unnamed_body")
-
-        body_pos, body_quat = self.get_body_transform(
+        body_pos, body_quat = self.body_transform(
             body,
             parent_pos,
             parent_quat,
         )
 
-        is_ignored = body_name in self.ignore_body_names
-        is_robot = (
-            body_name in self.robot_body_names
-            or body_name.startswith("ur5e")
-            or body_name.startswith("2f85")
+        ignored = name in self.ignore_body_names
+        robot = (
+            name in self.robot_body_names
+            or name.startswith("ur5e")
+            or name.startswith("2f85")
         )
 
-        # ------------------------------------------------------------
-        # 현재 body의 geom 처리
-        # ------------------------------------------------------------
-
-        if not is_ignored and not is_robot:
+        if not ignored and not robot:
             for geom in body.findall("geom"):
-                collision = self.create_collision_object(
+                collision = self.create_collision(
                     geom,
-                    body_name,
+                    name,
                     body_pos,
                     body_quat,
                 )
-
-                if collision is not None:
+                if collision:
                     collision_objects.append(collision)
-
-        # ------------------------------------------------------------
-        # Child body 재귀 처리
-        # ------------------------------------------------------------
 
         for child in body.findall("body"):
             self.process_body(
@@ -477,22 +294,15 @@ class MujocoPlanningScene(Node):
             )
 
     # ================================================================
-    # XML Load
+    # XML
     # ================================================================
 
     def load_collision_objects(self):
-        """
-        XML을 읽어서 CollisionObject 목록을 만든다.
-        """
         if not os.path.exists(self.world_xml):
             self.get_logger().error(
                 f"[XML] File not found: {self.world_xml}"
             )
             return []
-
-        self.get_logger().info(
-            f"[XML] Loading: {self.world_xml}"
-        )
 
         try:
             root = ET.parse(self.world_xml).getroot()
@@ -502,153 +312,87 @@ class MujocoPlanningScene(Node):
             )
             return []
 
-        world_pos = (0.0, 0.0, 0.0)
-        world_quat = (0.0, 0.0, 0.0, 1.0)
-        collision_objects = []
-
-        # ------------------------------------------------------------
-        # worldbody 찾기
-        #
-        # 일반 MJCF:
-        #   <worldbody>
-        #     <body ...>
-        #
-        # 현재 test.xml:
-        #   <mujocoinclude>
-        #     <body ...>
-        # ------------------------------------------------------------
-
         worldbody = root.find("worldbody")
-
         bodies = (
             worldbody.findall("body")
             if worldbody is not None
             else root.findall("body")
         )
 
+        objects = []
+
         for body in bodies:
             self.process_body(
                 body,
-                world_pos,
-                world_quat,
-                collision_objects,
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0, 1.0),
+                objects,
             )
 
-        return collision_objects
+        return objects
 
     # ================================================================
-    # Apply Planning Scene
+    # Apply
     # ================================================================
 
-    def apply_collision_objects(self, collision_objects):
-        """
-        MoveIt의 /apply_planning_scene 서비스를 사용해서
-        CollisionObject를 Planning Scene에 직접 적용한다.
-        """
-        if not collision_objects:
-            self.get_logger().warn(
+    def apply_collision_objects(self, objects):
+        if not objects:
+            self.get_logger().error(
                 "[Planning Scene] No collision objects."
             )
             return False
-
-        self.get_logger().info(
-            "[Planning Scene] "
-            "Waiting for /apply_planning_scene ..."
-        )
 
         if not self.apply_scene_client.wait_for_service(
             timeout_sec=10.0
         ):
             self.get_logger().error(
-                "[Planning Scene] "
-                "/apply_planning_scene unavailable."
+                "[Planning Scene] Service unavailable."
             )
             return False
 
-        # ------------------------------------------------------------
-        # PlanningScene 생성
-        # ------------------------------------------------------------
-
         scene = PlanningScene()
         scene.is_diff = True
-        scene.world.collision_objects = collision_objects
+        scene.world.collision_objects = objects
 
         request = ApplyPlanningScene.Request()
         request.scene = scene
 
-        self.get_logger().info(
-            f"[Planning Scene] Applying "
-            f"{len(collision_objects)} collision objects..."
-        )
-
         future = self.apply_scene_client.call_async(request)
 
         while rclpy.ok() and not future.done():
-            rclpy.spin_once(self, timeout_sec=0.1)
-
-        if not future.done():
-            self.get_logger().error(
-                "[Planning Scene] "
-                "Service call did not finish."
+            rclpy.spin_once(
+                self,
+                timeout_sec=0.1,
             )
-            return False
 
         try:
             response = future.result()
         except Exception as e:
+            self.get_logger().error(str(e))
+            return False
+
+        if not response or not response.success:
             self.get_logger().error(
-                f"[Planning Scene] Service exception: {e}"
+                "[Planning Scene] Apply failed."
             )
             return False
 
-        if response is None:
-            self.get_logger().error(
-                "[Planning Scene] Empty service response."
-            )
-            return False
-
-        if not response.success:
-            self.get_logger().error(
-                "[Planning Scene] "
-                "ApplyPlanningScene returned success=False."
-            )
-            return False
-
-        self.get_logger().info("=" * 60)
-        self.get_logger().info("[Planning Scene] SUCCESS")
         self.get_logger().info(
-            f"Registered {len(collision_objects)} "
-            f"collision objects."
+            f"[Planning Scene] SUCCESS: "
+            f"{len(objects)} objects, frame={self.frame_id}"
         )
-        self.get_logger().info("=" * 60)
 
         return True
 
     # ================================================================
-    # Load + Apply
+    # Main
     # ================================================================
 
     def load_and_apply_scene(self):
-        """
-        전체 작업:
+        objects = self.load_collision_objects()
 
-          XML
-           ↓
-          parse
-           ↓
-          CollisionObject
-           ↓
-          ApplyPlanningScene
-        """
-        collision_objects = self.load_collision_objects()
-
-        if not collision_objects:
-            self.get_logger().error(
-                "[Planning Scene] No objects generated."
-            )
-            return
-
-        self.apply_collision_objects(collision_objects)
+        if objects:
+            self.apply_collision_objects(objects)
 
 
 def main(args=None):
@@ -656,7 +400,6 @@ def main(args=None):
     node = MujocoPlanningScene()
 
     try:
-        # 서비스 적용 후 결과 확인 시간을 준다.
         rclpy.spin_once(node, timeout_sec=1.0)
     except KeyboardInterrupt:
         pass
