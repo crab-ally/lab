@@ -350,19 +350,6 @@ class MjcfBridgeNode(Node):
                 0
             ).astype(np.int32)
 
-            pnp_depth=depth[pnp_mask]
-            valid_pnp_depth=pnp_depth[np.isfinite(pnp_depth)&(pnp_depth>0)]
-
-            if valid_pnp_depth.size:
-                self.get_logger().info(
-                    f"[DEBUG] Bottle depth(m): "
-                    f"min={valid_pnp_depth.min():.4f}, "
-                    f"max={valid_pnp_depth.max():.4f}, "
-                    f"mean={valid_pnp_depth.mean():.4f}, "
-                    f"median={np.median(valid_pnp_depth):.4f}, "
-                    f"points={valid_pnp_depth.size}"
-                )
-
             stamp = self.get_clock().now().to_msg()
             self.rgb_pub.publish(self._image_msg(rgb, "rgb8", 3, stamp))
             self.depth_pub.publish(self._image_msg(depth, "32FC1", 4, stamp))
