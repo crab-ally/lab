@@ -123,14 +123,9 @@ def generate_launch_description():
         executable="static_transform_publisher",
         name="world_to_base",
         arguments=[
-            "0",
-            "0",
-            "0",
-            "0",
-            "0",
-            "0",
-            "world",
-            "base",
+            "0", "0", "0.6",
+            "0", "0", "0",
+            "world", "base",
         ],
         output="screen",
     )
