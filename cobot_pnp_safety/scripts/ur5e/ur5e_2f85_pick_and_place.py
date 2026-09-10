@@ -48,7 +48,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
 
         # Place target location
         self.place_x, self.place_y = 0.8, 0.0
-        self.table_top_z = 0.74
+        self.table_top_z = 0.74 - 0.6
 
         # Motion offsets
         self.pre_grasp_z_offset = 0.10
@@ -449,7 +449,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
     def target_pose_callback(self, msg):
         if self.is_busy or self.state != "IDLE":
             return
-        if msg.header.frame_id not in ("base", "world"):
+        if msg.header.frame_id != "base":
             self.get_logger().warn(
                 f"[PnP] Invalid target frame: {msg.header.frame_id}"
             )
@@ -1590,7 +1590,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         return False
 
     def calculate_place_pose(self):
-        center_z = self.table_top_z + pre_place_z_offset
+        center_z = self.table_top_z + self.pre_place_z_offset
         return (
             self.place_x,
             self.place_y,
