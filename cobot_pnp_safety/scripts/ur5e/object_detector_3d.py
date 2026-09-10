@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+"""
+sub:
+  - /camera/depth/image_raw
+  - /camera/depth/camera_info
+  - /camera/segmentation/image_raw
+pub:
+  - /target_object_pose
+  - /object_pointcloud
+  - /detected_objects_markers
+"""
 import cv2
 import numpy as np
 import rclpy
@@ -84,7 +94,7 @@ class Ransac3DObjectDetector(Node):
             tf = self.tf_buffer.lookup_transform(
                 self.target_frame,
                 self.camera_frame,
-                pose.header.stamp,
+                rclpy.time.Time(),
                 timeout=rclpy.duration.Duration(seconds=0.2)
             )
             return tf2_geometry_msgs.do_transform_pose_stamped(pose, tf)
@@ -128,7 +138,7 @@ class Ransac3DObjectDetector(Node):
         marker.type = Marker.SPHERE
         marker.action = Marker.ADD
         marker.pose = pose.pose
-        marker.scale.x = marker.scale.y = marker.scale.z = 0.05
+        marker.scale.x = marker.scale.y = marker.scale.z = 0.03
         marker.color.r = marker.color.a = 1.0
         markers.markers.append(marker)
 
@@ -170,10 +180,7 @@ class Ransac3DObjectDetector(Node):
         if now - self.last_pose_log_time >= 1.0:
             self.get_logger().info(
                 f"Target(base): "
-                f"({target.pose.position.x:.3f}, {target.pose.position.y:.3f}, {target.pose.position.z:.3f}) | "
-                f"Camera: "
-                f"({center[0]:.3f}, {center[1]:.3f}, {center[2]:.3f}) | "
-                f"Points: {len(points)}"
+                f"({target.pose.position.x:.3f}, {target.pose.position.y:.3f}, {target.pose.position.z:.3f})"
             )
             self.last_pose_log_time = now
 
