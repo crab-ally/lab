@@ -4,21 +4,21 @@
 
   <body name="docking_statio1" pos="0.6 -0.1 0">
     <geom name="table1_top" type="box" pos="0.30 0 0.72" size="0.30 0.45 0.02"/>
-    <geom name="table1_leg1" type="cylinder" pos="0.05 0.40 0.35" size="0.025 0.35" rgba="1 1 1 0"/>
-    <geom name="table1_leg2" type="cylinder" pos="0.05 -0.40 0.35" size="0.025 0.35" rgba="1 1 1 0"/>
-    <geom name="table1_leg3" type="cylinder" pos="0.55 0.40 0.35" size="0.025 0.35" rgba="1 1 1 0"/>
-    <geom name="table1_leg4" type="cylinder" pos="0.55 -0.40 0.35" size="0.025 0.35" rgba="1 1 1 0"/>
+    <geom name="table1_leg1" type="cylinder" pos="0.05 0.40 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
+    <geom name="table1_leg2" type="cylinder" pos="0.05 -0.40 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
+    <geom name="table1_leg3" type="cylinder" pos="0.55 0.40 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
+    <geom name="table1_leg4" type="cylinder" pos="0.55 -0.40 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
   </body>
 
   <body name="docking_station2" pos="0.1 0.8 0">
-    <geom name="table2_top" type="box" pos="0.30 0 0.72" size="0.30 0.45 0.02"/>
-    <geom name="table2_leg1" type="cylinder" pos="0.05 0.40 0.35" size="0.025 0.35"/>
-    <geom name="table2_leg2" type="cylinder" pos="0.05 -0.40 0.35" size="0.025 0.35"/>
-    <geom name="table2_leg3" type="cylinder" pos="0.55 0.40 0.35" size="0.025 0.35"/>
-    <geom name="table2_leg4" type="cylinder" pos="0.55 -0.40 0.35" size="0.025 0.35"/>
+    <geom name="table2_top" type="box" pos="0.30 0 0.72" size="0.30 0.45 0.02" rgba="1 1 1 1"/>
+    <geom name="table2_leg1" type="cylinder" pos="0.05 0.40 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
+    <geom name="table2_leg2" type="cylinder" pos="0.05 -0.40 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
+    <geom name="table2_leg3" type="cylinder" pos="0.55 0.40 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
+    <geom name="table2_leg4" type="cylinder" pos="0.55 -0.40 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
   </body>
 
-  <!-- pnp_object -->
+  <!-- pnp_object: 가로/세로 6.6cm, 높이 17.5cm -->
   <body name="water_bottle" pos="0.4 0.8 0.74">
     <freejoint name="bottle_freejoint"/>
     <inertial pos="0 0 0.075" mass="0.15" diaginertia="0.0004 0.0004 0.00015"/>
@@ -34,6 +34,6 @@
   </body>
 
   <body name="ur5e_bottom_box">
-    <geom type="box" pos="0 0 0.30" size="0.3 0.3 0.30" rgba="1 1 1 0"/>
+    <geom type="box" pos="0 0 0.30" size="0.3 0.3 0.30" rgba="0 0 0 1"/>
   </body>
 </mujocoinclude>
