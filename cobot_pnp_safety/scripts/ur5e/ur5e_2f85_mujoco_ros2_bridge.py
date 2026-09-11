@@ -949,41 +949,36 @@ class MjcfBridgeNode(Node):
         )
 
     def _check_gripper_object_contact(self):
-        left_contact = False
-        right_contact = False
-        left_force = 0.0
-        right_force = 0.0
-
-        left_geoms = {"left_pad1", "left_pad2"}
-        right_geoms = {"right_pad1", "right_pad2"}
-        object_geom = "water_bottle_body_col"
+        left_contact=right_contact=False
+        left_force=right_force=0.0
+        left_geoms={"left_pad1","left_pad2"}
+        right_geoms={"right_pad1","right_pad2"}
+        object_geoms={"water_bottle1_body_col","water_bottle2_body_col"}
 
         for i in range(self.data.ncon):
-            contact = self.data.contact[i]
+            contact=self.data.contact[i]
+            geom1=self.model.geom(contact.geom1).name
+            geom2=self.model.geom(contact.geom2).name
 
-            geom1 = self.model.geom(contact.geom1).name
-            geom2 = self.model.geom(contact.geom2).name
-
-            if object_geom not in (geom1, geom2):
+            if geom1 in object_geoms:
+                object_geom,other_geom=geom1,geom2
+            elif geom2 in object_geoms:
+                object_geom,other_geom=geom2,geom1
+            else:
                 continue
 
-            other_geom = geom2 if geom1 == object_geom else geom1
-
-            force = np.zeros(6, dtype=np.float64)
-            mujoco.mj_contactForce(self.model, self.data, i, force)
-            normal_force = abs(float(force[0]))
+            force=np.zeros(6,dtype=np.float64)
+            mujoco.mj_contactForce(self.model,self.data,i,force)
+            normal_force=abs(float(force[0]))
 
             if other_geom in left_geoms:
-                left_contact = True
-                left_force = max(left_force, normal_force)
-
+                left_contact=True
+                left_force=max(left_force,normal_force)
             elif other_geom in right_geoms:
-                right_contact = True
-                right_force = max(right_force, normal_force)
+                right_contact=True
+                right_force=max(right_force,normal_force)
 
-        grasped = left_contact and right_contact
-
-        return grasped, left_contact, right_contact, left_force, right_force
+        return left_contact and right_contact,left_contact,right_contact,left_force,right_force
 
     def execute_gripper(self, goal_handle):
         # command.position is treated as a fraction of max opening (0.0~0.04 m)
@@ -1249,21 +1244,25 @@ def load_model(xml_path):
         print(f"[WARN] from_xml_path failed: {e}")
         print("[INFO] Trying VFS fallback...")
 
-    root = Path("/workspace")
+    roots = [
+        Path("/workspace/model"),
+        Path("/workspace/assets"),
+        Path("/workspace/world"),
+        Path("/workspace/scene"),
+    ]
     vfs = {}
 
-    for path in root.rglob("*"):
-        if (
-            not path.is_file()
-            or path.suffix.lower() not in {
-                ".xml", ".stl", ".obj", ".png", ".jpg", ".jpeg"
-            }
-        ):
-            continue
-        try:
-            vfs[path.relative_to(root).as_posix()] = path.read_bytes()
-        except Exception:
-            pass
+    for root in roots:
+        for path in root.rglob("*"):
+            if (
+                not path.is_file()
+                or path.suffix.lower() not in {".xml", ".stl", ".obj", ".png", ".jpg", ".jpeg"}
+            ):
+                continue
+            try:
+                vfs[path.relative_to(Path("/workspace")).as_posix()] = path.read_bytes()
+            except Exception:
+                pass
 
     print(f"[INFO] VFS files: {len(vfs)}")
 
