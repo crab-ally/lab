@@ -33,7 +33,8 @@ class MujocoPlanningScene(Node):
 
         # 등록 제외 object
         self.ignore_body_names = {
-            "water_bottle",
+            "water_bottle1",
+            "water_bottle2",
             "ur5e_bottom_box",
         }
         self.ignore_geom_names = {"floor"}
