@@ -47,8 +47,19 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         ]
 
         # Place target location
+        self.place_positions=[
+            # C D
+            # B E  로봇
+            # A F
+            (0.85,0.20),  # A
+            (0.85,-0.10), # B
+            (0.85,-0.40), # C
+            (0.55,-0.40), # D
+            (0.55,-0.10), # E
+            (0.55,0.20),  # F
+        ]
+        self.place_index=0
         self.world_to_base = 0.6
-        self.place_x, self.place_y = 0.8, 0.0
         self.table_top_z = 0.74 - self.world_to_base
 
         # Motion offsets
@@ -58,7 +69,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         self.pre_place_xy_step = 0.05
 
         # Side grasp 파라미터: 물체 옆에서 수평 접근할 때 사용할 접근 거리
-        self.side_grasp_approach_offset = 0.15
+        self.side_grasp_offset = 0.15
         self.side_grasp_insertion_offset = 0.02
 
         # Lift / fallback parameters
@@ -136,10 +147,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         self.get_logger().info(
             "[PnP INIT] UR5e + Robotiq 2F-85 MoveIt 9-Step Pick & Place Controller Ready."
         )
-        self.get_logger().info(
-            f"[PnP INIT] Table Z={self.table_top_z:.3f}, "
-            f"Place XY=({self.place_x:.3f},{self.place_y:.3f})"
-        )
+        self.get_logger().info(f"Place positions={self.place_positions[self.place_index]}")
 
         self.worker = threading.Thread(
             target=self.pnp_worker_loop, daemon=True
@@ -1405,15 +1413,13 @@ class Ur5e2f85MoveItPickAndPlace(Node):
 
     # Named state (e.g. ready / home)
     def plan_and_execute_named_state(
-        self, named_state="ready", num_attempts=5, planning_time=3.0
+        self, named_state="ready", num_attempts=10, planning_time=5.0
     ):
         if not self.move_group_client.wait_for_server(timeout_sec=3.0):
             self.get_logger().error("[PnP] MoveGroup server unavailable.")
             return False
 
-        self.get_logger().info(
-            f"[PnP] Returning to state: {named_state}"
-        )
+        self.get_logger().info(f"[PnP] Returning to state: {named_state}")
 
         req = MotionPlanRequest()
         req.group_name = "ur5e_arm"
@@ -1428,8 +1434,8 @@ class Ur5e2f85MoveItPickAndPlace(Node):
             jc = JointConstraint()
             jc.joint_name = joint
             jc.position = value
-            jc.tolerance_above = 0.05
-            jc.tolerance_below = 0.05
+            jc.tolerance_above = 0.02
+            jc.tolerance_below = 0.02
             jc.weight = 1.0
             constraints.joint_constraints.append(jc)
 
@@ -1438,7 +1444,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         options = PlanningOptions()
         options.plan_only = False
         options.replan = True
-        options.replan_attempts = 3
+        options.replan_attempts = 5
 
         goal = MoveGroup.Goal()
         goal.request = req
@@ -1590,12 +1596,9 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         return False
 
     def calculate_place_pose(self):
-        center_z = self.table_top_z + self.pre_place_z_offset
-        return (
-            self.place_x,
-            self.place_y,
-            center_z - self.tcp_to_fingertip
-        )
+        px, py = self.place_positions[self.place_index]
+        z = self.table_top_z + self.pre_place_z_offset - self.tcp_to_fingertip
+        return px, py, z
 
     # Failure recovery
     def reset_after_failure(self, reason, need_open_gripper=False):
@@ -1644,8 +1647,8 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     qx, qy, qz, qw = self.yaw_to_side_grasp_quaternion(approach_yaw)
 
                     # 접근 방향 벡터 = approach_yaw 방향 × offset 거리
-                    approach_dx = math.cos(approach_yaw) * self.side_grasp_approach_offset
-                    approach_dy = math.sin(approach_yaw) * self.side_grasp_approach_offset
+                    approach_dx = math.cos(approach_yaw) * self.side_grasp_offset
+                    approach_dy = math.sin(approach_yaw) * self.side_grasp_offset
                     # 파지 목표: 물체 중심 위치에서 수평 파지
                     grasp_x = tx + math.cos(approach_yaw) * self.side_grasp_insertion_offset
                     grasp_y = ty + math.sin(approach_yaw) * self.side_grasp_insertion_offset
@@ -1757,10 +1760,26 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     px, py, pz = self.calculate_place_pose()
                     pre_place_z = pz + self.pre_place_z_offset
 
+                    #ok = self.move_to_pre_place_position(
+                    #    grasp_x, grasp_y, after_grasp_z,
+                    #    px, py, pre_place_z,
+                    #    *place_q
+                    #)
+
                     ok = self.move_to_pre_place_position(
-                        grasp_x, grasp_y, after_grasp_z,   # grasp_x/y = tx/ty
+                        grasp_x, grasp_y, after_grasp_z,
                         px, py, pre_place_z,
                         qx, qy, qz, qw
+                    )
+
+                    place_yaw = math.atan2(py, px)
+                    place_dx = math.cos(place_yaw) * self.side_grasp_offset
+                    place_dy = math.sin(place_yaw) * self.side_grasp_offset
+                    place_q = self.yaw_to_side_grasp_quaternion(place_yaw)
+                    
+                    ok=self.plan_and_execute_pose(
+                        px,py,pre_place_z,
+                        *place_q
                     )
 
                     if not ok:
@@ -1773,20 +1792,18 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     self.get_logger().info("[Step 6/9] Pre-place 완료")
 
                     # 7. Place descent / open
-                    self.get_logger().info(
-                        f"[Step 7/9] Place 하강: {pre_place_z:.3f} -> {pz:.3f}"
-                    )
+                    self.get_logger().info(f"[Step 7/9] Place 하강: {pre_place_z:.3f} -> {pz:.3f}")
 
                     ok = self.cartesian_z_move(
                         px, py, pre_place_z, pz,
-                        qx, qy, qz, qw,
+                        *place_q,
                         "[Step 7 Cartesian Z]"
                     )
 
                     if not ok:
                         self.get_logger().warn("[Step 7/9] Cartesian 실패. Pose fallback")
                         ok = self.lift_joint_space_fallback(
-                            px, py, pz, qx, qy, qz, qw
+                            px, py, pz, *place_q
                         )
 
                     if not ok:
@@ -1810,8 +1827,8 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     time.sleep(0.5)
 
                     # 8. Retract: Place 위치에서 수평으로 후퇴
-                    retract_x = px - approach_dx
-                    retract_y = py - approach_dy
+                    retract_x = px - place_dx
+                    retract_y = py - place_dy
                     retract_z = pz
 
                     self.get_logger().info(
@@ -1823,7 +1840,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                     ok = self.cartesian_xyz_move(
                         px, py, pz,
                         retract_x, retract_y, retract_z,
-                        qx, qy, qz, qw
+                        *place_q
                     )
 
                     if not ok:
@@ -1831,13 +1848,14 @@ class Ur5e2f85MoveItPickAndPlace(Node):
                             "[Step 8/9] Side retract 실패. Pose fallback"
                         )
                         ok = self.lift_joint_space_fallback(
-                            retract_x, retract_y, retract_z,
-                            qx, qy, qz, qw
+                            retract_x, retract_y, retract_z, *place_q
                         )
 
                     if not ok:
                         self.reset_after_failure("Step 8 Retract failed.")
                         continue
+
+                    self.place_index+=1
 
                     # 9. Ready
                     self.get_logger().info("[Step 9/9] Ready 복귀")
