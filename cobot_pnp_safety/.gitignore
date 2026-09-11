@@ -10,3 +10,8 @@ antigravity_docs/
 
 MUJOCO_LOG.TXT
 rendering
+
+# ros pakage
+build/
+install/
+log/
