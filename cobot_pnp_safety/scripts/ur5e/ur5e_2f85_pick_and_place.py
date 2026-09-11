@@ -47,14 +47,14 @@ class Ur5e2f85MoveItPickAndPlace(Node):
         ]
 
         # Place target location
+        self.world_to_base = 0.6
         self.place_x, self.place_y = 0.8, 0.0
-        self.table_top_z = 0.74 - 0.6
+        self.table_top_z = 0.74 - self.world_to_base
 
         # Motion offsets
         self.pre_grasp_z_offset = 0.10
         self.lift_z_offset = 0.15
         self.pre_place_z_offset = 0.10
-        self.post_place_z_offset = 0.10
         self.pre_place_xy_step = 0.05
 
         # Side grasp 파라미터: 물체 옆에서 수평 접근할 때 사용할 접근 거리
@@ -1755,7 +1755,7 @@ class Ur5e2f85MoveItPickAndPlace(Node):
 
                     # 6. Pre-place: 파지된 물체를 place 위치 상단으로 이동
                     px, py, pz = self.calculate_place_pose()
-                    pre_place_z = pz + self.post_place_z_offset
+                    pre_place_z = pz + self.pre_place_z_offset
 
                     ok = self.move_to_pre_place_position(
                         grasp_x, grasp_y, after_grasp_z,   # grasp_x/y = tx/ty
