@@ -18,6 +18,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 from sensor_msgs.msg import Image, CameraInfo, PointCloud2, PointField
 from tf2_ros import Buffer, TransformListener
 import tf2_geometry_msgs
+from sklearn.cluster import DBSCAN
 
 class Object3DDetector(Node):
     def __init__(self):
@@ -89,18 +90,9 @@ class Object3DDetector(Node):
 
         return np.column_stack((x, y, z)).astype(np.float32)
 
-    def transform_pose(self, pose):
-        try:
-            tf = self.tf_buffer.lookup_transform(
-                self.target_frame,
-                self.camera_frame,
-                rclpy.time.Time(),
-                timeout=rclpy.duration.Duration(seconds=0.2)
-            )
-            return tf2_geometry_msgs.do_transform_pose_stamped(pose, tf)
-        except Exception as e:
-            self.get_logger().warn(f"TF Transform failed: {e}")
-            return None
+    def cluster_points(self,points):
+        labels=DBSCAN(eps=0.025,min_samples=10).fit_predict(points)
+        return [points[labels==i] for i in set(labels) if i>=0]
 
     def publish_pointcloud(self, points):
         msg = PointCloud2()
@@ -120,61 +112,75 @@ class Object3DDetector(Node):
         msg.data = points.astype(np.float32).tobytes()
         self.cloud_pub.publish(msg)
 
-    def publish_marker(self, pose):
-        stamp = self.depth_stamp
-        markers = MarkerArray()
+    def publish_markers(self,clusters,targets,best_idx):
+        markers=MarkerArray()
 
-        delete = Marker()
-        delete.header.frame_id = self.target_frame
-        delete.header.stamp = stamp
-        delete.action = Marker.DELETEALL
+        delete=Marker()
+        delete.header.frame_id=self.target_frame
+        delete.header.stamp=self.depth_stamp
+        delete.action=Marker.DELETEALL
         markers.markers.append(delete)
 
-        marker = Marker()
-        marker.header.frame_id = self.target_frame
-        marker.header.stamp = stamp
-        marker.ns = "objects"
-        marker.id = 0
-        marker.type = Marker.SPHERE
-        marker.action = Marker.ADD
-        marker.pose = pose.pose
-        marker.scale.x = marker.scale.y = marker.scale.z = 0.03
-        marker.color.r = marker.color.a = 1.0
-        markers.markers.append(marker)
+        for i,target in enumerate(targets):
+            marker=Marker()
+            marker.header.frame_id=self.target_frame
+            marker.header.stamp=self.depth_stamp
+            marker.ns="objects"
+            marker.id=i
+            marker.type=Marker.SPHERE
+            marker.action=Marker.ADD
+            marker.pose=target.pose
+            marker.scale.x=marker.scale.y=marker.scale.z=0.03
+            marker.color.r=1.0
+            marker.color.a=1.0
+            markers.markers.append(marker)
 
         self.marker_pub.publish(markers)
 
     def process(self):
-        if self.depth is None or self.seg is None:
-            return
-        if None in (self.fx, self.fy, self.cx, self.cy):
-            return
-        if self.depth.shape != self.seg.shape:
-            self.get_logger().warn("Depth and segmentation resolution mismatch.")
-            return
+        if self.depth is None or self.seg is None or None in (self.fx,self.fy,self.cx,self.cy): return
+        if self.depth.shape != self.seg.shape: return
 
-        points = self.depth_to_points()
-        if len(points) < 20:
-            return
+        points=self.depth_to_points()
+        if len(points)<20: return
+
+        clusters=self.cluster_points(points)
+        if not clusters: return
+
+        tf=self.tf_buffer.lookup_transform(
+            self.target_frame,self.camera_frame,rclpy.time.Time(),
+            timeout=rclpy.duration.Duration(seconds=0.2))
+
+        targets=[]
+        best_idx=-1
+        best_dist=float("inf")
+
+        for i,cluster in enumerate(clusters):
+            center=cluster.mean(axis=0)
+
+            pose=PoseStamped()
+            pose.header.frame_id=self.camera_frame
+            pose.header.stamp=self.depth_stamp
+            pose.pose.position.x=float(center[0])
+            pose.pose.position.y=float(center[1])
+            pose.pose.position.z=float(center[2])
+            pose.pose.orientation.w=1.0
+
+            target=tf2_geometry_msgs.do_transform_pose_stamped(pose,tf)
+            targets.append(target)
+
+            p=target.pose.position
+            dist=np.sqrt(p.x*p.x+p.y*p.y+p.z*p.z)
+
+            if dist<best_dist:
+                best_dist=dist
+                best_idx=i
+
+        if best_idx<0: return
 
         self.publish_pointcloud(points)
-
-        center = points.mean(axis=0)
-
-        pose = PoseStamped()
-        pose.header.frame_id = self.camera_frame
-        pose.header.stamp = self.depth_stamp
-        pose.pose.position.x = float(center[0])
-        pose.pose.position.y = float(center[1])
-        pose.pose.position.z = float(center[2])
-        pose.pose.orientation.w = 1.0
-
-        target = self.transform_pose(pose)
-        if target is None:
-            return
-
-        self.pose_pub.publish(target)
-        self.publish_marker(target)
+        self.pose_pub.publish(targets[best_idx])
+        self.publish_markers(clusters,targets,best_idx)
 
         now = self.get_clock().now().nanoseconds * 1e-9
         if now - self.last_pose_log_time >= 1.0:
