@@ -84,9 +84,13 @@ class MjcfBridgeNode(Node):
 
         self.finger_geom_ids = self._collect_finger_geom_ids()
         self.robot_geom_ids = self._collect_robot_geom_ids()
-        self.pnp_object_body_name = "water_bottle"
-        self.pnp_object_body_id = self.model.body(self.pnp_object_body_name).id
-        self.pnp_object_geom_ids = self._collect_body_geom_ids(self.pnp_object_body_id)
+        self.pnp_object_body_names = ["water_bottle1","water_bottle2"]
+        self.pnp_object_geom_ids = set()
+        for body_name in self.pnp_object_body_names:
+            body_id = self.model.body(body_name).id
+            self.pnp_object_geom_ids.update(
+                self._collect_body_geom_ids(body_id)
+            )
 
         self.joint_pub = self.create_publisher(JointState, "/joint_states", 10)
         self.rgb_pub = self.create_publisher(Image, "/camera/image_raw", 10)
