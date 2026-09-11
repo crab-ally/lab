@@ -19,9 +19,9 @@ from sensor_msgs.msg import Image, CameraInfo, PointCloud2, PointField
 from tf2_ros import Buffer, TransformListener
 import tf2_geometry_msgs
 
-class Ransac3DObjectDetector(Node):
+class Object3DDetector(Node):
     def __init__(self):
-        super().__init__("ransac_3d_object_detector")
+        super().__init__("object_3d_detector")
 
         self.camera_frame = "gripper_camera_optical_frame"
         self.target_frame = "base"
@@ -186,7 +186,7 @@ class Ransac3DObjectDetector(Node):
 
 def main():
     rclpy.init()
-    node = Ransac3DObjectDetector()
+    node = Object3DDetector()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
