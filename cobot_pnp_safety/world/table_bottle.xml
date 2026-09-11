@@ -2,7 +2,7 @@
   <light name="world_light" pos="0 0 3" dir="0 0 -1" directional="true"/>
   <geom name="floor" rgba="0.5 0.6 0.7 0.5" pos="0 0 0" size="0 0 0.25" type="plane"/>
 
-  <body name="docking_statio1" pos="0.6 -0.1 0">
+  <body name="docking_statio1" pos="0.4 -0.1 0">
     <geom name="table1_top" type="box" pos="0.30 0 0.72" size="0.30 0.45 0.02"/>
     <geom name="table1_leg1" type="cylinder" pos="0.05 0.40 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
     <geom name="table1_leg2" type="cylinder" pos="0.05 -0.40 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
@@ -11,26 +11,40 @@
   </body>
 
   <body name="docking_station2" pos="0.1 0.8 0">
-    <geom name="table2_top" type="box" pos="0.30 0 0.72" size="0.30 0.45 0.02" rgba="1 1 1 1"/>
-    <geom name="table2_leg1" type="cylinder" pos="0.05 0.40 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
-    <geom name="table2_leg2" type="cylinder" pos="0.05 -0.40 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
-    <geom name="table2_leg3" type="cylinder" pos="0.55 0.40 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
-    <geom name="table2_leg4" type="cylinder" pos="0.55 -0.40 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
+    <geom name="table2_top" type="box" pos="0.30 0 0.72" size="0.30 0.30 0.02" rgba="1 1 1 1"/>
+    <geom name="table2_leg1" type="cylinder" pos="0.05 0.25 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
+    <geom name="table2_leg2" type="cylinder" pos="0.05 -0.25 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
+    <geom name="table2_leg3" type="cylinder" pos="0.55 0.25 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
+    <geom name="table2_leg4" type="cylinder" pos="0.55 -0.25 0.35" size="0.025 0.35" rgba="1 1 1 1"/>
   </body>
 
   <!-- pnp_object: 가로/세로 6.6cm, 높이 17.5cm -->
-  <body name="water_bottle" pos="0.4 0.8 0.74">
-    <freejoint name="bottle_freejoint"/>
+  <body name="water_bottle1" pos="0.3 0.8 0.74">
+    <freejoint name="bottle1_freejoint"/>
     <inertial pos="0 0 0.075" mass="0.15" diaginertia="0.0004 0.0004 0.00015"/>
 
-    <geom name="water_bottle_visual" type="mesh" mesh="bottle_mesh" class="bottle_collision" contype="0" conaffinity="0" group="1" material="bottle_mat"/>
-    <geom name="water_bottle_body_col" class="bottle_collision" type="cylinder" pos="0 0 0.058" size="0.033 0.055" group="0"/>
-    <geom name="water_bottle_shoulder_col" class="bottle_collision" type="cylinder" pos="0 0 0.125" size="0.024 0.015" group="0"/>
-    <geom name="water_bottle_cap_col" class="bottle_collision" type="cylinder" pos="0 0 0.1575" size="0.0155 0.0175" group="0"/>
+    <geom name="water_bottle1_visual" type="mesh" mesh="bottle_mesh" class="bottle_collision" contype="0" conaffinity="0" group="1" material="bottle_mat"/>
+    <geom name="water_bottle1_body_col" class="bottle_collision" type="cylinder" pos="0 0 0.058" size="0.033 0.055" group="0"/>
+    <geom name="water_bottle1_shoulder_col" class="bottle_collision" type="cylinder" pos="0 0 0.125" size="0.024 0.015" group="0"/>
+    <geom name="water_bottle1_cap_col" class="bottle_collision" type="cylinder" pos="0 0 0.1575" size="0.0155 0.0175" group="0"/>
 
-    <site name="water_bottle_center" pos="0 0 0.075" size="0.005" rgba="1 0 0 1"/>
-    <site name="water_bottle_cog_site" pos="0 0 0.075" size="0.005" rgba="0 1 0 1"/>
-    <site name="water_bottle_bottom" pos="0 0 0" size="0.005" rgba="0 1 0 1"/>
+    <site name="water_bottle1_center" pos="0 0 0.075" size="0.005" rgba="1 0 0 1"/>
+    <site name="water_bottle1_cog_site" pos="0 0 0.075" size="0.005" rgba="0 1 0 1"/>
+    <site name="water_bottle1_bottom" pos="0 0 0" size="0.005" rgba="0 1 0 1"/>
+  </body>
+
+  <body name="water_bottle2" pos="0.5 0.8 0.74">
+    <freejoint name="bottle2_freejoint"/>
+    <inertial pos="0 0 0.075" mass="0.15" diaginertia="0.0004 0.0004 0.00015"/>
+
+    <geom name="water_bottle2_visual" type="mesh" mesh="bottle_mesh" class="bottle_collision" contype="0" conaffinity="0" group="1" material="bottle_mat"/>
+    <geom name="water_bottle2_body_col" class="bottle_collision" type="cylinder" pos="0 0 0.058" size="0.033 0.055" group="0"/>
+    <geom name="water_bottle2_shoulder_col" class="bottle_collision" type="cylinder" pos="0 0 0.125" size="0.024 0.015" group="0"/>
+    <geom name="water_bottle2_cap_col" class="bottle_collision" type="cylinder" pos="0 0 0.1575" size="0.0155 0.0175" group="0"/>
+
+    <site name="water_bottle2_center" pos="0 0 0.075" size="0.005" rgba="1 0 0 1"/>
+    <site name="water_bottle2_cog_site" pos="0 0 0.075" size="0.005" rgba="0 1 0 1"/>
+    <site name="water_bottle2_bottom" pos="0 0 0" size="0.005" rgba="0 1 0 1"/>
   </body>
 
   <body name="ur5e_bottom_box">
